@@ -392,6 +392,8 @@ export function FrontDeskView() {
   const [newReservationOpen, setNewReservationOpen] = useState(false)
   const [prefilledReservation, setPrefilledReservation] = useState<ReservationPrefill | null>(null)
   const [serverBoard, setServerBoard] = useState<ServerBoard | null>(null)
+  const [serverBoardState, setServerBoardState] = useState<'loading' | 'ready' | 'error'>(SERVER_API_ENABLED ? 'loading' : 'ready')
+  const [serverBoardError, setServerBoardError] = useState<string | null>(null)
   const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [, setReservationRecords] = useKV<ReservationRecord[]>('reservations-data', [])
   const [, setCanonicalReservationRecords] = useKV<ReservationRecord[]>('reservations', [])
@@ -401,37 +403,53 @@ export function FrontDeskView() {
   const { user } = useAuth()
   const { navigate } = useNavigation()
   const { openAssistant } = useFrontDeskAssistant()
-  const { rooms, setRooms, getRoomById, updateRoomStatus } = useRoomSync()
+  const { rooms, setRooms, updateRoomStatus } = useRoomSync()
 
-  const refreshServerBoard = async () => {
+  const refreshServerBoard = useCallback(async () => {
     if (!SERVER_API_ENABLED) return
-    const board = await pmsApi<{ ok: true; data: ServerBoard }>('/api/front-desk/board', authToken)
-    setServerBoard(board.data)
-    setRooms(mapServerBoardRooms(board.data))
-  }
+    setServerBoardState('loading')
+    setServerBoardError(null)
+    try {
+      const board = await pmsApi<{ ok: true; data: ServerBoard }>('/api/front-desk/board', authToken)
+      setServerBoard(board.data)
+      setRooms(mapServerBoardRooms(board.data))
+      setServerBoardState('ready')
+    } catch (error) {
+      setServerBoard(null)
+      setServerBoardState('error')
+      setServerBoardError(error instanceof Error ? error.message : 'Live PMS board is unavailable.')
+      throw error
+    }
+  }, [authToken, setRooms])
 
   useEffect(() => {
     void refreshServerBoard().catch(() => undefined)
-  }, [])
+  }, [refreshServerBoard])
 
   const todayKey = getBangkokDateKey(new Date())
+  // Server mode has one authority. An unavailable board must never expose browser KV data.
+  const displayedRooms = useMemo(() => SERVER_API_ENABLED
+    ? (serverBoard ? mapServerBoardRooms(serverBoard) : [])
+    : rooms, [rooms, serverBoard])
+  const serverBoardAvailable = !SERVER_API_ENABLED || serverBoardState === 'ready'
 
   const arrivals = useMemo(() => {
     if (SERVER_API_ENABLED && serverBoard?.reservations) {
       return serverBoard.reservations
         .filter((reservation) => ['PENDING', 'CONFIRMED', 'HOLD'].includes(reservation.status))
         .filter((reservation) => isSameHotelDate(reservation.checkIn, todayKey))
-        .map((reservation) => serverReservationToArrival(reservation, rooms))
+        .map((reservation) => serverReservationToArrival(reservation, displayedRooms))
     }
 
-    const roomArrivals = rooms
+    if (SERVER_API_ENABLED) return []
+    const roomArrivals = displayedRooms
       .filter((room) => room.guestName && !isOccupied(room) && isSameHotelDate(room.checkIn, todayKey))
       .map(roomToArrival)
     const unassignedArrivals = (unassignedReservations || [])
       .filter((reservation) => isSameHotelDate(reservation.checkIn, todayKey))
       .map(unassignedToArrival)
     return [...roomArrivals, ...unassignedArrivals]
-  }, [rooms, serverBoard, todayKey, unassignedReservations])
+  }, [displayedRooms, serverBoard, todayKey, unassignedReservations])
 
   const departures = useMemo(() => {
     if (SERVER_API_ENABLED && serverBoard?.reservations) {
@@ -441,12 +459,13 @@ export function FrontDeskView() {
         .map(serverReservationToDeparture)
     }
 
-    return rooms
+    if (SERVER_API_ENABLED) return []
+    return displayedRooms
       .filter((room) => room.guestName && isOccupied(room) && isSameHotelDate(room.checkOut, todayKey))
       .map((room) => toInHouseItem(room, todayKey))
       .filter(Boolean)
       .map((item) => inHouseToDeparture(item as InHouseItem))
-  }, [rooms, serverBoard, todayKey])
+  }, [displayedRooms, serverBoard, todayKey])
 
   const inHouse = useMemo(() => {
     if (SERVER_API_ENABLED && serverBoard?.reservations) {
@@ -476,13 +495,14 @@ export function FrontDeskView() {
           } satisfies InHouseItem
         })
     }
-    return rooms.map((room) => toInHouseItem(room, todayKey)).filter(Boolean) as InHouseItem[]
-  }, [rooms, serverBoard, todayKey])
+    if (SERVER_API_ENABLED) return []
+    return displayedRooms.map((room) => toInHouseItem(room, todayKey)).filter(Boolean) as InHouseItem[]
+  }, [displayedRooms, serverBoard, todayKey])
 
   const filteredArrivals = useMemo(() => filterByQuery(arrivals, searchQuery), [arrivals, searchQuery])
   const filteredDepartures = useMemo(() => filterByQuery(departures, searchQuery), [departures, searchQuery])
   const filteredInHouse = useMemo(() => filterByQuery(inHouse, searchQuery), [inHouse, searchQuery])
-  const readiness = useMemo(() => buildRoomReadinessSummary(rooms), [rooms])
+  const readiness = useMemo(() => buildRoomReadinessSummary(displayedRooms), [displayedRooms])
 
   const openCheckIn = (arrival: ArrivalItem, mode: 'express' | 'guided') => {
     setSelectedArrival(arrival)
@@ -505,7 +525,7 @@ export function FrontDeskView() {
     const runPendingAction = (detail: any) => {
       if (!detail?.action) return
       if (detail.action === 'CREATE_WALK_IN_DRAFT' || detail.action === 'CREATE_RESERVATION_DRAFT') {
-        const prefillRoom = detail.roomId ? rooms.find((room) => room.roomId === detail.roomId) : undefined
+        const prefillRoom = detail.roomId ? displayedRooms.find((room) => room.roomId === detail.roomId) : undefined
         openNewReservation({
           roomId: prefillRoom?.roomId,
           roomNumber: prefillRoom?.number,
@@ -537,7 +557,7 @@ export function FrontDeskView() {
     }
 
     return () => window.removeEventListener('front-desk-ai-action', handleAssistantAction)
-  }, [arrivals, departures, openNewReservation, rooms])
+  }, [arrivals, departures, displayedRooms, openNewReservation])
 
   const markRoomReady = async (roomId: string) => {
     if (SERVER_API_ENABLED) {
@@ -560,7 +580,7 @@ export function FrontDeskView() {
 
   const confirmCheckIn = async (data: CheckInData) => {
     if (!selectedArrival) return
-    const assignedRoom = getRoomById(data.roomId)
+    const assignedRoom = displayedRooms.find((room) => room.roomId === data.roomId)
     if (!assignedRoom) {
       toast.error('Assign a valid room before check-in.')
       return
@@ -700,7 +720,7 @@ export function FrontDeskView() {
       }
     }
 
-    const room = rooms.find((candidate) => candidate.number === selectedDeparture.roomNumber)
+    const room = displayedRooms.find((candidate) => candidate.number === selectedDeparture.roomNumber)
     if (!room) {
       toast.error(`Room ${selectedDeparture.roomNumber} was not found.`)
       return
@@ -839,7 +859,7 @@ export function FrontDeskView() {
                 className="pl-9"
               />
             </div>
-            <Button onClick={() => openNewReservation()} className="gap-1.5 bg-blue-600 hover:bg-blue-700">
+            <Button onClick={() => openNewReservation()} disabled={!serverBoardAvailable} className="gap-1.5 bg-blue-600 hover:bg-blue-700">
               <Plus size={16} weight="bold" />
               New Reservation
             </Button>
@@ -856,14 +876,22 @@ export function FrontDeskView() {
       </div>
 
       <main className="mx-auto max-w-[1700px] space-y-4 px-4 py-4 lg:px-6">
-        <RoomReadinessStrip readiness={readiness} rooms={rooms} />
+        {SERVER_API_ENABLED && serverBoardState !== 'ready' && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+            <span>{serverBoardState === 'loading' ? 'Loading the live PMS board. Local browser data is not shown.' : `Live PMS board unavailable: ${serverBoardError || 'please retry.'}`}</span>
+            <Button size="sm" variant="outline" onClick={() => void refreshServerBoard().catch(() => undefined)} disabled={serverBoardState === 'loading'}>
+              {serverBoardState === 'loading' ? 'Loading…' : 'Retry live board'}
+            </Button>
+          </div>
+        )}
+        <RoomReadinessStrip readiness={readiness} rooms={displayedRooms} />
 
         <div className="grid gap-4 xl:grid-cols-[1fr_0.95fr]">
           <section className="space-y-2">
             <SectionHeader title="Arrivals Today" count={filteredArrivals.length} />
             <ArrivalList
               arrivals={filteredArrivals}
-              rooms={rooms}
+              rooms={displayedRooms}
               hotelDateKey={todayKey}
               role={user?.role}
               onCheckIn={openCheckIn}
@@ -889,7 +917,7 @@ export function FrontDeskView() {
 
       <CheckInDialog
         arrival={selectedArrival}
-        rooms={rooms}
+        rooms={displayedRooms}
         mode={checkInMode}
         role={user?.role}
         open={checkInDialogOpen}

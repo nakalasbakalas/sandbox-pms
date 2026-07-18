@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
@@ -90,8 +91,13 @@ export function AdvancedRevenueAnalyticsView() {
   const [compareWith, setCompareWith] = useState<ComparisonKey>('previous')
   const currentRange = useMemo(() => getDateRange(dateRangeKey), [dateRangeKey])
   const comparisonRange = useMemo(() => getComparisonRange(currentRange, compareWith), [currentRange, compareWith])
-  const { revenueData } = useReportsData(currentRange)
+  const currentReports = useReportsData(currentRange)
   const comparison = useReportsData(comparisonRange)
+  const isLoading = currentReports.isLoading || (compareWith !== 'none' && comparison.isLoading)
+  const isUnavailable = currentReports.isUnavailable || (compareWith !== 'none' && comparison.isUnavailable)
+  const unavailableMessage = currentReports.error || comparison.error || 'The PMS server did not return revenue data. Browser-stored data is not shown in server mode.'
+
+  const { revenueData } = currentReports
 
   const currentTotals = revenueData.summary
   const previousTotals = compareWith === 'none' ? null : comparison.revenueData.summary
@@ -148,6 +154,27 @@ export function AdvancedRevenueAnalyticsView() {
       )}
     </Card>
   )
+
+  if (isLoading || isUnavailable) {
+    return (
+      <div className="flex h-full flex-col bg-background p-6" {...(isUnavailable ? { role: 'alert' } : { 'aria-live': 'polite' })}>
+        <Card className="p-6">
+          <h1 className="text-xl font-semibold">{isUnavailable ? 'Advanced revenue analytics unavailable' : 'Loading advanced revenue analytics'}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {isUnavailable ? unavailableMessage : 'Retrieving authoritative PMS revenue data.'}
+          </p>
+          {isUnavailable && (
+            <Button className="mt-4" onClick={() => {
+              currentReports.refresh()
+              if (compareWith !== 'none') comparison.refresh()
+            }}>
+              Retry authoritative analytics
+            </Button>
+          )}
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full flex-col bg-background">

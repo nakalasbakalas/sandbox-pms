@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { eachDayOfInterval, format } from 'date-fns'
 import type { BoardRoomCard } from '@/types/board'
@@ -675,6 +675,14 @@ export function useReportsData(dateRange: DateRange) {
   const [localFolios] = useKV<ReportFolio[]>('folios', [])
   const [serverSnapshot, setServerSnapshot] = useState<ServerSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [refreshToken, setRefreshToken] = useState(0)
+
+  const refresh = useCallback(() => {
+    if (!SERVER_API_ENABLED) return
+    setServerSnapshot(null)
+    setError(null)
+    setRefreshToken((current) => current + 1)
+  }, [])
 
   useEffect(() => {
     if (!SERVER_API_ENABLED) {
@@ -706,11 +714,17 @@ export function useReportsData(dateRange: DateRange) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [refreshToken])
 
-  const rooms = serverSnapshot?.rooms || localRooms || []
-  const reservations = serverSnapshot?.reservations || attachLocalFolios(localReservations || [], localFolios || [])
-  const guests = serverSnapshot?.guests || localGuests || []
+  // In server mode, browser KV is demo-only data and must never become a
+  // fallback for operational reports when the authoritative request fails.
+  const rooms = SERVER_API_ENABLED ? serverSnapshot?.rooms ?? [] : localRooms || []
+  const reservations = SERVER_API_ENABLED
+    ? serverSnapshot?.reservations ?? []
+    : attachLocalFolios(localReservations || [], localFolios || [])
+  const guests = SERVER_API_ENABLED ? serverSnapshot?.guests ?? [] : localGuests || []
+  const isLoading = SERVER_API_ENABLED && !serverSnapshot && !error
+  const isUnavailable = SERVER_API_ENABLED && !serverSnapshot && Boolean(error)
 
   const operationsData = useMemo(() => generateOperationsData(dateRange, rooms, reservations), [dateRange.from, dateRange.to, rooms, reservations])
   const revenueData = useMemo(() => generateRevenueData(dateRange, rooms, reservations), [dateRange.from, dateRange.to, rooms, reservations])
@@ -726,7 +740,10 @@ export function useReportsData(dateRange: DateRange) {
     housekeepingData,
     channelData,
     guestData,
-    isLoading: SERVER_API_ENABLED && !serverSnapshot && !error,
+    isLoading,
+    isUnavailable,
+    isDemoMode: !SERVER_API_ENABLED,
     error,
+    refresh,
   }
 }

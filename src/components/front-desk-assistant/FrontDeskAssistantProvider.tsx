@@ -168,6 +168,8 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
   const [pendingAction, setPendingAction] = useState<AssistantAction | null>(null)
   const [context, setContext] = useState<OpenAssistantOptions>({})
   const [serverBoard, setServerBoard] = useState<ServerBoard | null>(null)
+  const [serverBoardState, setServerBoardState] = useState<'loading' | 'ready' | 'error'>(SERVER_API_ENABLED ? 'loading' : 'ready')
+  const [serverBoardError, setServerBoardError] = useState<string | null>(null)
   const authToken = null
   const [unassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [localReservations] = useKV<any[]>('reservations-data', [])
@@ -178,9 +180,19 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
 
   const refreshServerBoard = useCallback(async () => {
     if (!SERVER_API_ENABLED) return
-    const payload = await pmsApi<{ ok: true; data: ServerBoard }>('/api/front-desk/board', authToken)
-    setServerBoard(payload.data)
-    setRooms(mapServerBoardRooms(payload.data))
+    setServerBoardState('loading')
+    setServerBoardError(null)
+    try {
+      const payload = await pmsApi<{ ok: true; data: ServerBoard }>('/api/front-desk/board', authToken)
+      setServerBoard(payload.data)
+      setRooms(mapServerBoardRooms(payload.data))
+      setServerBoardState('ready')
+    } catch (error) {
+      setServerBoard(null)
+      setServerBoardState('error')
+      setServerBoardError(error instanceof Error ? error.message : 'Live PMS board is unavailable.')
+      throw error
+    }
   }, [authToken, setRooms])
 
   useEffect(() => {
@@ -190,7 +202,7 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
 
   const snapshot = useMemo<AssistantSnapshot>(() => {
     const serverReservations = (serverBoard?.reservations || []).map(normalizeServerReservation)
-    const fallbackReservations = SERVER_API_ENABLED && serverReservations.length
+    const fallbackReservations = SERVER_API_ENABLED
       ? []
       : [
           ...(localReservations || []).map(localReservationToAssistant),
@@ -198,7 +210,7 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
         ]
     return buildSnapshotFromData({
       hotelDateKey: getBangkokDateKey(new Date()),
-      rooms,
+      rooms: SERVER_API_ENABLED ? (serverBoard ? mapServerBoardRooms(serverBoard) : []) : rooms,
       reservations: [...serverReservations, ...fallbackReservations],
       currentRoute,
       currentRoomNumber: context.roomNumber,
@@ -221,6 +233,23 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
     if (!trimmed) return
     onOpenChange(true)
     setError(null)
+    if (SERVER_API_ENABLED && serverBoardState !== 'ready') {
+      const unavailable = serverBoardState === 'loading'
+        ? 'Live PMS records are still loading. Please wait for the board to finish loading before asking about guests or rooms.'
+        : `Live PMS records are unavailable${serverBoardError ? `: ${serverBoardError}` : ''}. Retry the live board before relying on this assistant.`
+      addAssistantAnswer(trimmed, {
+        id: `live-pms-unavailable-${Date.now()}`,
+        intent: 'HELP',
+        title: 'Live PMS unavailable',
+        directAnswer: unavailable,
+        records: [],
+        warnings: ['No browser or demo guest data was used.'],
+        nextAction: 'Retry the live PMS board, then ask again.',
+        actions: [],
+      })
+      setInput('')
+      return
+    }
     setLoading(true)
     if (options) setContext((current) => ({ ...current, ...options }))
 
@@ -248,14 +277,15 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
         setLoading(false)
       }
     }, 120)
-  }, [addAssistantAnswer, context, onOpenChange, snapshot])
+  }, [addAssistantAnswer, context, onOpenChange, serverBoardError, serverBoardState, snapshot])
 
   useEffect(() => {
     if (!request) return
+    if (SERVER_API_ENABLED && serverBoardState === 'loading') return
     setContext((current) => ({ ...current, ...request }))
     if (request.prompt) submitAssistantPrompt(request.prompt, request)
     onRequestHandled(request.requestId)
-  }, [onRequestHandled, request, submitAssistantPrompt])
+  }, [onRequestHandled, request, serverBoardState, submitAssistantPrompt])
 
   const addLocalAudit = useCallback((record: AuditRecord) => {
     setAuditRecords((current) => [record, ...(current || auditRecords || [])].slice(0, 250))
@@ -417,7 +447,7 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
               <Sparkle size={17} weight="duotone" className="text-blue-600" />
               Front Desk AI
               <Badge variant="outline" className="ml-auto text-[10px]">
-                Live PMS
+                {SERVER_API_ENABLED ? (serverBoardState === 'ready' ? 'Live PMS' : serverBoardState === 'loading' ? 'Loading PMS' : 'PMS unavailable') : 'Demo PMS'}
               </Badge>
             </SheetTitle>
             <SheetDescription className="sr-only">
@@ -432,6 +462,15 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
               {snapshot.hotelDateKey}
             </div>
           </SheetHeader>
+
+          {SERVER_API_ENABLED && serverBoardState !== 'ready' && (
+            <div className="flex items-center justify-between gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900" role="status">
+              <span>{serverBoardState === 'loading' ? 'Loading live PMS records. Guest context is unavailable.' : `Live PMS unavailable${serverBoardError ? `: ${serverBoardError}` : ''}`}</span>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void refreshServerBoard().catch(() => undefined)} disabled={serverBoardState === 'loading'}>
+                {serverBoardState === 'loading' ? 'Loading…' : 'Retry'}
+              </Button>
+            </div>
+          )}
 
           <div className="border-b px-4 py-3">
             <div className="mb-2 flex items-center justify-between">

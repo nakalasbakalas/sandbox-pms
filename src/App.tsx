@@ -116,6 +116,14 @@ function CapabilityUnavailable({ title, detail }: { title: string; detail: strin
   )
 }
 
+const serverHiddenCommandIds = new Set([
+  'internal-comms',
+  'guest-communications',
+  'send-email',
+  'daily-summary',
+  'backup-data',
+])
+
 const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
   today: ['view:board', 'create:reservation', 'view:housekeeping'],
   board: ['view:board'],
@@ -217,6 +225,9 @@ function AppRouter() {
       }
       return <GuestCommunicationsView />
     case 'daily-summary':
+      if (SERVER_API_ENABLED) {
+        return <CapabilityUnavailable title="Daily Summary is unavailable" detail="This legacy report is browser-backed. Use Today and server-backed Reports for authoritative operational data." />
+      }
       return <DailySummaryReportView />
     case 'night-audit':
       return <NightAuditView />
@@ -229,6 +240,9 @@ function AppRouter() {
     case 'user-management':
       return <UserManagementView />
     case 'data-backup':
+      if (SERVER_API_ENABLED) {
+        return <CapabilityUnavailable title="Browser data backup is unavailable" detail="Server mode stores operational data in PostgreSQL. Browser export, import, and reset controls are disabled." />
+      }
       return <DataBackupView />
     case 'ops-chat':
       return <HotelOpsCommandCenterView tab="chat" />
@@ -284,7 +298,10 @@ function AuthenticatedAppContent() {
     const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false)
     const { navigate } = useNavigation()
     const { toggleDensity } = useDensity()
-    const commands = useMemo(() => createPMSCommands(navigate), [navigate])
+    const commands = useMemo(
+      () => createPMSCommands(navigate).filter((command) => !SERVER_API_ENABLED || !serverHiddenCommandIds.has(command.id)),
+      [navigate],
+    )
     const commandPalette = useCommandPalette(commands)
     
     const shortcuts = useMemo(

@@ -207,7 +207,8 @@ try {
   const context = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1440, height: 1000 } })
   await context.addInitScript(({ fakeRoomNumber, fakeGuestName }) => {
     window.localStorage.clear()
-    if (window.location.pathname !== '/board') return
+    const requestedFixturePath = window.sessionStorage.getItem('inject-local-operational-fixture')
+    if (window.location.pathname !== '/board' && window.location.pathname !== requestedFixturePath) return
     window.localStorage.setItem('pms-rooms', JSON.stringify([{
       id: 'browser-shadow-room',
       number: fakeRoomNumber,
@@ -235,6 +236,12 @@ try {
     window.localStorage.setItem('unassigned-reservations', JSON.stringify([{
       id: 'browser-shadow-unassigned',
       guestName: fakeGuestName,
+    }]))
+    window.localStorage.setItem('guests', JSON.stringify([{
+      id: 'browser-shadow-guest',
+      firstName: 'Browser',
+      lastName: 'Shadow',
+      fullName: fakeGuestName,
     }]))
   }, { fakeRoomNumber: fakeBoardRoomNumber, fakeGuestName: fakeBoardGuest })
   const login = await context.request.post('/api/auth/login', { data: { identity: username, password } })
@@ -335,7 +342,7 @@ try {
   assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'the server board ignores fake browser reservation state')
   const injectedBoardStorage = await page.evaluate((keys) => Object.fromEntries(
     keys.map((key) => [key, window.localStorage.getItem(key)]),
-  ), ['pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations'])
+  ), ['pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations', 'guests'])
   assert.match(injectedBoardStorage['pms-rooms'] || '', new RegExp(fakeBoardRoomNumber), 'the fake room fixture existed while the board ignored it')
   assert.match(injectedBoardStorage.reservations || '', new RegExp(fakeBoardGuest), 'the fake reservation fixture existed while the board ignored it')
   await page.unroute('**/api/front-desk/board?*')
@@ -343,7 +350,10 @@ try {
     for (const key of keys) window.localStorage.removeItem(key)
   }, Object.keys(injectedBoardStorage))
   await assertNoOperationalBrowserStorage('server-mode booking board before retry')
-  await page.getByRole('button', { name: 'Retry' }).click()
+  const boardRetry = page.getByRole('button', { name: 'Retry' })
+  if (await boardRetry.isVisible().catch(() => false)) {
+    await boardRetry.click({ timeout: 5_000 }).catch(() => undefined)
+  }
   await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
   await page.getByText(`Room ${boardRoomNumber}`, { exact: true }).waitFor({ state: 'visible' })
   await page.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
@@ -352,6 +362,67 @@ try {
   assert.equal(await page.getByText(boardGuestTwo, { exact: true }).count(), 1, 'the second same-room stay renders as one distinct segment')
   assert.equal(await page.getByRole('alert').count(), 0, 'retry replaces the truthful error with authoritative board data')
   await assertNoOperationalBrowserStorage('server-mode booking board after retry')
+
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/front-desk'))
+  await page.route('**/api/front-desk/board*', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected front desk authority failure.' }),
+    })
+  })
+  await page.goto('/front-desk', { waitUntil: 'domcontentloaded' })
+  await page.getByText('Live PMS board unavailable:', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'front desk failure does not display browser reservation data')
+  assert.equal(await page.getByText(fakeBoardRoomNumber, { exact: false }).count(), 0, 'front desk failure does not display browser room data')
+  await page.getByRole('button', { name: 'Ask about today' }).click()
+  await page.getByText('PMS unavailable', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'assistant failure does not use browser guest context')
+  await page.keyboard.press('Escape')
+  await page.unroute('**/api/front-desk/board*')
+  await page.evaluate(() => {
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+    window.localStorage.clear()
+  })
+
+  await page.route('**/api/front-desk/board*', async (route) => {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 500))
+    await route.continue()
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: 'Ask about today' }).click()
+  await page.getByText('Live PMS', { exact: true }).waitFor({ state: 'visible' })
+  await page.locator('div.ml-8').filter({ hasText: /^Show today's risks$/ }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText('Live PMS records are still loading.', { exact: false }).count(), 0, 'a healthy prefilled assistant request waits for authoritative data')
+  await page.keyboard.press('Escape')
+  await page.unroute('**/api/front-desk/board*')
+
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/reports'))
+  for (const pattern of ['**/api/front-desk/board*', '**/api/reservations*', '**/api/guests*']) {
+    await page.route(pattern, async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Injected reports authority failure.' }),
+      })
+    })
+  }
+  await page.goto('/reports', { waitUntil: 'domcontentloaded' })
+  await page.getByText('Reports unavailable', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'reports failure does not display browser reservation data')
+  await page.getByRole('button', { name: /Export/ }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByRole('button', { name: /Export/ }).isDisabled(), true, 'report export is disabled without authoritative server data')
+  for (const pattern of ['**/api/front-desk/board*', '**/api/reservations*', '**/api/guests*']) {
+    await page.unroute(pattern)
+  }
+  await page.getByRole('button', { name: 'Retry authoritative reports' }).click()
+  await page.getByText('Reports unavailable', { exact: true }).waitFor({ state: 'hidden' })
+  await page.getByRole('button', { name: /Export/ }).click({ trial: true })
+  assert.equal(await page.getByRole('button', { name: /Export/ }).isDisabled(), false, 'report retry restores export after authoritative data loads')
+  await page.evaluate(() => {
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+    window.localStorage.clear()
+  })
 
   await page.goto('/housekeeping', { waitUntil: 'domcontentloaded' })
   await page.getByText(taskTitle, { exact: false }).waitFor({ state: 'visible' })
@@ -379,13 +450,13 @@ try {
   await page.getByRole('tab', { name: /Rules/ }).click()
   await page.getByText(ruleName, { exact: false }).waitFor({ state: 'visible' })
 
-  for (const path of ['/settings', '/night-audit', '/system-status', '/internal-comms', '/guest-communications']) {
+  for (const path of ['/settings', '/night-audit', '/system-status', '/internal-comms', '/guest-communications', '/daily-summary', '/data-backup']) {
     await page.goto(path, { waitUntil: 'domcontentloaded' })
     await page.getByText('Loading PMS workspace...', { exact: true }).waitFor({ state: 'hidden' })
     const body = await page.locator('body').innerText()
     assert.equal(body.includes('Access restricted'), false, `${path} remains available in authenticated server mode`)
     assert.equal(body.includes('Something went wrong'), false, `${path} does not render the error boundary`)
-    if (path === '/internal-comms' || path === '/guest-communications') {
+    if (['/internal-comms', '/guest-communications', '/daily-summary', '/data-backup'].includes(path)) {
       assert.match(body, /browser-backed|unavailable/i, `${path} reports its server capability boundary`)
     }
     await assertNoOperationalBrowserStorage(path)
@@ -399,6 +470,19 @@ try {
     assert.equal(body.includes('Something went wrong'), false, `${path} does not render the error boundary`)
     await assertNoOperationalBrowserStorage(path)
   }
+
+  await page.keyboard.press('Control+K')
+  await page.getByPlaceholder('Type a command or search...').waitFor({ state: 'visible' })
+  for (const label of [
+    'Staff Communications',
+    'Guest Communications',
+    'Send Email',
+    'Daily Summary Report',
+    'Data Backup & Export',
+  ]) {
+    assert.equal(await page.getByText(label, { exact: true }).count(), 0, `${label} is not presented as an operational server command`)
+  }
+  await page.keyboard.press('Escape')
 
   const lastEvent = await prisma.domainEvent.findFirst({ orderBy: { id: 'desc' }, select: { id: true } })
   const after = lastEvent?.id || 0n

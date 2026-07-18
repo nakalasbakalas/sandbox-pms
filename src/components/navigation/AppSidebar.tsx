@@ -103,6 +103,9 @@ export function AppSidebar() {
   const propertyName = SERVER_API_ENABLED ? 'Hotel PMS' : propertyData?.name || 'Hotel PMS'
 
   const canViewItem = (item: NavItem) => {
+    if (SERVER_API_ENABLED && (item.id === 'internal-comms' || item.id === 'guest-communications')) {
+      return false
+    }
     if (SERVER_API_ENABLED && item.id === 'growth-suite' && !capabilityEnabled(registry?.integrations.directBooking)) {
       return false
     }
