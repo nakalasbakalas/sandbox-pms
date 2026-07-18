@@ -605,6 +605,7 @@ export function ReservationsView() {
   const { rooms, setRooms } = useRoomSync()
   const { user } = useAuth()
   const { navigate } = useNavigation()
+  const [serverReservations, setServerReservations] = useState<Reservation[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTab, setSelectedTab] = useState<ReservationTab>('all')
   const [showNewReservationDialog, setShowNewReservationDialog] = useState(false)
@@ -621,6 +622,8 @@ export function ReservationsView() {
   const { events: bookingEmailEvents } = useBookingEmailInbox()
   
   const reservations = useMemo(() => {
+    if (SERVER_API_ENABLED) return serverReservations
+
     const merged = new Map<string, Reservation>()
     ;(canonicalReservationsRaw || []).map(deserializeReservation).forEach((reservation) => {
       merged.set(reservation.id, reservation)
@@ -635,9 +638,14 @@ export function ReservationsView() {
       if (!merged.has(reservation.id)) merged.set(reservation.id, reservation)
     })
     return [...merged.values()]
-  }, [canonicalReservationsRaw, reservationsRaw, rooms, unassignedReservations])
+  }, [canonicalReservationsRaw, reservationsRaw, rooms, serverReservations, unassignedReservations])
   
   const setReservations = (updater: Reservation[] | ((current: Reservation[]) => Reservation[])) => {
+    if (SERVER_API_ENABLED) {
+      setServerReservations((current) => typeof updater === 'function' ? updater(current) : updater)
+      return
+    }
+
     setReservationsRaw((current) => {
       const base = current?.length ? current : canonicalReservationsRaw || []
       const deserialized = base.map(deserializeReservation)
@@ -655,8 +663,7 @@ export function ReservationsView() {
       .then((payload) => {
         if (!cancelled) {
           const nextReservations = payload.data.map(reservationFromServer)
-          setReservationsRaw(nextReservations)
-          setCanonicalReservations(nextReservations)
+          setServerReservations(nextReservations)
         }
       })
       .catch((error) => {
@@ -666,7 +673,7 @@ export function ReservationsView() {
     return () => {
       cancelled = true
     }
-  }, [authToken, setCanonicalReservations, setReservationsRaw])
+  }, [authToken])
 
   useEffect(() => {
     setManualRoomSelection('')
@@ -856,7 +863,6 @@ export function ReservationsView() {
         })
         const updated = reservationFromServer(payload.data)
         setReservations((current) => [...current.filter((item) => item.id !== updated.id), updated])
-        setUnassignedReservations((current) => (current || []).filter((item) => item.id !== updated.id))
         setSelectedReservation(updated)
         setManualRoomSelection('')
         toast.success(payload.message || `Room ${option.room.number} assigned.`)
@@ -927,7 +933,6 @@ export function ReservationsView() {
         })
         const updated = reservationFromServer(payload.data)
         setReservations((current) => current.map((item) => item.id === updated.id ? updated : item))
-        setUnassignedReservations((current) => (current || []).filter((item) => item.id !== updated.id))
         setSelectedReservation(updated)
         setStatusAction(null)
         setStatusActionReason('')

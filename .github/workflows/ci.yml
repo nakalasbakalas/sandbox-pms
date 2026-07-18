@@ -49,6 +49,12 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check diff whitespace
+        run: git diff --check
+
+      - name: Capture launch evidence
+        run: npm run launch:evidence
+
       - name: Launch gate
         run: npm run launch:check
 
