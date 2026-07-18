@@ -213,18 +213,24 @@ try {
   const page = await context.newPage()
   page.setDefaultTimeout(30_000)
   page.setDefaultNavigationTimeout(60_000)
+  const assertNoOperationalBrowserStorage = async (label) => {
+    const operationalStorageKeys = await page.evaluate(() => {
+      const forbidden = new Set([
+        'pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations',
+        'guests', 'guests-data', 'folios', 'cashier-folios', 'housekeeping-tasks',
+        'night-audit-logs', 'room-types-config', 'rates', 'rate-rules',
+        'internal-messages', 'guest-messages', 'messages', 'message-templates',
+        'channels', 'channel-reservations', 'channel-sync-logs', 'channel-room-mappings',
+        'onboarding-property', 'onboarding-room-types', 'onboarding-rooms',
+      ])
+      return Object.keys(window.localStorage).filter((key) => forbidden.has(key))
+    })
+    assert.deepEqual(operationalStorageKeys, [], `${label} does not write operational workflow state to browser storage`)
+  }
+
   await page.goto('/housekeeping', { waitUntil: 'domcontentloaded' })
   await page.getByText(taskTitle, { exact: false }).waitFor({ state: 'visible' })
-  const operationalStorageKeys = await page.evaluate(() => {
-    const forbidden = new Set([
-      'pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations',
-      'guests', 'guests-data', 'folios', 'cashier-folios', 'housekeeping-tasks',
-      'night-audit-logs', 'room-types-config', 'rates', 'rate-rules',
-      'internal-messages', 'guest-messages', 'messages', 'message-templates',
-    ])
-    return Object.keys(window.localStorage).filter((key) => forbidden.has(key))
-  })
-  assert.deepEqual(operationalStorageKeys, [], 'server-mode housekeeping does not write operational workflow state to browser storage')
+  await assertNoOperationalBrowserStorage('server-mode housekeeping')
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.getByText(taskTitle, { exact: false }).waitFor({ state: 'visible' })
 
@@ -256,6 +262,15 @@ try {
     if (path === '/internal-comms' || path === '/guest-communications') {
       assert.match(body, /browser-backed|unavailable/i, `${path} reports its server capability boundary`)
     }
+    await assertNoOperationalBrowserStorage(path)
+  }
+
+  for (const path of ['/reservations', '/guests', '/cashier', '/rooms', '/channels', '/messaging', '/reports']) {
+    await page.goto(path, { waitUntil: 'domcontentloaded' })
+    const body = await page.locator('body').innerText()
+    assert.equal(body.includes('Access restricted'), false, `${path} remains available in authenticated server mode`)
+    assert.equal(body.includes('Something went wrong'), false, `${path} does not render the error boundary`)
+    await assertNoOperationalBrowserStorage(path)
   }
 
   const lastEvent = await prisma.domainEvent.findFirst({ orderBy: { id: 'desc' }, select: { id: true } })
