@@ -1,4 +1,4 @@
-/* global AbortController, clearTimeout, console, document, fetch, process, setTimeout, TextDecoder, window */
+/* global AbortController, clearTimeout, console, document, fetch, PopStateEvent, process, setTimeout, TextDecoder, URL, URLSearchParams, window */
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -213,7 +213,7 @@ await prisma.user.create({
   },
 })
 
-await prisma.user.create({
+const limitedUser = await prisma.user.create({
   data: {
     username: limitedUsername,
     email: `${limitedUsername}@example.test`,
@@ -450,6 +450,19 @@ try {
     headers: { 'x-idempotency-key': `membership-denied-no-show-${runId}` },
   })
   assert.equal(deniedNoShow.status(), 403, 'property membership role denies reservation no-show despite a broader legacy user role')
+  const limitedPage = await limitedContext.newPage()
+  await limitedPage.goto('/board', { waitUntil: 'domcontentloaded' })
+  await limitedPage.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+  await limitedPage.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await limitedPage.getByRole('button', { name: 'New reservation', exact: false }).isDisabled(), true, 'a membership-limited browser sees no create-reservation affordance')
+  assert.equal(await limitedPage.locator('[data-board-command-drawer]').count(), 0, 'a membership-limited browser cannot render the Board command drawer')
+  assert.equal(await limitedPage.getByRole('button', { name: 'Guided check-in', exact: true }).count(), 0, 'a membership-limited browser sees no check-in command')
+  await prisma.userPropertyMembership.updateMany({
+    where: { userId: limitedUser.id, propertyId: property.id },
+    data: { active: false },
+  })
+  const deniedAfterMembershipDrift = await limitedContext.request.get('/api/front-desk/board')
+  assert.equal(deniedAfterMembershipDrift.status(), 403, 'an existing session is denied immediately after its property membership is deactivated')
   await limitedContext.close()
   const afterDeniedCommands = await prisma.reservation.findUnique({
     where: { id: boardReservationOne.data.id },
@@ -556,6 +569,66 @@ try {
   assert.equal(await page.getByText(boardGuestTwo, { exact: true }).count(), 1, 'the second same-room stay renders as one distinct segment')
   assert.equal(await page.getByRole('alert').count(), 0, 'retry replaces the truthful error with authoritative board data')
   await assertNoOperationalBrowserStorage('server-mode booking board after retry')
+
+  // Board handoffs must open authoritative staff workspaces without applying a mutation.
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: 'Guided check-in', exact: true }).click()
+  await page.waitForURL((url) => url.pathname === '/front-desk' && !url.searchParams.has('workflow'))
+  await page.getByRole('heading', { name: new RegExp(`Check In: ${boardGuestOne}`) }).waitFor({ state: 'visible' })
+  assert.equal(
+    (await prisma.reservation.findUnique({ where: { id: boardReservationOne.data.id } })).status,
+    'CONFIRMED',
+    'opening the guided check-in workflow does not mutate the reservation',
+  )
+  await page.keyboard.press('Escape')
+  await page.evaluate((reservationId) => {
+    const url = new URL(window.location.href)
+    url.search = new URLSearchParams({ reservationId, workflow: 'check-in' }).toString()
+    window.history.pushState({}, '', url)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, boardReservationOne.data.id)
+  await page.waitForURL((url) => url.pathname === '/front-desk' && !url.searchParams.has('workflow'))
+  await page.getByRole('heading', { name: new RegExp(`Check In: ${boardGuestOne}`) }).waitFor({ state: 'visible' })
+  assert.equal(
+    (await prisma.reservation.findUnique({ where: { id: boardReservationOne.data.id } })).status,
+    'CONFIRMED',
+    'same-route Front Desk handoff is consumed without applying a mutation',
+  )
+  await page.keyboard.press('Escape')
+
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: 'Open cashier', exact: true }).click()
+  await page.waitForURL((url) => url.pathname === '/cashier' && !url.searchParams.has('workflow'))
+  await page.getByText(`Folio #${boardReservationOne.data.folio.id}`, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(
+    (await prisma.reservation.findUnique({ where: { id: boardReservationOne.data.id } })).status,
+    'CONFIRMED',
+    'opening the cashier workflow does not mutate the reservation',
+  )
+  await page.keyboard.press('Escape')
+  await page.evaluate(({ reservationId, folioId }) => {
+    const url = new URL(window.location.href)
+    url.search = new URLSearchParams({ reservationId, workflow: 'cashier', folioId }).toString()
+    window.history.pushState({}, '', url)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, {
+    reservationId: boardReservationOne.data.id,
+    folioId: boardReservationOne.data.folio.id,
+  })
+  await page.waitForURL((url) => url.pathname === '/cashier' && !url.searchParams.has('workflow'))
+  await page.getByText(`Folio #${boardReservationOne.data.folio.id}`, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(
+    (await prisma.reservation.findUnique({ where: { id: boardReservationOne.data.id } })).status,
+    'CONFIRMED',
+    'same-route Cashier handoff is consumed without applying a mutation',
+  )
+  await page.keyboard.press('Escape')
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+  await assertNoOperationalBrowserStorage('Board workflow handoffs')
 
   // The command drawer must commit through the PMS, then show the same truth after a reload.
   await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
@@ -677,6 +750,9 @@ try {
   assert.match(persistedCancelledReservation.notes || '', /Guest requested cancellation in browser proof\./, 'cancellation reason is retained by the PMS')
   await assertNoOperationalBrowserStorage('server-mode booking board command drawer mutations')
 
+  const ambiguousAssignmentAuditBefore = await prisma.auditLog.count({ where: { entityId: boardReservationThree.data.id, action: 'ASSIGNED_ROOM' } })
+  const ambiguousAssignmentHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: boardReservationThree.data.id, action: 'ASSIGNED_ROOM' } })
+  const ambiguousAssignmentEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: boardReservationThree.data.id, eventType: 'RESERVATION_ROOM_ASSIGNED' } })
   let lostAssignmentKey = null
   await page.route(`**/api/reservations/${boardReservationThree.data.id}/assign-room`, async (route) => {
     lostAssignmentKey = route.request().headers()['x-idempotency-key'] || null
@@ -689,33 +765,30 @@ try {
       data: JSON.parse(route.request().postData() || '{}'),
     })
     assert.equal(upstream.status(), 200, 'the first assignment reaches the authoritative PMS before its response is lost')
-    await route.abort('failed').catch((error) => {
-      if (!/already handled/i.test(error instanceof Error ? error.message : String(error))) throw error
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected ambiguous assignment response.' }),
     })
   })
   await page.locator(`[data-board-reservation-select="${boardReservationThree.data.id}"]`).click()
   await page.locator(`[data-board-room-action="${boardMoveRoom.id}"]`).click()
-  assert.ok(lostAssignmentKey, 'the ambiguous assignment captured an idempotency key')
+  await page.getByText('Injected ambiguous assignment response.', { exact: false }).waitFor({ state: 'visible' })
+  assert.ok(lostAssignmentKey, 'the ambiguous 500 assignment captured an idempotency key')
   await page.unroute(`**/api/reservations/${boardReservationThree.data.id}/assign-room`)
   const assignmentRetryButton = page.locator(`[data-board-room-action="${boardMoveRoom.id}"]`)
-  let alreadyAppliedAssignment = await prisma.reservation.findUnique({ where: { id: boardReservationThree.data.id } })
-  for (let attempt = 0; attempt < 40 && alreadyAppliedAssignment.assignedRoomId !== boardMoveRoom.id && !(await assignmentRetryButton.isEnabled()); attempt += 1) {
-    await page.waitForTimeout(50)
-    alreadyAppliedAssignment = await prisma.reservation.findUnique({ where: { id: boardReservationThree.data.id } })
-  }
-  if (alreadyAppliedAssignment.assignedRoomId !== boardMoveRoom.id) {
-    assert.equal(await assignmentRetryButton.isEnabled(), true, 'an unapplied ambiguous assignment becomes available for an idempotent retry')
-    const assignmentResponse = page.waitForResponse((response) =>
-      response.url().endsWith(`/api/reservations/${boardReservationThree.data.id}/assign-room`)
-        && response.request().method() === 'POST',
-    )
-    await assignmentRetryButton.click()
-    const assignmentRetry = await assignmentResponse
-    assert.equal(assignmentRetry.status(), 200, 'server Booking Board replays the lost assignment safely')
-    assert.equal(assignmentRetry.request().headers()['x-idempotency-key'], lostAssignmentKey, 'retry after a lost response reuses the exact logical assignment key')
-  } else {
-    assert.equal(alreadyAppliedAssignment.assignedRoomId, boardMoveRoom.id, 'a fast authoritative refresh makes a redundant lost-response retry unnecessary')
-  }
+  assert.equal(await assignmentRetryButton.isEnabled(), true, 'an ambiguous server response keeps the same Board command available for a protected retry')
+  const assignmentResponse = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/reservations/${boardReservationThree.data.id}/assign-room`)
+      && response.request().method() === 'POST',
+  )
+  await assignmentRetryButton.click()
+  const assignmentRetry = await assignmentResponse
+  assert.equal(assignmentRetry.status(), 200, 'server Booking Board replays the ambiguous assignment safely')
+  assert.equal(assignmentRetry.request().headers()['x-idempotency-key'], lostAssignmentKey, 'retry after an ambiguous 500 reuses the exact logical assignment key')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: boardReservationThree.data.id, action: 'ASSIGNED_ROOM' } }), ambiguousAssignmentAuditBefore + 1, 'ambiguous assignment retry creates one audit record')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: boardReservationThree.data.id, action: 'ASSIGNED_ROOM' } }), ambiguousAssignmentHistoryBefore + 1, 'ambiguous assignment retry creates one reservation history record')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: boardReservationThree.data.id, eventType: 'RESERVATION_ROOM_ASSIGNED' } }), ambiguousAssignmentEventsBefore + 1, 'ambiguous assignment retry creates one domain event')
   await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })

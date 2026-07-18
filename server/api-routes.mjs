@@ -24,6 +24,12 @@ const optionalIdempotencyKeyParameter = {
   schema: { type: 'string', maxLength: 200 },
 }
 
+const requiredIdempotencyKeyParameter = {
+  ...optionalIdempotencyKeyParameter,
+  required: true,
+  description: 'Required property-scoped retry key. Reuse the same value when retrying the same lifecycle command after an uncertain response.',
+}
+
 const optionalReservationVersionParameters = [
   {
     name: 'x-reservation-expected-updated-at',
@@ -161,10 +167,18 @@ const API_ROUTE_CONTRACTS = [
   route('/api/reservations/{id}/assign-room', ['POST'], {
     tag: 'Reservations',
     summary: 'Assign or move a reservation room',
-    parameters: [optionalIdempotencyKeyParameter],
+    parameters: [optionalIdempotencyKeyParameter, ...optionalReservationVersionParameters],
   }),
-  route('/api/reservations/{id}/check-in', ['POST'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}/check-out', ['POST'], { tag: 'Reservations' }),
+  route('/api/reservations/{id}/check-in', ['POST'], {
+    tag: 'Reservations',
+    summary: 'Check in a property-scoped reservation with retry and stale-write protection',
+    parameters: [requiredIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
+  route('/api/reservations/{id}/check-out', ['POST'], {
+    tag: 'Reservations',
+    summary: 'Check out a property-scoped reservation with retry and stale-write protection',
+    parameters: [requiredIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
   route('/api/reservations/{id}/guest', ['PATCH'], {
     tag: 'Reservations',
     summary: 'Update the guest attached to a property-scoped reservation',

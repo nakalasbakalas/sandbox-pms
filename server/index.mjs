@@ -919,9 +919,10 @@ async function handleApi(request, response, url) {
       sendJson(response, 401, { ok: false, error: 'Invalid username/email or password.' })
       return true
     }
+    const propertyContext = await resolveRequestContext(db, user, request)
     loginThrottle.recordSuccess(loginIdentity)
-    const token = createSessionToken(user)
-    sendJson(response, 200, { ok: true, user: publicUser(user) }, { 'set-cookie': sessionCookie(token) })
+    const token = createSessionToken(propertyContext.actor)
+    sendJson(response, 200, { ok: true, user: publicUser(propertyContext.actor) }, { 'set-cookie': sessionCookie(token) })
     return true
   }
 
@@ -932,7 +933,8 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/auth/me' && request.method === 'GET') {
     const user = await requireUser(request)
-    sendJson(response, 200, { ok: true, user: publicUser(user) })
+    const propertyContext = await resolveRequestContext(db, user, request)
+    sendJson(response, 200, { ok: true, user: publicUser(propertyContext.actor) })
     return true
   }
 
@@ -1768,8 +1770,17 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
     const body = await readJson(request)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
     const reservation = await assignRoom(db, params.id, body.roomId, user, {
       idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Room assigned successfully.' })
     return true
@@ -1779,13 +1790,27 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'check-in:guest')
     const body = await readJson(request)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
     const reservation = await checkInReservation(db, params.id, user, body.payment ? {
       ...body,
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
       payment: {
         ...body.payment,
         idempotencyKey: body.payment.idempotencyKey || context.idempotencyKey,
       },
-    } : body)
+    } : {
+      ...body,
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Check-in complete. Room is now occupied.' })
     return true
   }
@@ -1794,13 +1819,27 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'check-out:guest')
     const body = await readJson(request)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
     const reservation = await checkOutReservation(db, params.id, user, body.payment ? {
       ...body,
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
       payment: {
         ...body.payment,
         idempotencyKey: body.payment.idempotencyKey || context.idempotencyKey,
       },
-    } : body)
+    } : {
+      ...body,
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Check-out complete. Room has been sent to housekeeping.' })
     return true
   }

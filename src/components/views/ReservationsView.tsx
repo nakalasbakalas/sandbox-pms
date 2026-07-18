@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -44,8 +44,8 @@ import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
 import { useNavigation } from '@/hooks/use-navigation'
 import { getBangkokDateKey, nightsBetween, reservationsOverlap } from '@/lib/hotel/business-rules'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
-import { createPmsIdempotencyKey, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
-import { durableAttemptKeys } from '@/lib/durable-attempt-key'
+import { createPmsIdempotencyKey, isDefinitivePmsApiError, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
 import { emailReservationDocument, printReservationDocument } from '@/lib/reservation-document-actions'
 import type { BoardRoomCard } from '@/types/board'
 import type { BookingEmailEvent } from '@/types/booking-email'
@@ -96,6 +96,13 @@ export interface Reservation {
   createdAt: Date
   updatedAt: Date
   createdBy: string
+}
+
+interface PendingReservationAttempt {
+  signature: string
+  descriptor: DurableAttemptDescriptor
+  expectedUpdatedAt?: string
+  requestBody: Record<string, unknown>
 }
 
 interface UnassignedReservation {
@@ -596,6 +603,9 @@ function reservationToDeparture(reservation: Reservation, room?: BoardRoomCard):
 }
 
 export function ReservationsView() {
+  const pendingAssignmentAttempt = useRef<PendingReservationAttempt | null>(null)
+  const pendingCheckInAttempt = useRef<PendingReservationAttempt | null>(null)
+  const pendingCheckOutAttempt = useRef<PendingReservationAttempt | null>(null)
   const [reservationsRaw, setReservationsRaw] = useKV<Reservation[]>('reservations-data', [])
   const [canonicalReservationsRaw, setCanonicalReservations] = useKV<Reservation[]>('reservations', [])
   const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
@@ -603,7 +613,7 @@ export function ReservationsView() {
   const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
   const authToken = null
   const { rooms, setRooms } = useRoomSync()
-  const { user } = useAuth()
+  const { user, hasPermission } = useAuth()
   const { navigate } = useNavigation()
   const [serverReservations, setServerReservations] = useState<Reservation[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -620,6 +630,24 @@ export function ReservationsView() {
   const [statusAction, setStatusAction] = useState<{ reservation: Reservation; action: 'cancel' | 'no-show' } | null>(null)
   const [statusActionReason, setStatusActionReason] = useState('')
   const { events: bookingEmailEvents } = useBookingEmailInbox()
+  const canCreateReservation = hasPermission('create:reservation')
+  const canEditReservation = hasPermission('edit:reservation')
+  const canCancelReservation = hasPermission('cancel:reservation')
+  const canCheckIn = hasPermission('check-in:guest')
+  const canCheckOut = hasPermission('check-out:guest')
+  const canEditRoomStatus = hasPermission('edit:room-status')
+  const canViewCashier = hasPermission('view:cashier')
+
+  useEffect(() => {
+    if (!checkInDialogOpen) {
+      pendingAssignmentAttempt.current = null
+      pendingCheckInAttempt.current = null
+    }
+  }, [checkInDialogOpen])
+
+  useEffect(() => {
+    if (!checkOutDialogOpen) pendingCheckOutAttempt.current = null
+  }, [checkOutDialogOpen])
   
   const reservations = useMemo(() => {
     if (SERVER_API_ENABLED) return serverReservations
@@ -655,31 +683,30 @@ export function ReservationsView() {
     })
   }
 
+  const refreshServerReservations = useCallback(async () => {
+    if (!SERVER_API_ENABLED) return
+    const payload = await pmsApi<{ ok: true; data: any[] }>('/api/reservations', authToken)
+    setServerReservations(payload.data.map(reservationFromServer))
+  }, [authToken])
+
   useEffect(() => {
     if (!SERVER_API_ENABLED) return
-
     let cancelled = false
-    pmsApi<{ ok: true; data: any[] }>('/api/reservations', authToken)
-      .then((payload) => {
-        if (!cancelled) {
-          const nextReservations = payload.data.map(reservationFromServer)
-          setServerReservations(nextReservations)
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) toast.error(error instanceof Error ? error.message : 'Could not load reservations from the PMS API.')
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [authToken])
+    void refreshServerReservations().catch((error) => {
+      if (!cancelled) toast.error(error instanceof Error ? error.message : 'Could not load reservations from the PMS API.')
+    })
+    return () => { cancelled = true }
+  }, [refreshServerReservations])
 
   useEffect(() => {
     setManualRoomSelection('')
   }, [selectedReservation?.id])
   
   const handleCreateReservation = async (reservation: NewReservationData) => {
+    if (!canCreateReservation) {
+      toast.error('Reservation creation permission is required.')
+      return
+    }
     if (SERVER_API_ENABLED) {
       const payload = await pmsApi<{ ok: true; data: any; message?: string }>('/api/reservations', authToken, {
         method: 'POST',
@@ -783,6 +810,14 @@ export function ReservationsView() {
   }
 
   const openCheckIn = (reservation: Reservation, mode: 'express' | 'guided' = 'guided') => {
+    if (!canCheckIn) {
+      toast.error('Check-in permission is required.')
+      return
+    }
+    if (!reservation.roomId && !canEditReservation) {
+      toast.error('Reservation edit permission is required to assign a room before check-in.')
+      return
+    }
     if (reservation.status === 'CHECKED_IN') {
       toast.info(`${reservation.guestName} is already checked in.`)
       return
@@ -800,6 +835,10 @@ export function ReservationsView() {
   }
 
   const openCheckOut = (reservation: Reservation, mode: 'express' | 'guided' = 'guided') => {
+    if (!canCheckOut) {
+      toast.error('Check-out permission is required.')
+      return
+    }
     if (reservation.status !== 'CHECKED_IN') {
       toast.info('Only checked-in reservations can be checked out.')
       return
@@ -813,6 +852,10 @@ export function ReservationsView() {
   }
 
   const markRoomReady = async (roomId: string) => {
+    if (!canEditRoomStatus) {
+      toast.error('Room-status edit permission is required.')
+      return
+    }
     const room = rooms.find((candidate) => candidate.roomId === roomId)
     if (!room) return
 
@@ -845,6 +888,10 @@ export function ReservationsView() {
   }
 
   const assignRoomToReservation = async (reservation: Reservation, roomId: string) => {
+    if (!canEditReservation) {
+      toast.error('Reservation edit permission is required to assign a room.')
+      return
+    }
     const option = buildRoomAssignmentOptions(reservation, rooms, reservations).find((candidate) => candidate.room.roomId === roomId)
     if (!option) {
       toast.error('Select a room before assigning.')
@@ -910,12 +957,20 @@ export function ReservationsView() {
   }
 
   const openStatusAction = (reservation: Reservation, action: 'cancel' | 'no-show') => {
+    if (!canCancelReservation) {
+      toast.error('Reservation cancellation permission is required.')
+      return
+    }
     setStatusAction({ reservation, action })
     setStatusActionReason('')
   }
 
   const confirmStatusAction = async () => {
     if (!statusAction) return
+    if (!canCancelReservation) {
+      toast.error('Reservation cancellation permission is required.')
+      return
+    }
     const reason = statusActionReason.trim()
     if (!reason) {
       toast.error('Record a reason before changing this reservation.')
@@ -983,6 +1038,10 @@ export function ReservationsView() {
 
   const confirmCheckIn = async (data: CheckInData) => {
     if (!selectedArrival) return
+    if (!canCheckIn) {
+      toast.error('Check-in permission is required.')
+      return
+    }
 
     const assignedRoom = rooms.find((room) => room.roomId === data.roomId)
     if (!assignedRoom) {
@@ -991,37 +1050,122 @@ export function ReservationsView() {
     }
 
     if (SERVER_API_ENABLED) {
-      try {
-        if (selectedArrival.assignedRoomId !== data.roomId) {
-          await pmsApi(`/api/reservations/${selectedArrival.reservationId}/assign-room`, authToken, {
-            method: 'POST',
-            headers: { 'x-idempotency-key': createPmsIdempotencyKey('reservations-check-in-assign-room') },
-            body: JSON.stringify({ roomId: data.roomId }),
-          })
+      let expectedUpdatedAt = selectedReservation?.updatedAt?.toISOString()
+        || reservations.find((reservation) => reservation.id === selectedArrival.reservationId)?.updatedAt?.toISOString()
+      if (selectedArrival.assignedRoomId !== data.roomId) {
+        if (!canEditReservation) {
+          toast.error('Reservation edit permission is required to assign or move the room.')
+          return
         }
-        const requestBody = {
-          guest: {
-            nationality: data.nationality,
-            idType: data.idNumber ? 'PASSPORT' : undefined,
-            idNumber: data.idNumber,
-          },
-          payment: data.payment,
-          additionalNotes: data.additionalNotes,
-        }
-        const paymentAttempt = data.payment ? {
-          operation: 'check-in-payment' as const,
-          entityId: selectedArrival.reservationId,
-          material: requestBody,
-        } : null
-        const idempotencyKey = paymentAttempt ? await durableAttemptKeys.getOrCreate(paymentAttempt) : null
-        await pmsApi(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
-          method: 'POST',
-          headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : undefined,
-          body: JSON.stringify(requestBody),
+        const assignmentSignature = JSON.stringify({
+          reservationId: selectedArrival.reservationId,
+          roomId: data.roomId,
         })
-        if (paymentAttempt) await durableAttemptKeys.confirmSuccess(paymentAttempt)
+        if (pendingAssignmentAttempt.current?.signature !== assignmentSignature) {
+          const requestBody = {
+            roomId: data.roomId,
+            ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
+          }
+          pendingAssignmentAttempt.current = {
+            signature: assignmentSignature,
+            descriptor: {
+              operation: 'reservation-assign-room',
+              entityId: selectedArrival.reservationId,
+              material: requestBody,
+            },
+            expectedUpdatedAt,
+            requestBody,
+          }
+        }
+        const assignmentAttempt = pendingAssignmentAttempt.current
+        const assignmentKey = await durableAttemptKeys.getOrCreate(assignmentAttempt.descriptor)
+        try {
+          const assigned = await pmsApi<{ ok: true; data?: { updatedAt?: string } }>(`/api/reservations/${selectedArrival.reservationId}/assign-room`, authToken, {
+            method: 'POST',
+            headers: {
+              'x-idempotency-key': assignmentKey,
+              ...(assignmentAttempt.expectedUpdatedAt
+                ? { 'x-reservation-expected-updated-at': assignmentAttempt.expectedUpdatedAt }
+                : {}),
+            },
+            body: JSON.stringify(assignmentAttempt.requestBody),
+          })
+          expectedUpdatedAt = assigned.data?.updatedAt ? new Date(assigned.data.updatedAt).toISOString() : expectedUpdatedAt
+          await durableAttemptKeys.confirmSuccess(assignmentAttempt.descriptor)
+          pendingAssignmentAttempt.current = null
+        } catch (error) {
+          const definitiveRejection = isDefinitivePmsApiError(error)
+          if (definitiveRejection) {
+            await durableAttemptKeys.confirmSuccess(assignmentAttempt.descriptor)
+            pendingAssignmentAttempt.current = null
+          }
+          await refreshServerReservations().catch(() => undefined)
+          toast.error(error instanceof Error ? error.message : 'Room assignment failed.')
+          if (!definitiveRejection) {
+            toast.message('Connection outcome is unknown. Retry the same assignment to reuse its protected request key.')
+          }
+          return
+        }
+      }
+      const commandBody = {
+        guest: {
+          nationality: data.nationality,
+          idType: data.idNumber ? 'PASSPORT' : undefined,
+          idNumber: data.idNumber,
+        },
+        payment: data.payment,
+        additionalNotes: data.additionalNotes,
+      }
+      const lifecycleSignature = JSON.stringify({
+        reservationId: selectedArrival.reservationId,
+        ...commandBody,
+      })
+      if (pendingCheckInAttempt.current?.signature !== lifecycleSignature) {
+        const requestBody = {
+          ...commandBody,
+          ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
+        }
+        pendingCheckInAttempt.current = {
+          signature: lifecycleSignature,
+          descriptor: {
+            operation: 'reservation-check-in',
+            entityId: selectedArrival.reservationId,
+            material: requestBody,
+          },
+          expectedUpdatedAt,
+          requestBody,
+        }
+      }
+      const lifecycleAttempt = pendingCheckInAttempt.current
+      const idempotencyKey = await durableAttemptKeys.getOrCreate(lifecycleAttempt.descriptor)
+      try {
+        const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
+          method: 'POST',
+          headers: {
+            'x-idempotency-key': idempotencyKey,
+            ...(lifecycleAttempt.expectedUpdatedAt
+              ? { 'x-reservation-expected-updated-at': lifecycleAttempt.expectedUpdatedAt }
+              : {}),
+          },
+          body: JSON.stringify(lifecycleAttempt.requestBody),
+        })
+        await durableAttemptKeys.confirmSuccess(lifecycleAttempt.descriptor)
+        pendingCheckInAttempt.current = null
+        await refreshServerReservations().catch(() => toast.warning('Check-in succeeded, but reservations could not be refreshed.'))
+        toast.success(payload.message || `Checked in: ${selectedArrival.guestName} -> Room ${assignedRoom.number}`)
+        setCheckInDialogOpen(false)
+        setSelectedArrival(null)
+        setSelectedReservation(null)
+        return
       } catch (error) {
+        const definitiveRejection = isDefinitivePmsApiError(error)
+        if (definitiveRejection) {
+          await durableAttemptKeys.confirmSuccess(lifecycleAttempt.descriptor)
+          pendingCheckInAttempt.current = null
+        }
+        await refreshServerReservations().catch(() => undefined)
         toast.error(error instanceof Error ? error.message : 'Check-in failed.')
+        if (!definitiveRejection) toast.message('Connection outcome is unknown. Retry check-in to reuse its protected request key.')
         return
       }
     }
@@ -1089,34 +1233,74 @@ export function ReservationsView() {
 
   const confirmCheckOut = async (data: CheckOutData) => {
     if (!selectedDeparture) return
+    if (!canCheckOut) {
+      toast.error('Check-out permission is required.')
+      return
+    }
 
     if (SERVER_API_ENABLED) {
-      try {
+      const expectedUpdatedAt = selectedDeparture.updatedAt
+      const commandBody = {
+        payment: data.paymentAmount ? {
+          amount: data.paymentAmount,
+          method: data.paymentMethod,
+          reference: data.paymentReference,
+          notes: data.additionalNotes,
+        } : undefined,
+        allowUnpaidOverride: data.forceCheckout,
+        overrideReason: data.overrideReason,
+        additionalNotes: data.additionalNotes,
+      }
+      const lifecycleSignature = JSON.stringify({
+        reservationId: selectedDeparture.reservationId,
+        ...commandBody,
+      })
+      if (pendingCheckOutAttempt.current?.signature !== lifecycleSignature) {
         const requestBody = {
-          payment: data.paymentAmount ? {
-            amount: data.paymentAmount,
-            method: data.paymentMethod,
-            reference: data.paymentReference,
-            notes: data.additionalNotes,
-          } : undefined,
-          allowUnpaidOverride: data.forceCheckout,
-          overrideReason: data.overrideReason,
-          additionalNotes: data.additionalNotes,
+          ...commandBody,
+          ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
         }
-        const paymentAttempt = data.paymentAmount ? {
-          operation: 'check-out-payment' as const,
-          entityId: selectedDeparture.reservationId,
-          material: requestBody,
-        } : null
-        const idempotencyKey = paymentAttempt ? await durableAttemptKeys.getOrCreate(paymentAttempt) : null
-        await pmsApi(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
+        pendingCheckOutAttempt.current = {
+          signature: lifecycleSignature,
+          descriptor: {
+            operation: 'reservation-check-out',
+            entityId: selectedDeparture.reservationId,
+            material: requestBody,
+          },
+          expectedUpdatedAt,
+          requestBody,
+        }
+      }
+      const lifecycleAttempt = pendingCheckOutAttempt.current
+      const idempotencyKey = await durableAttemptKeys.getOrCreate(lifecycleAttempt.descriptor)
+      try {
+        const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
           method: 'POST',
-          headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : undefined,
-          body: JSON.stringify(requestBody),
+          headers: {
+            'x-idempotency-key': idempotencyKey,
+            ...(lifecycleAttempt.expectedUpdatedAt
+              ? { 'x-reservation-expected-updated-at': lifecycleAttempt.expectedUpdatedAt }
+              : {}),
+          },
+          body: JSON.stringify(lifecycleAttempt.requestBody),
         })
-        if (paymentAttempt) await durableAttemptKeys.confirmSuccess(paymentAttempt)
+        await durableAttemptKeys.confirmSuccess(lifecycleAttempt.descriptor)
+        pendingCheckOutAttempt.current = null
+        await refreshServerReservations().catch(() => toast.warning('Check-out succeeded, but reservations could not be refreshed.'))
+        toast.success(payload.message || `Checked out: ${selectedDeparture.guestName} -> Room ${selectedDeparture.roomNumber}`)
+        setCheckOutDialogOpen(false)
+        setSelectedDeparture(null)
+        setSelectedReservation(null)
+        return
       } catch (error) {
+        const definitiveRejection = isDefinitivePmsApiError(error)
+        if (definitiveRejection) {
+          await durableAttemptKeys.confirmSuccess(lifecycleAttempt.descriptor)
+          pendingCheckOutAttempt.current = null
+        }
+        await refreshServerReservations().catch(() => undefined)
         toast.error(error instanceof Error ? error.message : 'Check-out failed.')
+        if (!definitiveRejection) toast.message('Connection outcome is unknown. Retry check-out to reuse its protected request key.')
         return
       }
     }
@@ -1348,7 +1532,7 @@ export function ReservationsView() {
                 <SquaresFour size={18} weight="bold" />
                 Board
               </Button>
-              <Button className="gap-2" onClick={() => setShowNewReservationDialog(true)}>
+              <Button className="gap-2" disabled={!canCreateReservation} onClick={() => setShowNewReservationDialog(true)}>
                 <Plus size={18} weight="bold" />
                 New Reservation
               </Button>
@@ -1452,7 +1636,7 @@ export function ReservationsView() {
                   </p>
                   <div className="mt-4 flex justify-center gap-2">
                     <Button variant="outline" onClick={() => setSelectedTab('all')}>Show All</Button>
-                    <Button onClick={() => setShowNewReservationDialog(true)}>New Reservation</Button>
+                    <Button disabled={!canCreateReservation} onClick={() => setShowNewReservationDialog(true)}>New Reservation</Button>
                   </div>
                 </Card>
               ) : (
@@ -1571,6 +1755,7 @@ export function ReservationsView() {
                             <Button
                               size="sm"
                               className="gap-1.5 bg-blue-600 hover:bg-blue-700"
+                              disabled={!canCheckOut}
                               onClick={(event) => {
                                 event.stopPropagation()
                                 openCheckOut(reservation, reservation.balanceDue > 0 ? 'guided' : 'express')
@@ -1583,7 +1768,7 @@ export function ReservationsView() {
                             <Button
                               size="sm"
                               className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
-                              disabled={reservation.status === 'CHECKED_OUT' || reservation.status === 'CANCELLED' || reservation.status === 'NO_SHOW'}
+                              disabled={!canCheckIn || reservation.status === 'CHECKED_OUT' || reservation.status === 'CANCELLED' || reservation.status === 'NO_SHOW'}
                               onClick={(event) => {
                                 event.stopPropagation()
                                 openCheckIn(reservation, reservation.balanceDue <= 0 ? 'express' : 'guided')
@@ -1641,6 +1826,11 @@ export function ReservationsView() {
         onManualRoomSelectionChange={setManualRoomSelection}
         onAssignRoom={assignRoomToReservation}
         onStatusAction={openStatusAction}
+        canEditReservation={canEditReservation}
+        canCheckIn={canCheckIn}
+        canCheckOut={canCheckOut}
+        canCancelReservation={canCancelReservation}
+        canViewCashier={canViewCashier}
       />
       <Dialog open={Boolean(statusAction)} onOpenChange={(open) => {
         if (!open) {
@@ -1694,7 +1884,7 @@ export function ReservationsView() {
           if (!open) setSelectedArrival(null)
         }}
         onConfirm={confirmCheckIn}
-        onMarkRoomReady={markRoomReady}
+        onMarkRoomReady={canEditRoomStatus ? markRoomReady : undefined}
       />
       <CheckOutDialog
         departure={selectedDeparture}
@@ -1730,6 +1920,11 @@ function ReservationDetailDialog({
   onManualRoomSelectionChange,
   onAssignRoom,
   onStatusAction,
+  canEditReservation,
+  canCheckIn: hasCheckInPermission,
+  canCheckOut: hasCheckOutPermission,
+  canCancelReservation,
+  canViewCashier,
 }: {
   reservation: Reservation | null
   open: boolean
@@ -1749,13 +1944,18 @@ function ReservationDetailDialog({
   onManualRoomSelectionChange: (roomId: string) => void
   onAssignRoom: (reservation: Reservation, roomId: string) => void
   onStatusAction: (reservation: Reservation, action: 'cancel' | 'no-show') => void
+  canEditReservation: boolean
+  canCheckIn: boolean
+  canCheckOut: boolean
+  canCancelReservation: boolean
+  canViewCashier: boolean
 }) {
   if (!reservation) return null
 
-  const canCheckIn = reservation.status === 'CONFIRMED' || reservation.status === 'PENDING'
-  const canCheckOut = reservation.status === 'CHECKED_IN'
-  const canCancel = reservation.status === 'CONFIRMED' || reservation.status === 'PENDING'
-  const canNoShow = reservation.status === 'CONFIRMED' || reservation.status === 'PENDING'
+  const canCheckIn = hasCheckInPermission && (reservation.status === 'CONFIRMED' || reservation.status === 'PENDING')
+  const canCheckOut = hasCheckOutPermission && reservation.status === 'CHECKED_IN'
+  const canCancel = canCancelReservation && (reservation.status === 'CONFIRMED' || reservation.status === 'PENDING')
+  const canNoShow = canCancelReservation && (reservation.status === 'CONFIRMED' || reservation.status === 'PENDING')
   const paidAmount = Math.max(0, reservation.totalAmount - reservation.balanceDue)
   const assignmentOptions = buildRoomAssignmentOptions(reservation, rooms, reservations)
   const safeAutoOption = assignmentOptions.find((option) => option.assignable)
@@ -1852,7 +2052,7 @@ function ReservationDetailDialog({
                 <div className="space-y-2">
                   <Button
                     className="w-full justify-start gap-1.5 bg-emerald-600 hover:bg-emerald-700"
-                    disabled={!safeAutoOption || !canCheckIn && reservation.status !== 'PENDING'}
+                    disabled={!canEditReservation || !safeAutoOption || !canCheckIn && reservation.status !== 'PENDING'}
                     onClick={() => safeAutoOption && onAssignRoom(reservation, safeAutoOption.room.roomId)}
                   >
                     <CheckCircle size={15} weight="bold" />
@@ -1860,6 +2060,7 @@ function ReservationDetailDialog({
                   </Button>
                   <select
                     value={manualRoomSelection}
+                    disabled={!canEditReservation}
                     onChange={(event) => onManualRoomSelectionChange(event.target.value)}
                     className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                     aria-label="Assign manually"
@@ -1874,7 +2075,7 @@ function ReservationDetailDialog({
                   <Button
                     variant="outline"
                     className="w-full justify-start"
-                    disabled={!selectedManualOption?.assignable}
+                    disabled={!canEditReservation || !selectedManualOption?.assignable}
                     onClick={() => selectedManualOption && onAssignRoom(reservation, selectedManualOption.room.roomId)}
                   >
                     Assign Manually
@@ -1964,11 +2165,11 @@ function ReservationDetailDialog({
               </div>
             </div>
             <div className="grid gap-2">
-              <Button variant="outline" className="justify-start gap-1.5" onClick={onCashier}>
+              <Button variant="outline" className="justify-start gap-1.5" disabled={!canViewCashier} onClick={onCashier}>
                 <CreditCard size={15} weight="bold" />
                 Collect Payment
               </Button>
-              <Button variant="outline" className="justify-start gap-1.5" onClick={onCashier}>
+              <Button variant="outline" className="justify-start gap-1.5" disabled={!canViewCashier} onClick={onCashier}>
                 <Receipt size={15} weight="bold" />
                 Add Charge
               </Button>
@@ -1996,7 +2197,7 @@ function ReservationDetailDialog({
             </Button>
           </div>
           <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="outline" className="gap-1.5" onClick={onCashier}>
+            <Button variant="outline" className="gap-1.5" disabled={!canViewCashier} onClick={onCashier}>
               <CreditCard size={15} weight="bold" />
               Folio
             </Button>

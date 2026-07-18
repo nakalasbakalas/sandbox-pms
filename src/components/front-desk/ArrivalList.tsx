@@ -18,6 +18,8 @@ interface ArrivalListProps {
   rooms: BoardRoomCard[]
   hotelDateKey: string
   role?: UserRole | null
+  canCheckIn: boolean
+  canAssignRoom: boolean
   onCheckIn: (arrival: ArrivalItem, mode: 'express' | 'guided') => void
 }
 
@@ -28,7 +30,7 @@ function ActionIcon({ intent }: { intent: ReturnType<typeof getArrivalPrimaryAct
   return <CheckCircle size={15} weight="bold" />
 }
 
-export function ArrivalList({ arrivals, rooms, hotelDateKey, role, onCheckIn }: ArrivalListProps) {
+export function ArrivalList({ arrivals, rooms, hotelDateKey, role, canCheckIn, canAssignRoom, onCheckIn }: ArrivalListProps) {
   if (arrivals.length === 0) {
     return (
       <div className="rounded-lg border bg-white p-6 text-center text-sm text-muted-foreground">
@@ -46,6 +48,12 @@ export function ArrivalList({ arrivals, rooms, hotelDateKey, role, onCheckIn }: 
         const action = getArrivalPrimaryAction(summary, arrival)
         const mode = action.intent === 'express-check-in' ? 'express' : 'guided'
         const due = amountDueForArrival(arrival)
+        const permissionDenied = !canCheckIn || (!arrival.assignedRoomId && !canAssignRoom)
+        const permissionReason = !canCheckIn
+          ? 'Check-in permission is required.'
+          : !arrival.assignedRoomId && !canAssignRoom
+            ? 'Reservation edit permission is required to assign a room.'
+            : undefined
 
         return (
           <div key={arrival.id} className="grid gap-3 p-3 md:grid-cols-[1.3fr_1fr_auto] md:items-center">
@@ -84,7 +92,8 @@ export function ArrivalList({ arrivals, rooms, hotelDateKey, role, onCheckIn }: 
               </div>
               <Button
                 size="sm"
-                disabled={action.disabled}
+                disabled={action.disabled || permissionDenied}
+                title={permissionReason}
                 onClick={() => onCheckIn(arrival, mode)}
                 className={cn(
                   'min-w-[136px] gap-1.5',
@@ -94,7 +103,7 @@ export function ArrivalList({ arrivals, rooms, hotelDateKey, role, onCheckIn }: 
                 )}
               >
                 <ActionIcon intent={action.intent} />
-                {action.label}
+                {permissionDenied ? 'Check-in restricted' : action.label}
               </Button>
             </div>
 

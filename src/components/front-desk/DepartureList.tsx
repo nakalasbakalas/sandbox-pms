@@ -11,6 +11,7 @@ interface DepartureListProps {
   departures: DepartureItem[]
   hotelDateKey: string
   role?: UserRole | null
+  canCheckOut: boolean
   onCheckOut: (departure: DepartureItem, mode: 'express' | 'guided') => void
 }
 
@@ -20,7 +21,7 @@ function ActionIcon({ intent }: { intent: ReturnType<typeof getDeparturePrimaryA
   return <CheckCircle size={15} weight="bold" />
 }
 
-export function DepartureList({ departures, hotelDateKey, role, onCheckOut }: DepartureListProps) {
+export function DepartureList({ departures, hotelDateKey, role, canCheckOut, onCheckOut }: DepartureListProps) {
   if (departures.length === 0) {
     return (
       <div className="rounded-lg border bg-white p-6 text-center text-sm text-muted-foreground">
@@ -72,7 +73,8 @@ export function DepartureList({ departures, hotelDateKey, role, onCheckOut }: De
               </div>
               <Button
                 size="sm"
-                disabled={action.disabled}
+                disabled={action.disabled || !canCheckOut}
+                title={!canCheckOut ? 'Check-out permission is required.' : undefined}
                 onClick={() => onCheckOut(departure, mode)}
                 className={cn(
                   'min-w-[136px] gap-1.5',
@@ -82,7 +84,7 @@ export function DepartureList({ departures, hotelDateKey, role, onCheckOut }: De
                 )}
               >
                 <ActionIcon intent={action.intent} />
-                {action.label}
+                {canCheckOut ? action.label : 'Check-out restricted'}
               </Button>
             </div>
 

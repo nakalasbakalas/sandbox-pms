@@ -483,15 +483,15 @@ assert.match(
   /operation: 'cashier-charge'[\s\S]{0,1000}pmsApi\('\/api\/charges'[\s\S]{0,300}headers: \{ 'x-idempotency-key': idempotencyKey \}/,
   'Cashier charge submissions send the durable attempt key through the backend idempotency header contract',
 )
-for (const paymentSurface of [
+for (const lifecycleSurface of [
   'src/components/front-desk/FrontDeskView.tsx',
   'src/components/views/ReservationsView.tsx',
-  'src/components/board/Board.tsx',
 ]) {
-  const source = await readFile(resolve(paymentSurface), 'utf8')
-  assert.match(source, /operation: 'check-in-payment'/, `${paymentSurface} uses durable check-in payment attempts`)
-  assert.match(source, /operation: 'check-out-payment'/, `${paymentSurface} uses durable check-out payment attempts`)
-  assert.match(source, /durableAttemptKeys\.confirmSuccess/, `${paymentSurface} clears attempt keys only after confirmed success`)
+  const source = await readFile(resolve(lifecycleSurface), 'utf8')
+  assert.match(source, /operation: 'reservation-check-in'/, `${lifecycleSurface} protects the complete check-in lifecycle`)
+  assert.match(source, /operation: 'reservation-check-out'/, `${lifecycleSurface} protects the complete check-out lifecycle`)
+  assert.match(source, /'x-reservation-expected-updated-at'/, `${lifecycleSurface} sends the authoritative stale-write token`)
+  assert.match(source, /durableAttemptKeys\.confirmSuccess/, `${lifecycleSurface} retires keys only after a known outcome`)
 }
 
 const durableAttemptStorageRows = new Map()

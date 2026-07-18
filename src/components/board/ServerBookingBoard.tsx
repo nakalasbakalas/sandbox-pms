@@ -31,8 +31,14 @@ import { useNavigation } from '@/hooks/use-navigation'
 import { useServerBookingBoard } from '@/hooks/use-server-booking-board'
 import { capabilityEnabled, useSystemCapabilities } from '@/hooks/use-system-capabilities'
 import { getBangkokDateKey } from '@/lib/hotel/business-rules'
-import { createPmsIdempotencyKey, PmsApiError, pmsApi } from '@/lib/pms-api-client'
+import { createPmsIdempotencyKey, isDefinitivePmsApiError, pmsApi } from '@/lib/pms-api-client'
 import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
+import {
+  clearAuthoritativeWorkflowQuery,
+  navigateToAuthoritativeWorkflow,
+  readAuthoritativeWorkflowQuery,
+  type AuthoritativeWorkflowIntent,
+} from '@/lib/authoritative-workflow-navigation'
 import { BoardReservationCommandDrawer } from '@/components/board/BoardReservationCommandDrawer'
 import type {
   BookingBoardRangeDays,
@@ -143,6 +149,7 @@ export function ServerBookingBoard() {
   const [plannedCheckOut, setPlannedCheckOut] = useState('')
   const [dateDraftDirty, setDateDraftDirty] = useState(false)
   const [mutationInFlight, setMutationInFlight] = useState(false)
+  const [requestedWorkflow, setRequestedWorkflow] = useState<AuthoritativeWorkflowIntent | null>(null)
   const { data, loading, error, reload, range } = useServerBookingBoard(startDate, days)
   const { hasPermission, hasAnyPermission } = useAuth()
   const { registry, loading: capabilitiesLoading } = useSystemCapabilities()
@@ -150,11 +157,20 @@ export function ServerBookingBoard() {
   const canCreate = hasPermission('create:reservation')
   const canEdit = hasPermission('edit:reservation')
   const canCancel = hasPermission('cancel:reservation')
+  const canCheckIn = hasPermission('check-in:guest')
+  const canCheckOut = hasPermission('check-out:guest')
   const canEditGuest = hasPermission('edit:reservation') && hasPermission('view:guests')
   const canPostCharge = hasPermission('post:charges')
+  const canViewCashier = hasPermission('view:cashier')
   const canUseReservationCommands = !capabilitiesLoading && capabilityEnabled(registry?.operations.reservations)
   const canUseAccountingCommands = !capabilitiesLoading && capabilityEnabled(registry?.finance.legacyFolioCharges)
-  const canSelectCommand = canEdit || canCancel || canEditGuest || canPostCharge
+  const canSelectCommand = canEdit
+    || canCancel
+    || canCheckIn
+    || canCheckOut
+    || canEditGuest
+    || canPostCharge
+    || canViewCashier
   const dayWidth = days === 30 ? 56 : days === 14 ? 76 : 96
   const dateColumns = useMemo(
     () => Array.from({ length: days }, (_, index) => addDays(range.start, index)),
@@ -195,6 +211,25 @@ export function ServerBookingBoard() {
     () => data?.reservations.find((reservation) => reservation.id === selectedReservationId) || null,
     [data, selectedReservationId],
   )
+
+  useEffect(() => {
+    const syncWorkflowQuery = () => {
+      const query = readAuthoritativeWorkflowQuery()
+      if (!query?.reservationId || !['assignment', 'check-in', 'check-out'].includes(query.workflow)) {
+        setSelectedReservationId(null)
+        setRequestedWorkflow(null)
+        setDateDraftDirty(false)
+        return
+      }
+      setSelectedReservationId(query.reservationId)
+      setRequestedWorkflow(query.workflow)
+      setDateDraftDirty(false)
+    }
+
+    syncWorkflowQuery()
+    window.addEventListener('popstate', syncWorkflowQuery)
+    return () => window.removeEventListener('popstate', syncWorkflowQuery)
+  }, [])
 
   useEffect(() => {
     if (!selectedReservation || dateDraftDirty) return
@@ -282,9 +317,21 @@ export function ServerBookingBoard() {
 
   const selectReservation = (reservation: ServerBookingBoardReservation) => {
     setSelectedReservationId(reservation.id)
+    setRequestedWorkflow('assignment')
     setDateDraftDirty(false)
     setPlannedCheckIn(format(parseISO(reservation.checkIn), 'yyyy-MM-dd'))
     setPlannedCheckOut(format(parseISO(reservation.checkOut), 'yyyy-MM-dd'))
+    navigateToAuthoritativeWorkflow('board', {
+      reservationId: reservation.id,
+      workflow: 'assignment',
+    }, 'replace')
+  }
+
+  const clearSelectedReservation = () => {
+    setSelectedReservationId(null)
+    setRequestedWorkflow(null)
+    setDateDraftDirty(false)
+    clearAuthoritativeWorkflowQuery()
   }
 
   const runBoardMutation = async (attempt: DurableAttemptDescriptor, successMessage: string, request: (idempotencyKey: string) => Promise<unknown>) => {
@@ -299,7 +346,7 @@ export function ServerBookingBoard() {
       return true
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : 'The server could not apply that booking-board change.')
-      if (caught instanceof PmsApiError) {
+      if (isDefinitivePmsApiError(caught)) {
         // Known HTTP outcomes can safely refetch. A 409 also discards stale local date drafts.
         if (caught.status === 409) setDateDraftDirty(false)
         reload()
@@ -326,8 +373,14 @@ export function ServerBookingBoard() {
       action === 'move' ? `Moved to Room ${room.number}.` : `Assigned to Room ${room.number}.`,
       (idempotencyKey) => pmsApi(`/api/reservations/${encodeURIComponent(selectedReservation.id)}/assign-room`, null, {
         method: 'POST',
-        headers: { 'x-idempotency-key': idempotencyKey },
-        body: JSON.stringify({ roomId: room.id }),
+        headers: {
+          'x-idempotency-key': idempotencyKey,
+          'x-reservation-expected-updated-at': selectedReservation.updatedAt,
+        },
+        body: JSON.stringify({
+          roomId: room.id,
+          expectedUpdatedAt: selectedReservation.updatedAt,
+        }),
       }),
     )
   }
@@ -466,8 +519,20 @@ export function ServerBookingBoard() {
           ))}
         </nav>
 
+        {data && selectedReservationId && !selectedReservation && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+            <span>The requested reservation is not available in this Board date range or is no longer visible to your role.</span>
+            <Button type="button" size="sm" variant="outline" onClick={clearSelectedReservation}>Clear workflow request</Button>
+          </div>
+        )}
+
         {selectedReservation && canSelectCommand && (
-          <section className="mt-4 rounded-lg border bg-muted/30 p-3" aria-label="Selected reservation actions">
+          <section
+            className={`mt-4 rounded-lg border bg-muted/30 p-3 ${requestedWorkflow === 'assignment' ? 'ring-2 ring-primary ring-offset-2' : ''}`}
+            aria-label="Selected reservation actions"
+            aria-current={requestedWorkflow === 'assignment' ? 'step' : undefined}
+            data-board-workflow-highlight={requestedWorkflow === 'assignment' ? 'assignment' : undefined}
+          >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-sm font-semibold">{selectedReservation.guestName}</p>
@@ -475,7 +540,7 @@ export function ServerBookingBoard() {
                   {selectedReservation.confirmationCode} · Select a compatible available room below to {selectedReservation.assignedRoomId ? 'move' : 'assign'}.
                 </p>
               </div>
-              <Button type="button" size="sm" variant="ghost" onClick={() => { setSelectedReservationId(null); setDateDraftDirty(false) }} disabled={mutationInFlight}>
+              <Button type="button" size="sm" variant="ghost" onClick={clearSelectedReservation} disabled={mutationInFlight}>
                 Clear selection
               </Button>
             </div>
@@ -501,11 +566,25 @@ export function ServerBookingBoard() {
             reservation={selectedReservation}
             mutationInFlight={mutationInFlight}
             canCancel={canCancel}
+            canCheckIn={canCheckIn}
+            canCheckOut={canCheckOut}
             canEditGuest={canEditGuest}
             canPostCharge={canPostCharge}
+            canViewCashier={canViewCashier}
             operationsAvailable={canUseReservationCommands}
             accountingAvailable={canUseAccountingCommands}
-            onClose={() => { setSelectedReservationId(null); setDateDraftDirty(false) }}
+            requestedWorkflow={requestedWorkflow}
+            onOpenCheckIn={() => navigateToAuthoritativeWorkflow('front-desk', { reservationId: selectedReservation.id, workflow: 'check-in' })}
+            onOpenCheckOut={() => navigateToAuthoritativeWorkflow('front-desk', { reservationId: selectedReservation.id, workflow: 'check-out' })}
+            onOpenCashier={() => {
+              if (!selectedReservation.folio) return
+              navigateToAuthoritativeWorkflow('cashier', {
+                reservationId: selectedReservation.id,
+                folioId: selectedReservation.folio.id,
+                workflow: 'cashier',
+              })
+            }}
+            onClose={clearSelectedReservation}
             onMutation={runBoardMutation}
           />
         )}

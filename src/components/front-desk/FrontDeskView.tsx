@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import type { ArrivalItem, CheckInData, CheckOutData, DepartureItem, InHouseItem } from '@/types/front-desk'
 import type { BoardRoomCard } from '@/types/board'
@@ -21,8 +21,13 @@ import {
   buildRoomReadinessSummary,
   toInHouseItem,
 } from '@/lib/front-desk-workflow'
-import { createPmsIdempotencyKey, mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
-import { durableAttemptKeys } from '@/lib/durable-attempt-key'
+import { isDefinitivePmsApiError, mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
+import {
+  clearAuthoritativeWorkflowQuery,
+  readAuthoritativeWorkflowQuery,
+  useAuthoritativeWorkflowNavigationVersion,
+} from '@/lib/authoritative-workflow-navigation'
 import { Calendar, EnvelopeSimple, MagnifyingGlass, Plus, SignOut, Users } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { useFrontDeskAssistant } from '@/components/front-desk-assistant/FrontDeskAssistantProvider'
@@ -54,6 +59,13 @@ type ReservationPrefill = {
   roomNumber?: string
   roomType?: 'TWIN' | 'DOUBLE'
   checkIn?: Date
+}
+
+interface PendingReservationAttempt {
+  signature: string
+  descriptor: DurableAttemptDescriptor
+  expectedUpdatedAt?: string
+  requestBody: Record<string, unknown>
 }
 
 interface ReservationRecord {
@@ -251,6 +263,7 @@ function roomToArrival(room: BoardRoomCard): ArrivalItem {
     paymentStatus: paymentStatus(balanceDue),
     roomStatus: room.status,
     operationalStatus: room.operationalStatus,
+    updatedAt: room.lastUpdatedAt,
   }
 }
 
@@ -324,6 +337,7 @@ function serverReservationToArrival(reservation: any, rooms: BoardRoomCard[]): A
     paymentStatus: paymentStatus(balanceDue, reservation.folio?.paid || 0),
     roomStatus: reservation.assignedRoom?.currentStatus,
     operationalStatus: reservation.assignedRoom?.operationalStatus,
+    updatedAt: reservation.updatedAt ? new Date(reservation.updatedAt).toISOString() : undefined,
   }
 }
 
@@ -354,6 +368,7 @@ function serverReservationToDeparture(reservation: any): DepartureItem {
     roomStatus: roomCleanLabel(reservation.assignedRoom),
     specialRequests: reservation.specialRequests || undefined,
     notes: reservation.notes || undefined,
+    updatedAt: reservation.updatedAt ? new Date(reservation.updatedAt).toISOString() : undefined,
   }
 }
 
@@ -378,10 +393,15 @@ function inHouseToDeparture(item: InHouseItem): DepartureItem {
     folioStatus: item.folioStatus,
     paymentStatus: item.paymentStatus,
     roomStatus: item.roomStatus,
+    updatedAt: item.updatedAt,
   }
 }
 
 export function FrontDeskView() {
+  const workflowNavigationVersion = useAuthoritativeWorkflowNavigationVersion()
+  const pendingAssignmentAttempt = useRef<PendingReservationAttempt | null>(null)
+  const pendingCheckInAttempt = useRef<PendingReservationAttempt | null>(null)
+  const pendingCheckOutAttempt = useRef<PendingReservationAttempt | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedArrival, setSelectedArrival] = useState<ArrivalItem | null>(null)
   const [selectedDeparture, setSelectedDeparture] = useState<DepartureItem | null>(null)
@@ -400,10 +420,26 @@ export function FrontDeskView() {
   const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
   const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
   const authToken = null
-  const { user } = useAuth()
+  const { user, hasPermission } = useAuth()
   const { navigate } = useNavigation()
   const { openAssistant } = useFrontDeskAssistant()
   const { rooms, setRooms, updateRoomStatus } = useRoomSync()
+  const canCreateReservation = hasPermission('create:reservation')
+  const canEditReservation = hasPermission('edit:reservation')
+  const canCheckIn = hasPermission('check-in:guest')
+  const canCheckOut = hasPermission('check-out:guest')
+  const canEditRoomStatus = hasPermission('edit:room-status')
+
+  useEffect(() => {
+    if (!checkInDialogOpen) {
+      pendingAssignmentAttempt.current = null
+      pendingCheckInAttempt.current = null
+    }
+  }, [checkInDialogOpen])
+
+  useEffect(() => {
+    if (!checkOutDialogOpen) pendingCheckOutAttempt.current = null
+  }, [checkOutDialogOpen])
 
   const refreshServerBoard = useCallback(async () => {
     if (!SERVER_API_ENABLED) return
@@ -492,6 +528,7 @@ export function FrontDeskView() {
             roomStatus: departure.roomStatus,
             serviceFlags: departure.balanceDue > 0 ? ['Balance due'] : [],
             mainAction: departure.balanceDue > 0 ? 'SETTLE_BALANCE' : 'CHECK_OUT',
+            updatedAt: departure.updatedAt,
           } satisfies InHouseItem
         })
     }
@@ -504,62 +541,131 @@ export function FrontDeskView() {
   const filteredInHouse = useMemo(() => filterByQuery(inHouse, searchQuery), [inHouse, searchQuery])
   const readiness = useMemo(() => buildRoomReadinessSummary(displayedRooms), [displayedRooms])
 
-  const openCheckIn = (arrival: ArrivalItem, mode: 'express' | 'guided') => {
+  useEffect(() => {
+    if (!SERVER_API_ENABLED || !selectedArrival || serverBoardState !== 'ready') return
+    let authoritativeArrival = arrivals.find((item) => item.reservationId === selectedArrival.reservationId)
+    if (!authoritativeArrival) {
+      const reservation = serverBoard?.reservations?.find((candidate) => (
+        candidate.id === selectedArrival.reservationId
+        && ['PENDING', 'CONFIRMED', 'HOLD'].includes(candidate.status)
+      ))
+      if (reservation) authoritativeArrival = serverReservationToArrival(reservation, displayedRooms)
+    }
+    if (!authoritativeArrival) {
+      setCheckInDialogOpen(false)
+      setSelectedArrival(null)
+      return
+    }
+    if (authoritativeArrival.updatedAt !== selectedArrival.updatedAt) {
+      setSelectedArrival(authoritativeArrival)
+    }
+  }, [arrivals, displayedRooms, selectedArrival, serverBoard, serverBoardState])
+
+  useEffect(() => {
+    if (!SERVER_API_ENABLED || !selectedDeparture || serverBoardState !== 'ready') return
+    let authoritativeDeparture = departures.find((item) => item.reservationId === selectedDeparture.reservationId)
+    if (!authoritativeDeparture) {
+      const reservation = serverBoard?.reservations?.find((candidate) => (
+        candidate.id === selectedDeparture.reservationId
+        && candidate.status === 'CHECKED_IN'
+      ))
+      if (reservation) authoritativeDeparture = serverReservationToDeparture(reservation)
+    }
+    if (!authoritativeDeparture) {
+      setCheckOutDialogOpen(false)
+      setSelectedDeparture(null)
+      return
+    }
+    if (authoritativeDeparture.updatedAt !== selectedDeparture.updatedAt) {
+      setSelectedDeparture(authoritativeDeparture)
+    }
+  }, [departures, selectedDeparture, serverBoard, serverBoardState])
+
+  const openCheckIn = useCallback((arrival: ArrivalItem, mode: 'express' | 'guided') => {
+    if (!canCheckIn) {
+      toast.error('Check-in permission is required.')
+      return
+    }
+    if (!arrival.assignedRoomId && !canEditReservation) {
+      toast.error('Reservation edit permission is required to assign a room before check-in.')
+      return
+    }
     setSelectedArrival(arrival)
     setCheckInMode(mode)
     setCheckInDialogOpen(true)
-  }
+  }, [canCheckIn, canEditReservation])
 
-  const openCheckOut = (departure: DepartureItem, mode: 'express' | 'guided') => {
+  const openCheckOut = useCallback((departure: DepartureItem, mode: 'express' | 'guided') => {
+    if (!canCheckOut) {
+      toast.error('Check-out permission is required.')
+      return
+    }
     setSelectedDeparture(departure)
     setCheckOutMode(mode)
     setCheckOutDialogOpen(true)
-  }
+  }, [canCheckOut])
 
   const openNewReservation = useCallback((prefill?: ReservationPrefill | null) => {
+    if (!canCreateReservation) {
+      toast.error('Reservation creation permission is required.')
+      return
+    }
     setPrefilledReservation(prefill || { checkIn: new Date() })
     setNewReservationOpen(true)
-  }, [])
+  }, [canCreateReservation])
 
   useEffect(() => {
-    const runPendingAction = (detail: any) => {
-      if (!detail?.action) return
-      if (detail.action === 'CREATE_WALK_IN_DRAFT' || detail.action === 'CREATE_RESERVATION_DRAFT') {
-        const prefillRoom = detail.roomId ? displayedRooms.find((room) => room.roomId === detail.roomId) : undefined
-        openNewReservation({
-          roomId: prefillRoom?.roomId,
-          roomNumber: prefillRoom?.number,
-          roomType: detail.roomType || prefillRoom?.type,
-          checkIn: new Date(),
-        })
+    const query = readAuthoritativeWorkflowQuery()
+    if (!query || (SERVER_API_ENABLED && serverBoardState !== 'ready')) return
+
+    if (query.workflow === 'walk-in') {
+      clearAuthoritativeWorkflowQuery()
+      openNewReservation()
+      return
+    }
+    if (query.workflow === 'check-in' && query.reservationId) {
+      let arrival = arrivals.find((item) => item.reservationId === query.reservationId || item.id === query.reservationId)
+      if (!arrival && SERVER_API_ENABLED) {
+        const reservation = serverBoard?.reservations?.find((candidate) => (
+          candidate.id === query.reservationId
+          && ['PENDING', 'CONFIRMED', 'HOLD'].includes(candidate.status)
+        ))
+        if (reservation) arrival = serverReservationToArrival(reservation, displayedRooms)
+      }
+      clearAuthoritativeWorkflowQuery()
+      if (!arrival) {
+        toast.error('The requested reservation is not available for guided check-in.')
         return
       }
-      if (detail.action === 'OPEN_CHECK_IN' && detail.reservationId) {
-        const arrival = arrivals.find((item) => item.reservationId === detail.reservationId || item.id === detail.reservationId)
-        if (arrival) openCheckIn(arrival, 'guided')
+      openCheckIn(arrival, 'guided')
+      return
+    }
+    if (query.workflow === 'check-out' && query.reservationId) {
+      let departure = departures.find((item) => item.reservationId === query.reservationId || item.id === query.reservationId)
+      if (!departure && SERVER_API_ENABLED) {
+        const reservation = serverBoard?.reservations?.find((candidate) => (
+          candidate.id === query.reservationId
+          && candidate.status === 'CHECKED_IN'
+        ))
+        if (reservation) departure = serverReservationToDeparture(reservation)
+      }
+      clearAuthoritativeWorkflowQuery()
+      if (!departure) {
+        toast.error('The requested reservation is not available for guided check-out.')
         return
       }
-      if (detail.action === 'OPEN_CHECK_OUT' && detail.reservationId) {
-        const departure = departures.find((item) => item.reservationId === detail.reservationId || item.id === detail.reservationId)
-        if (departure) openCheckOut(departure, 'guided')
-      }
+      openCheckOut(departure, 'guided')
+      return
     }
-
-    const handleAssistantAction = (event: Event) => runPendingAction((event as CustomEvent).detail)
-    window.addEventListener('front-desk-ai-action', handleAssistantAction)
-
-    const rawPending = window.sessionStorage.getItem('front-desk-ai-pending-action')
-    if (rawPending) {
-      window.sessionStorage.removeItem('front-desk-ai-pending-action')
-      try {
-        window.setTimeout(() => runPendingAction(JSON.parse(rawPending)), 100)
-      } catch {}
-    }
-
-    return () => window.removeEventListener('front-desk-ai-action', handleAssistantAction)
-  }, [arrivals, departures, displayedRooms, openNewReservation])
+    clearAuthoritativeWorkflowQuery()
+    toast.error('This workflow request does not belong to Front Desk.')
+  }, [arrivals, departures, displayedRooms, openCheckIn, openCheckOut, openNewReservation, serverBoard, serverBoardState, workflowNavigationVersion])
 
   const markRoomReady = async (roomId: string) => {
+    if (!canEditRoomStatus) {
+      toast.error('Room-status edit permission is required.')
+      return
+    }
     if (SERVER_API_ENABLED) {
       try {
         await pmsApi(`/api/housekeeping/rooms/${roomId}/status`, authToken, {
@@ -580,6 +686,10 @@ export function FrontDeskView() {
 
   const confirmCheckIn = async (data: CheckInData) => {
     if (!selectedArrival) return
+    if (!canCheckIn) {
+      toast.error('Check-in permission is required.')
+      return
+    }
     const assignedRoom = displayedRooms.find((room) => room.roomId === data.roomId)
     if (!assignedRoom) {
       toast.error('Assign a valid room before check-in.')
@@ -587,15 +697,69 @@ export function FrontDeskView() {
     }
 
     if (SERVER_API_ENABLED) {
-      try {
-        if (selectedArrival.assignedRoomId !== data.roomId) {
-          await pmsApi(`/api/reservations/${selectedArrival.reservationId}/assign-room`, authToken, {
-            method: 'POST',
-            headers: { 'x-idempotency-key': createPmsIdempotencyKey('front-desk-check-in-assign-room') },
-            body: JSON.stringify({ roomId: data.roomId }),
-          })
+      let expectedUpdatedAt = selectedArrival.updatedAt
+      if (selectedArrival.assignedRoomId !== data.roomId) {
+        if (!canEditReservation) {
+          toast.error('Reservation edit permission is required to assign or move the room.')
+          return
         }
-        const requestBody = {
+        const assignmentSignature = JSON.stringify({
+          reservationId: selectedArrival.reservationId,
+          roomId: data.roomId,
+        })
+        if (pendingAssignmentAttempt.current?.signature !== assignmentSignature) {
+          const requestBody = {
+            roomId: data.roomId,
+            ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
+          }
+          pendingAssignmentAttempt.current = {
+            signature: assignmentSignature,
+            descriptor: {
+              operation: 'reservation-assign-room',
+              entityId: selectedArrival.reservationId,
+              material: requestBody,
+            },
+            expectedUpdatedAt,
+            requestBody,
+          }
+        }
+        const assignmentAttempt = pendingAssignmentAttempt.current
+        const assignmentKey = await durableAttemptKeys.getOrCreate(assignmentAttempt.descriptor)
+        try {
+          const assigned = await pmsApi<{ ok: true; data?: { updatedAt?: string } }>(
+            `/api/reservations/${selectedArrival.reservationId}/assign-room`,
+            authToken,
+            {
+              method: 'POST',
+              headers: {
+                'x-idempotency-key': assignmentKey,
+                ...(assignmentAttempt.expectedUpdatedAt
+                  ? { 'x-reservation-expected-updated-at': assignmentAttempt.expectedUpdatedAt }
+                  : {}),
+              },
+              body: JSON.stringify(assignmentAttempt.requestBody),
+            },
+          )
+          expectedUpdatedAt = assigned.data?.updatedAt
+            ? new Date(assigned.data.updatedAt).toISOString()
+            : expectedUpdatedAt
+          await durableAttemptKeys.confirmSuccess(assignmentAttempt.descriptor)
+          pendingAssignmentAttempt.current = null
+        } catch (error) {
+          const definitiveRejection = isDefinitivePmsApiError(error)
+          if (definitiveRejection) {
+            await durableAttemptKeys.confirmSuccess(assignmentAttempt.descriptor)
+            pendingAssignmentAttempt.current = null
+          }
+          await refreshServerBoard().catch(() => undefined)
+          toast.error(error instanceof Error ? error.message : 'Room assignment failed.')
+          if (!definitiveRejection) {
+            toast.message('Connection outcome is unknown. Retry the same assignment to reuse its protected request key.')
+          }
+          return
+        }
+      }
+      const commandBody = {
           guest: {
             nationality: data.nationality,
             idType: data.idNumber ? 'PASSPORT' : undefined,
@@ -616,25 +780,57 @@ export function FrontDeskView() {
           overrideReason: data.overrideReason,
           additionalNotes: data.additionalNotes,
         }
-        const paymentAttempt = data.payment ? {
-          operation: 'check-in-payment' as const,
-          entityId: selectedArrival.reservationId,
-          material: requestBody,
-        } : null
-        const idempotencyKey = paymentAttempt ? await durableAttemptKeys.getOrCreate(paymentAttempt) : null
+      const lifecycleSignature = JSON.stringify({
+        reservationId: selectedArrival.reservationId,
+        ...commandBody,
+      })
+      if (pendingCheckInAttempt.current?.signature !== lifecycleSignature) {
+        const requestBody = {
+          ...commandBody,
+          ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
+        }
+        pendingCheckInAttempt.current = {
+          signature: lifecycleSignature,
+          descriptor: {
+            operation: 'reservation-check-in',
+            entityId: selectedArrival.reservationId,
+            material: requestBody,
+          },
+          expectedUpdatedAt,
+          requestBody,
+        }
+      }
+      const lifecycleAttempt = pendingCheckInAttempt.current
+      const idempotencyKey = await durableAttemptKeys.getOrCreate(lifecycleAttempt.descriptor)
+      try {
         const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
           method: 'POST',
-          headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : undefined,
-          body: JSON.stringify(requestBody),
+          headers: {
+            'x-idempotency-key': idempotencyKey,
+            ...(lifecycleAttempt.expectedUpdatedAt
+              ? { 'x-reservation-expected-updated-at': lifecycleAttempt.expectedUpdatedAt }
+              : {}),
+          },
+          body: JSON.stringify(lifecycleAttempt.requestBody),
         })
-        await refreshServerBoard()
-        if (paymentAttempt) await durableAttemptKeys.confirmSuccess(paymentAttempt)
+        await durableAttemptKeys.confirmSuccess(lifecycleAttempt.descriptor)
+        pendingCheckInAttempt.current = null
+        await refreshServerBoard().catch(() => toast.warning('Check-in succeeded, but the live board could not be refreshed. Retry the board refresh.'))
         toast.success(payload.message || `Checked in: ${selectedArrival.guestName} -> Room ${assignedRoom.number}`)
         setCheckInDialogOpen(false)
         setSelectedArrival(null)
         return
       } catch (error) {
+        const definitiveRejection = isDefinitivePmsApiError(error)
+        if (definitiveRejection) {
+          await durableAttemptKeys.confirmSuccess(lifecycleAttempt.descriptor)
+          pendingCheckInAttempt.current = null
+        }
+        await refreshServerBoard().catch(() => undefined)
         toast.error(error instanceof Error ? error.message : 'Check-in failed.')
+        if (!definitiveRejection) {
+          toast.message('Connection outcome is unknown. Retry check-in to reuse its protected request key.')
+        }
         return
       }
     }
@@ -684,10 +880,13 @@ export function FrontDeskView() {
 
   const confirmCheckOut = async (data: CheckOutData) => {
     if (!selectedDeparture) return
+    if (!canCheckOut) {
+      toast.error('Check-out permission is required.')
+      return
+    }
 
     if (SERVER_API_ENABLED) {
-      try {
-        const requestBody = {
+      const commandBody = {
           payment: data.paymentAmount ? {
             amount: data.paymentAmount,
             method: data.paymentMethod,
@@ -698,25 +897,57 @@ export function FrontDeskView() {
           overrideReason: data.overrideReason,
           additionalNotes: data.additionalNotes,
         }
-        const paymentAttempt = data.paymentAmount ? {
-          operation: 'check-out-payment' as const,
-          entityId: selectedDeparture.reservationId,
-          material: requestBody,
-        } : null
-        const idempotencyKey = paymentAttempt ? await durableAttemptKeys.getOrCreate(paymentAttempt) : null
+      const lifecycleSignature = JSON.stringify({
+        reservationId: selectedDeparture.reservationId,
+        ...commandBody,
+      })
+      if (pendingCheckOutAttempt.current?.signature !== lifecycleSignature) {
+        const requestBody = {
+          ...commandBody,
+          ...(selectedDeparture.updatedAt ? { expectedUpdatedAt: selectedDeparture.updatedAt } : {}),
+        }
+        pendingCheckOutAttempt.current = {
+          signature: lifecycleSignature,
+          descriptor: {
+            operation: 'reservation-check-out',
+            entityId: selectedDeparture.reservationId,
+            material: requestBody,
+          },
+          expectedUpdatedAt: selectedDeparture.updatedAt,
+          requestBody,
+        }
+      }
+      const lifecycleAttempt = pendingCheckOutAttempt.current
+      const idempotencyKey = await durableAttemptKeys.getOrCreate(lifecycleAttempt.descriptor)
+      try {
         const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
           method: 'POST',
-          headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : undefined,
-          body: JSON.stringify(requestBody),
+          headers: {
+            'x-idempotency-key': idempotencyKey,
+            ...(lifecycleAttempt.expectedUpdatedAt
+              ? { 'x-reservation-expected-updated-at': lifecycleAttempt.expectedUpdatedAt }
+              : {}),
+          },
+          body: JSON.stringify(lifecycleAttempt.requestBody),
         })
-        await refreshServerBoard()
-        if (paymentAttempt) await durableAttemptKeys.confirmSuccess(paymentAttempt)
+        await durableAttemptKeys.confirmSuccess(lifecycleAttempt.descriptor)
+        pendingCheckOutAttempt.current = null
+        await refreshServerBoard().catch(() => toast.warning('Check-out succeeded, but the live board could not be refreshed. Retry the board refresh.'))
         toast.success(payload.message || `Checked out: ${selectedDeparture.guestName} -> Room ${selectedDeparture.roomNumber} marked for cleaning`)
         setCheckOutDialogOpen(false)
         setSelectedDeparture(null)
         return
       } catch (error) {
+        const definitiveRejection = isDefinitivePmsApiError(error)
+        if (definitiveRejection) {
+          await durableAttemptKeys.confirmSuccess(lifecycleAttempt.descriptor)
+          pendingCheckOutAttempt.current = null
+        }
+        await refreshServerBoard().catch(() => undefined)
         toast.error(error instanceof Error ? error.message : 'Check-out failed.')
+        if (!definitiveRejection) {
+          toast.message('Connection outcome is unknown. Retry check-out to reuse its protected request key.')
+        }
         return
       }
     }
@@ -766,6 +997,10 @@ export function FrontDeskView() {
   }
 
   const confirmNewReservation = async (reservation: NewReservationData) => {
+    if (!canCreateReservation) {
+      toast.error('Reservation creation permission is required.')
+      return
+    }
     if (SERVER_API_ENABLED) {
       try {
         const response = await pmsApi<{ ok: true; message?: string; data?: any }>('/api/reservations', authToken, {
@@ -860,7 +1095,12 @@ export function FrontDeskView() {
                 className="pl-9"
               />
             </div>
-            <Button onClick={() => openNewReservation()} disabled={!serverBoardAvailable} className="gap-1.5 bg-blue-600 hover:bg-blue-700">
+            <Button
+              onClick={() => openNewReservation()}
+              disabled={!serverBoardAvailable || !canCreateReservation}
+              title={!canCreateReservation ? 'Reservation creation permission is required.' : undefined}
+              className="gap-1.5 bg-blue-600 hover:bg-blue-700"
+            >
               <Plus size={16} weight="bold" />
               New Reservation
             </Button>
@@ -885,6 +1125,18 @@ export function FrontDeskView() {
             </Button>
           </div>
         )}
+        {(!canCreateReservation || !canCheckIn || !canCheckOut || !canEditRoomStatus) && (
+          <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700" role="status">
+            This board is permission-scoped. Unavailable actions:
+            {' '}
+            {[
+              !canCreateReservation && 'new reservation',
+              !canCheckIn && 'check-in',
+              !canCheckOut && 'check-out',
+              !canEditRoomStatus && 'room readiness updates',
+            ].filter(Boolean).join(', ')}.
+          </div>
+        )}
         <RoomReadinessStrip readiness={readiness} rooms={displayedRooms} />
 
         <div className="grid gap-4 xl:grid-cols-[1fr_0.95fr]">
@@ -895,6 +1147,8 @@ export function FrontDeskView() {
               rooms={displayedRooms}
               hotelDateKey={todayKey}
               role={user?.role}
+              canCheckIn={canCheckIn}
+              canAssignRoom={canEditReservation}
               onCheckIn={openCheckIn}
             />
           </section>
@@ -905,6 +1159,7 @@ export function FrontDeskView() {
               departures={filteredDepartures}
               hotelDateKey={todayKey}
               role={user?.role}
+              canCheckOut={canCheckOut}
               onCheckOut={openCheckOut}
             />
           </section>
@@ -912,7 +1167,11 @@ export function FrontDeskView() {
 
         <section className="space-y-2">
           <SectionHeader title="In-House" count={filteredInHouse.length} />
-          <InHouseList stays={filteredInHouse} onCheckOut={(item) => openCheckOut(inHouseToDeparture(item), item.balanceDue > 0 ? 'guided' : 'express')} />
+          <InHouseList
+            stays={filteredInHouse}
+            canCheckOut={canCheckOut}
+            onCheckOut={(item) => openCheckOut(inHouseToDeparture(item), item.balanceDue > 0 ? 'guided' : 'express')}
+          />
         </section>
       </main>
 
@@ -924,7 +1183,7 @@ export function FrontDeskView() {
         open={checkInDialogOpen}
         onOpenChange={setCheckInDialogOpen}
         onConfirm={confirmCheckIn}
-        onMarkRoomReady={markRoomReady}
+        onMarkRoomReady={canEditRoomStatus ? markRoomReady : undefined}
       />
 
       <CheckOutDialog
@@ -1013,7 +1272,7 @@ function ReadinessTile({ label, value, tone, detail }: { label: string; value: n
   )
 }
 
-function InHouseList({ stays, onCheckOut }: { stays: InHouseItem[]; onCheckOut: (item: InHouseItem) => void }) {
+function InHouseList({ stays, canCheckOut, onCheckOut }: { stays: InHouseItem[]; canCheckOut: boolean; onCheckOut: (item: InHouseItem) => void }) {
   if (stays.length === 0) {
     return (
       <div className="rounded-lg border bg-white p-6 text-center text-sm text-muted-foreground">
@@ -1051,11 +1310,13 @@ function InHouseList({ stays, onCheckOut }: { stays: InHouseItem[]; onCheckOut: 
             </div>
             <Button
               size="sm"
+              disabled={!canCheckOut}
+              title={!canCheckOut ? 'Check-out permission is required.' : undefined}
               onClick={() => onCheckOut(stay)}
               className={stay.balanceDue > 0 ? 'min-w-[136px] gap-1.5 bg-rose-600 hover:bg-rose-700' : 'min-w-[136px] gap-1.5 bg-emerald-600 hover:bg-emerald-700'}
             >
               <SignOut size={15} weight="bold" />
-              {stay.balanceDue > 0 ? 'Settle Balance' : 'Express Check-Out'}
+              {!canCheckOut ? 'Check-out restricted' : stay.balanceDue > 0 ? 'Settle Balance' : 'Express Check-Out'}
             </Button>
           </div>
         </div>

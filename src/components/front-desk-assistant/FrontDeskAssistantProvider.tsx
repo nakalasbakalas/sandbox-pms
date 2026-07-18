@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { toast } from 'sonner'
-import { Sparkle, ArrowClockwise, Warning, CheckCircle, Lock, PaperPlaneTilt, X, Database, Clock, ListMagnifyingGlass } from '@phosphor-icons/react'
+import { Sparkle, ArrowClockwise, Warning, CheckCircle, PaperPlaneTilt, Database, Clock, ListMagnifyingGlass } from '@phosphor-icons/react'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -12,10 +12,9 @@ import { useAuth } from '@/hooks/use-auth'
 import { useNavigation } from '@/hooks/use-navigation'
 import { useRoomSync } from '@/hooks/use-room-sync'
 import type { BoardRoomCard } from '@/types/board'
-import type { AuditRecord } from '@/lib/hotel/operations'
 import { getBangkokDateKey, nightsBetween } from '@/lib/hotel/business-rules'
-import { createPmsIdempotencyKey, mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
-import { createAIAssistedAuditRecord } from '@/lib/assistant/audit'
+import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { navigateToAuthoritativeWorkflow } from '@/lib/authoritative-workflow-navigation'
 import { parseFrontDeskIntent } from '@/lib/assistant/intents'
 import { FRONT_DESK_ASSISTANT_PROMPTS, FRONT_DESK_ASSISTANT_SHORTCUTS } from '@/lib/assistant/prompts'
 import {
@@ -107,10 +106,28 @@ function unassignedToAssistant(reservation: UnassignedReservation): AssistantRes
   }
 }
 
-function buildActionMessage(action: AssistantAction) {
-  if (action.risk === 'high') return 'This changes stay, room, or payment state. Confirm only after checking the live record.'
-  if (action.requiresConfirmation) return 'Please confirm before the assistant changes PMS data.'
-  return action.description || 'This opens the existing PMS workflow.'
+const HOUSEKEEPING_ACTIONS = new Set<AssistantAction['type']>([
+  'MARK_ROOM_DIRTY',
+  'MARK_ROOM_CLEANING',
+  'MARK_ROOM_CLEAN',
+  'MARK_ROOM_READY',
+  'FLAG_PRIORITY_TURNOVER',
+])
+
+const ACTION_WORKFLOW_LABELS: Partial<Record<AssistantAction['type'], string>> = {
+  ASSIGN_BEST_ROOM: 'Open assignment workflow',
+  ASSIGN_SPECIFIC_ROOM: 'Open assignment workflow',
+  COMPLETE_EXPRESS_CHECK_IN: 'Open check-in workflow',
+  COMPLETE_EXPRESS_CHECK_OUT: 'Open check-out workflow',
+  ADD_PAYMENT: 'Open cashier workflow',
+  ADD_CHARGE: 'Open cashier workflow',
+  ADD_NOTE: 'Open reservation workflow',
+  MARK_NO_SHOW: 'Open reservation workflow',
+  MARK_ROOM_DIRTY: 'Open Housekeeping',
+  MARK_ROOM_CLEANING: 'Open Housekeeping',
+  MARK_ROOM_CLEAN: 'Open Housekeeping',
+  MARK_ROOM_READY: 'Open Housekeeping',
+  FLAG_PRIORITY_TURNOVER: 'Open Housekeeping',
 }
 
 type PendingAssistantRequest = OpenAssistantOptions & {
@@ -165,7 +182,6 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
   const [messages, setMessages] = useState<AssistantMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pendingAction, setPendingAction] = useState<AssistantAction | null>(null)
   const [context, setContext] = useState<OpenAssistantOptions>({})
   const [serverBoard, setServerBoard] = useState<ServerBoard | null>(null)
   const [serverBoardState, setServerBoardState] = useState<'loading' | 'ready' | 'error'>(SERVER_API_ENABLED ? 'loading' : 'ready')
@@ -173,10 +189,9 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
   const authToken = null
   const [unassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [localReservations] = useKV<any[]>('reservations-data', [])
-  const [auditRecords, setAuditRecords] = useKV<AuditRecord[]>('audit-records', [])
-  const { user } = useAuth()
+  const { user, hasPermission } = useAuth()
   const { currentRoute, navigate } = useNavigation()
-  const { rooms, setRooms, updateRoomStatus } = useRoomSync({ serverSync: false })
+  const { rooms, setRooms } = useRoomSync({ serverSync: false })
 
   const refreshServerBoard = useCallback(async () => {
     if (!SERVER_API_ENABLED) return
@@ -221,12 +236,32 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
 
   const addAssistantAnswer = useCallback((prompt: string, answer: AssistantAnswer) => {
     const now = new Date().toISOString()
+    const safeAnswer = {
+      ...answer,
+      actions: answer.actions.map((action) => {
+        const denied = Boolean(action.permission && !hasPermission(action.permission))
+        const workflowLabel = ACTION_WORKFLOW_LABELS[action.type]
+        return {
+          ...action,
+          ...(workflowLabel ? {
+            label: workflowLabel,
+            description: 'Opens a staff-controlled, permission-checked PMS workflow. The assistant does not apply the change.',
+            requiresConfirmation: false,
+            risk: 'low' as const,
+          } : {}),
+          disabled: action.disabled || denied,
+          disabledReason: denied
+            ? `${action.permission} permission is required.`
+            : action.disabledReason,
+        }
+      }),
+    } satisfies AssistantAnswer
     setMessages((current) => [
       ...current,
       { id: `msg-user-${Date.now()}`, role: 'user', content: prompt, createdAt: now },
-      { id: `msg-ai-${Date.now()}`, role: 'assistant', content: answer.directAnswer, answer, createdAt: now },
+      { id: `msg-ai-${Date.now()}`, role: 'assistant', content: safeAnswer.directAnswer, answer: safeAnswer, createdAt: now },
     ])
-  }, [])
+  }, [hasPermission])
 
   const submitAssistantPrompt = useCallback((prompt: string, options?: OpenAssistantOptions) => {
     const trimmed = prompt.trim()
@@ -287,156 +322,48 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
     onRequestHandled(request.requestId)
   }, [onRequestHandled, request, serverBoardState, submitAssistantPrompt])
 
-  const addLocalAudit = useCallback((record: AuditRecord) => {
-    setAuditRecords((current) => [record, ...(current || auditRecords || [])].slice(0, 250))
-  }, [auditRecords, setAuditRecords])
-
-  const executeAction = useCallback(async (actionToRun: AssistantAction) => {
+  const executeAction = useCallback((actionToRun: AssistantAction) => {
     if (actionToRun.disabled) return
     const reservationId = String(actionToRun.payload?.reservationId || '')
-    const roomId = String(actionToRun.payload?.roomId || '')
+    const folioId = String(actionToRun.payload?.folioId || '')
+    let opened = false
 
-    const dispatchFrontDeskAction = () => {
-      const detail = {
-        action: actionToRun.type,
-        reservationId,
-        roomId,
-        roomType: actionToRun.payload?.roomType,
-      }
-      window.sessionStorage.setItem('front-desk-ai-pending-action', JSON.stringify(detail))
-      window.dispatchEvent(new CustomEvent('front-desk-ai-action', { detail }))
-    }
-
-    try {
-      if (actionToRun.type === 'OPEN_ROOM') {
-        navigate('front-desk')
-        toast.info(`Opened room board${actionToRun.payload?.roomNumber ? ` for Room ${actionToRun.payload.roomNumber}` : ''}.`)
-        return
-      }
-      if (actionToRun.type === 'OPEN_RESERVATION') {
-        navigate('reservations')
-        toast.info('Opened reservations.')
-        return
-      }
-      if (actionToRun.type === 'OPEN_PAYMENT') {
+    if (HOUSEKEEPING_ACTIONS.has(actionToRun.type)) {
+      navigate('housekeeping')
+      opened = true
+    } else if (actionToRun.type === 'OPEN_ROOM') {
+      navigate('board')
+      opened = true
+    } else if (actionToRun.type === 'CREATE_WALK_IN_DRAFT') {
+      opened = navigateToAuthoritativeWorkflow('front-desk', { workflow: 'walk-in' })
+    } else if (actionToRun.type === 'OPEN_CHECK_IN' || actionToRun.type === 'COMPLETE_EXPRESS_CHECK_IN') {
+      opened = navigateToAuthoritativeWorkflow('front-desk', { workflow: 'check-in', reservationId })
+    } else if (actionToRun.type === 'OPEN_CHECK_OUT' || actionToRun.type === 'COMPLETE_EXPRESS_CHECK_OUT') {
+      opened = navigateToAuthoritativeWorkflow('front-desk', { workflow: 'check-out', reservationId })
+    } else if (actionToRun.type === 'OPEN_PAYMENT' || actionToRun.type === 'ADD_PAYMENT' || actionToRun.type === 'ADD_CHARGE') {
+      opened = navigateToAuthoritativeWorkflow('cashier', { workflow: 'cashier', reservationId, folioId })
+      if (!opened) {
         navigate('cashier')
-        toast.info('Opened cashier/payment tools.')
-        return
+        opened = true
       }
-      if (actionToRun.type === 'OPEN_CHECK_IN' || actionToRun.type === 'OPEN_CHECK_OUT' || actionToRun.type === 'CREATE_WALK_IN_DRAFT') {
-        navigate('front-desk')
-        window.setTimeout(dispatchFrontDeskAction, 250)
-        toast.info('Opened front desk workflow.')
-        return
-      }
-
-      if (SERVER_API_ENABLED) {
-        if (actionToRun.type === 'ASSIGN_BEST_ROOM' || actionToRun.type === 'ASSIGN_SPECIFIC_ROOM') {
-          await pmsApi(`/api/reservations/${reservationId}/assign-room`, authToken, {
-            method: 'POST',
-            headers: { 'x-idempotency-key': createPmsIdempotencyKey('front-desk-assistant-assign-room') },
-            body: JSON.stringify({ roomId }),
-          })
-        } else if (actionToRun.type === 'COMPLETE_EXPRESS_CHECK_IN') {
-          await pmsApi(`/api/reservations/${reservationId}/check-in`, authToken, {
-            method: 'POST',
-            body: JSON.stringify({ additionalNotes: 'AI suggested express check-in; user confirmed.' }),
-          })
-        } else if (actionToRun.type === 'COMPLETE_EXPRESS_CHECK_OUT') {
-          await pmsApi(`/api/reservations/${reservationId}/check-out`, authToken, {
-            method: 'POST',
-            body: JSON.stringify({ additionalNotes: 'AI suggested express checkout; user confirmed.' }),
-          })
-        } else if (['MARK_ROOM_DIRTY', 'MARK_ROOM_CLEANING', 'MARK_ROOM_CLEAN', 'MARK_ROOM_READY'].includes(actionToRun.type)) {
-          const statusByAction: Record<string, string> = {
-            MARK_ROOM_DIRTY: 'DIRTY',
-            MARK_ROOM_CLEANING: 'CLEANING',
-            MARK_ROOM_CLEAN: 'CLEAN',
-            MARK_ROOM_READY: 'INSPECTED',
-          }
-          await pmsApi(`/api/housekeeping/rooms/${roomId}/status`, authToken, {
-            method: 'POST',
-            body: JSON.stringify({ status: statusByAction[actionToRun.type], notes: 'AI suggested housekeeping update; user confirmed.' }),
-          })
-        }
-        await refreshServerBoard()
-        toast.success(`${actionToRun.label} complete.`)
-        return
-      }
-
-      const reservation = snapshot.reservations.find((candidate) => candidate.id === reservationId)
-      const room = snapshot.rooms.find((candidate) => candidate.roomId === roomId)
-      if (actionToRun.type === 'ASSIGN_BEST_ROOM' || actionToRun.type === 'ASSIGN_SPECIFIC_ROOM') {
-        if (!reservation || !room) throw new Error('Reservation or room was not found.')
-        setRooms((current) => current.map((candidate) => candidate.roomId === room.roomId
-          ? {
-              ...candidate,
-              reservationId: reservation.id,
-              currentReservationId: reservation.id,
-              guestName: reservation.guestName,
-              checkIn: new Date(reservation.checkIn),
-              checkOut: new Date(reservation.checkOut),
-              guestCount: reservation.adults + reservation.children,
-              balanceDue: reservation.balanceDue,
-              depositStatus: reservation.balanceDue > 0 ? 'PENDING' : 'PAID',
-              lastUpdatedAt: new Date().toISOString(),
-              lastUpdatedBy: user?.displayName || 'Front desk',
-            }
-          : candidate))
-        addLocalAudit(createAIAssistedAuditRecord('reservation', reservation.id, 'ASSIGN_ROOM', `${reservation.guestName} assigned to Room ${room.number}.`, user?.displayName || 'Front desk AI', { roomId: room.roomId, aiSuggested: true, userConfirmed: true }))
-      } else if (actionToRun.type === 'COMPLETE_EXPRESS_CHECK_IN') {
-        if (!reservation?.assignedRoomId) throw new Error('Reservation has no assigned room.')
-        setRooms((current) => current.map((candidate) => candidate.roomId === reservation.assignedRoomId
-          ? {
-              ...candidate,
-              status: candidate.cleanStatus === 'DIRTY' ? 'OCCUPIED_DIRTY' : 'OCCUPIED_CLEAN',
-              reservationId: reservation.id,
-              currentReservationId: reservation.id,
-              guestName: reservation.guestName,
-              lastUpdatedAt: new Date().toISOString(),
-              lastUpdatedBy: user?.displayName || 'Front desk',
-            }
-          : candidate))
-        addLocalAudit(createAIAssistedAuditRecord('reservation', reservation.id, 'CHECKED_IN', `${reservation.guestName} checked in.`, user?.displayName || 'Front desk AI', { aiSuggested: true, userConfirmed: true }))
-      } else if (actionToRun.type === 'COMPLETE_EXPRESS_CHECK_OUT') {
-        if (!reservation?.assignedRoomId) throw new Error('Reservation has no assigned room.')
-        setRooms((current) => current.map((candidate) => candidate.roomId === reservation.assignedRoomId
-          ? {
-              ...candidate,
-              status: 'VACANT_DIRTY',
-              cleanStatus: 'DIRTY',
-              housekeepingStatus: 'DIRTY',
-              reservationId: undefined,
-              currentReservationId: undefined,
-              guestName: undefined,
-              balanceDue: undefined,
-              depositStatus: 'NONE',
-              lastUpdatedAt: new Date().toISOString(),
-              lastUpdatedBy: user?.displayName || 'Front desk',
-            }
-          : candidate))
-        addLocalAudit(createAIAssistedAuditRecord('reservation', reservation.id, 'CHECKED_OUT', `${reservation.guestName} checked out; room sent to housekeeping.`, user?.displayName || 'Front desk AI', { aiSuggested: true, userConfirmed: true }))
-      } else if (['MARK_ROOM_DIRTY', 'MARK_ROOM_CLEANING', 'MARK_ROOM_CLEAN', 'MARK_ROOM_READY'].includes(actionToRun.type)) {
-        const statusByAction: Record<string, 'DIRTY' | 'CLEANING' | 'CLEAN' | 'INSPECTED'> = {
-          MARK_ROOM_DIRTY: 'DIRTY',
-          MARK_ROOM_CLEANING: 'CLEANING',
-          MARK_ROOM_CLEAN: 'CLEAN',
-          MARK_ROOM_READY: 'INSPECTED',
-        }
-        updateRoomStatus({ roomId, cleanStatus: statusByAction[actionToRun.type], cleanedBy: user?.displayName || 'Front desk AI' })
-        addLocalAudit(createAIAssistedAuditRecord('housekeeping', roomId, actionToRun.type, `${actionToRun.label}.`, user?.displayName || 'Front desk AI', { aiSuggested: true, userConfirmed: true }))
-      }
-      toast.success(`${actionToRun.label} complete.`)
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : 'Assistant action failed.')
-      throw caught
+    } else if (reservationId) {
+      opened = navigateToAuthoritativeWorkflow('board', { workflow: 'assignment', reservationId })
+    } else if (actionToRun.type === 'OPEN_RESERVATION') {
+      navigate('board')
+      opened = true
     }
-  }, [addLocalAudit, authToken, navigate, refreshServerBoard, setRooms, snapshot.reservations, snapshot.rooms, updateRoomStatus, user?.displayName])
+
+    if (opened) {
+      onOpenChange(false)
+      toast.info('Sent the request to the authoritative staff workflow. No change was applied by Front Desk AI.')
+    } else {
+      toast.error('The assistant could not open that workflow because its record identifier was missing or invalid.')
+    }
+  }, [navigate, onOpenChange])
 
   const resetConversation = () => {
     setMessages([])
     setError(null)
-    setPendingAction(null)
   }
 
   return (
@@ -519,7 +446,7 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
 
               {messages.map((message) => (
                 <div key={message.id} className={message.role === 'user' ? 'ml-8 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white' : 'mr-3'}>
-                  {message.role === 'user' ? message.content : <AnswerCard answer={message.answer} onAction={(actionToRun) => actionToRun.requiresConfirmation ? setPendingAction(actionToRun) : void executeAction(actionToRun)} />}
+                  {message.role === 'user' ? message.content : <AnswerCard answer={message.answer} onAction={executeAction} />}
                 </div>
               ))}
 
@@ -559,45 +486,6 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
         </SheetContent>
       </Sheet>
 
-      {pendingAction && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4">
-          <div className="w-full max-w-md rounded-lg border bg-background shadow-lg">
-            <div className="flex items-start gap-3 border-b p-4">
-              <div className="rounded-md bg-amber-100 p-2 text-amber-700">
-                <Warning size={18} weight="fill" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-semibold">Confirm Assistant Action</div>
-                <p className="mt-1 text-sm text-muted-foreground">{buildActionMessage(pendingAction)}</p>
-              </div>
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setPendingAction(null)}>
-                <X size={14} />
-              </Button>
-            </div>
-            <div className="p-4">
-              <div className="rounded-md border bg-muted/40 p-3 text-sm font-medium">{pendingAction.label}</div>
-              {pendingAction.permission && (
-                <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Lock size={13} />
-                  Requires {pendingAction.permission}
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 border-t p-3">
-              <Button variant="outline" onClick={() => setPendingAction(null)}>Cancel</Button>
-              <Button
-                onClick={() => {
-                  const actionToRun = pendingAction
-                  setPendingAction(null)
-                  void executeAction(actionToRun)
-                }}
-              >
-                Confirm
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }

@@ -29,6 +29,13 @@ export class PmsApiError extends Error {
   }
 }
 
+export function isDefinitivePmsApiError(error: unknown): error is PmsApiError {
+  return error instanceof PmsApiError
+    && error.status >= 400
+    && error.status < 500
+    && ![408, 425, 429].includes(error.status)
+}
+
 export async function pmsApi<T>(path: string, _legacyToken: string | null | undefined, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,

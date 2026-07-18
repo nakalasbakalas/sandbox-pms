@@ -75,9 +75,14 @@ Autonomy shadow records are evidence, not execution authority. GPT or a future a
 
 ## Booking Board Command And PII Boundary
 
+- Login and `/api/auth/me` resolve and return the active property-membership role. The legacy global user role is compatibility data only and cannot widen the signed session or request actor. Every authenticated request resolves membership again, so deactivation or role reduction applies to an existing session without requiring a new login.
+- Room assignment, check-in, and check-out execute inside serializable transactions with property-scoped reservation, room/date-inventory, and idempotency locks. Visible server clients send the selected reservation update token in both the request header and body; conflicting tokens, stale state, changed intent, and superseded replay fail with `409`.
+- An ambiguous network or `5xx` outcome retains the exact in-memory command snapshot: idempotency key, request body, and stale-write token. Only a definitive non-retryable client rejection or confirmed success retires it. No command material or key is placed in browser storage.
 - Cancel/no-show and reservation-scoped guest updates execute only through typed PMS services with property scope, permission checks, serializable reservation locks, stale-write tokens, idempotent intent fingerprints, audit/history/domain evidence, and truthful `409` conflicts. Cancellation/no-show always requires a reason.
 - `GET /api/front-desk/board` is an allowlisted operational DTO, not a raw Prisma relation graph. Guest contact/profile fields require `view:guests`; channel references and reservation notes require `view:reservations`; folio and exact-money fields require a cashier/charge/payment permission. `view:board` alone does not grant those fields.
 - Guest-change audit and domain evidence records only the guest identifier and changed field names, never the submitted email, phone, identity number, notes, or other profile values.
+- Board-to-Front-Desk/Cashier handoffs use allowlisted workflow names and sanitized reservation/folio identifiers in the URL, clear the query after consumption, and never carry guest data, money, credentials, or mutation payloads. Front Desk AI may read, suggest, and navigate only; it cannot call a mutating route or claim that navigation itself changed PMS state.
+- Operational reservations are never deleted from the Board. Posted financial corrections remain append-only reversals/refunds with original-transaction linkage.
 
 ## Approval Controls
 

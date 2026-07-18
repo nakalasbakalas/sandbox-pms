@@ -958,6 +958,8 @@ try {
   )
 
   const checkedIn = await checkInReservation(prisma, reservation.id, admin, {
+    idempotencyKey: `check-in-lifecycle-${reservation.id}`,
+    expectedUpdatedAt: moved.updatedAt.toISOString(),
     allowDateOverride: true,
     overrideReason: 'Disposable database workflow test uses future stay dates.',
     guest: {
@@ -974,7 +976,10 @@ try {
   assert.equal(checkedIn.status, 'CHECKED_IN', 'check-in persists')
   assert.equal(checkedIn.folio.balance, 0, 'check-in payment settles folio')
 
-  const checkedOut = await checkOutReservation(prisma, reservation.id, frontDesk)
+  const checkedOut = await checkOutReservation(prisma, reservation.id, frontDesk, {
+    idempotencyKey: `check-out-lifecycle-${reservation.id}`,
+    expectedUpdatedAt: checkedIn.updatedAt.toISOString(),
+  })
   assert.equal(checkedOut.status, 'CHECKED_OUT', 'check-out persists')
 
   const opsRunId = Date.now()

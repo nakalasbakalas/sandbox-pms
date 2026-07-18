@@ -11,6 +11,8 @@ import {
   createReservation,
   assignRoom,
   cancelReservation,
+  checkInReservation,
+  checkOutReservation,
   getBookingEmailEvent,
   listGuests,
   updateReservationGuest,
@@ -216,10 +218,14 @@ try {
       },
     },
   })
+  await prisma.userPropertyMembership.create({
+    data: { userId: managerUser.id, propertyId: fixtureB.property.id, role: 'MANAGER', active: true },
+  })
 
   const contextA = await resolveRequestContext(prisma, user, { requestId: `request-${runId}`, headers: {} }, { propertyCode: codeA })
   const contextB = await resolveRequestContext(prisma, user, { requestId: `request-${runId}-b`, headers: {} }, { propertyCode: codeB })
   const managerContextA = await resolveRequestContext(prisma, managerUser, { requestId: `request-${runId}-manager`, headers: {} }, { propertyCode: codeA })
+  const managerContextB = await resolveRequestContext(prisma, managerUser, { requestId: `request-${runId}-manager-b`, headers: {} }, { propertyCode: codeB })
   assert.equal(contextA.role, 'FRONT_DESK', 'membership role overrides the global ADMIN compatibility role')
   assert.throws(() => requirePermission(contextA.actor, 'manage:users'), /permission/, 'effective membership role prevents global-role privilege escalation')
   assert.equal(contextB.role, 'HOUSEKEEPING')
@@ -371,19 +377,20 @@ try {
   const boardAuditBefore = await prisma.auditLog.count({ where: { entityId: boardMutationReservation.reservation.id } })
   const boardHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: boardMutationReservation.reservation.id } })
   const boardEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: boardMutationReservation.reservation.id } })
+  const boardAssignmentExpectedUpdatedAt = boardMutationReservation.reservation.updatedAt.toISOString()
   const assignedBoardReservation = await assignRoom(
     prisma,
     boardMutationReservation.reservation.id,
     fixtureA.room.id,
     actorA,
-    { idempotencyKey: boardAssignmentKey },
+    { idempotencyKey: boardAssignmentKey, expectedUpdatedAt: boardAssignmentExpectedUpdatedAt },
   )
   const replayedBoardAssignment = await assignRoom(
     prisma,
     boardMutationReservation.reservation.id,
     fixtureA.room.id,
     actorA,
-    { idempotencyKey: boardAssignmentKey },
+    { idempotencyKey: boardAssignmentKey, expectedUpdatedAt: boardAssignmentExpectedUpdatedAt },
   )
   assert.equal(replayedBoardAssignment.id, assignedBoardReservation.id, 'same room-assignment intent returns the current authoritative reservation')
   const storedBoardAssignmentAttempt = await prisma.reservationMutationAttempt.findUnique({
@@ -393,10 +400,76 @@ try {
   assert.equal(await prisma.auditLog.count({ where: { entityId: boardMutationReservation.reservation.id } }), boardAuditBefore + 1, 'room-assignment replay does not duplicate audit evidence')
   assert.equal(await prisma.reservationLog.count({ where: { reservationId: boardMutationReservation.reservation.id } }), boardHistoryBefore + 1, 'room-assignment replay does not duplicate reservation history')
   assert.equal(await prisma.domainEvent.count({ where: { aggregateId: boardMutationReservation.reservation.id } }), boardEventsBefore + 1, 'room-assignment replay does not duplicate domain events')
+  const sameRoomAssignment = await assignRoom(
+    prisma,
+    boardMutationReservation.reservation.id,
+    fixtureA.room.id,
+    actorA,
+    {
+      idempotencyKey: `board-assign-same-room-${runId}`,
+      expectedUpdatedAt: assignedBoardReservation.updatedAt.toISOString(),
+    },
+  )
+  assert.equal(sameRoomAssignment.assignedRoomId, fixtureA.room.id, 'same-room assignment returns the authoritative reservation')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: boardMutationReservation.reservation.id } }), boardAuditBefore + 1, 'same-room assignment does not create duplicate audit evidence')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: boardMutationReservation.reservation.id } }), boardHistoryBefore + 1, 'same-room assignment does not create duplicate reservation history')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: boardMutationReservation.reservation.id } }), boardEventsBefore + 1, 'same-room assignment does not create duplicate domain events')
   await assert.rejects(
-    assignRoom(prisma, boardMutationReservation.reservation.id, `missing-room-${runId}`, actorA, { idempotencyKey: boardAssignmentKey }),
+    assignRoom(prisma, boardMutationReservation.reservation.id, `missing-room-${runId}`, actorA, {
+      idempotencyKey: boardAssignmentKey,
+      expectedUpdatedAt: boardAssignmentExpectedUpdatedAt,
+    }),
     (error) => error?.statusCode === 409 && /different command/.test(error.message),
     'room-assignment idempotency keys cannot be reused for a different target',
+  )
+
+  const staleAssignmentReservation = await createReservationFixture(fixtureA, 'BOARD-ASSIGN-STALE')
+  const staleAssignmentRoom = await prisma.room.create({
+    data: {
+      propertyId: fixtureA.property.id,
+      roomTypeId: fixtureA.roomType.id,
+      number: `G-A-ASSIGN-STALE-${runId}`,
+      floor: 2,
+      operationalStatus: 'AVAILABLE',
+      currentStatus: 'VACANT_CLEAN',
+    },
+  })
+  const staleAssignmentExpectedUpdatedAt = staleAssignmentReservation.reservation.updatedAt.toISOString()
+  const supersedingAssignmentReservation = await prisma.reservation.update({
+    where: { id: staleAssignmentReservation.reservation.id },
+    data: {
+      notes: `Superseding room-assignment edit ${runId}`,
+      updatedAt: new Date(staleAssignmentReservation.reservation.updatedAt.getTime() + 1_000),
+    },
+  })
+  const staleAssignmentKey = `board-assign-stale-${runId}`
+  const staleAssignmentAuditBefore = await prisma.auditLog.count({ where: { entityId: staleAssignmentReservation.reservation.id } })
+  const staleAssignmentHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: staleAssignmentReservation.reservation.id } })
+  const staleAssignmentEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: staleAssignmentReservation.reservation.id } })
+  await assert.rejects(
+    assignRoom(
+      prisma,
+      staleAssignmentReservation.reservation.id,
+      staleAssignmentRoom.id,
+      actorA,
+      {
+        idempotencyKey: staleAssignmentKey,
+        expectedUpdatedAt: staleAssignmentExpectedUpdatedAt,
+      },
+    ),
+    (error) => error?.statusCode === 409 && /changed after the booking board loaded it/.test(error.message),
+    'stale room assignment is rejected before changing reservation inventory or evidence',
+  )
+  const staleAssignmentAfter = await prisma.reservation.findUnique({ where: { id: staleAssignmentReservation.reservation.id } })
+  assert.equal(staleAssignmentAfter.assignedRoomId, null, 'stale room assignment preserves the authoritative unassigned state')
+  assert.equal(staleAssignmentAfter.updatedAt.toISOString(), supersedingAssignmentReservation.updatedAt.toISOString(), 'stale room assignment preserves the later reservation version')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: staleAssignmentReservation.reservation.id } }), staleAssignmentAuditBefore, 'stale room assignment creates no audit evidence')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: staleAssignmentReservation.reservation.id } }), staleAssignmentHistoryBefore, 'stale room assignment creates no reservation history')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: staleAssignmentReservation.reservation.id } }), staleAssignmentEventsBefore, 'stale room assignment creates no domain event')
+  assert.equal(
+    await prisma.reservationMutationAttempt.count({ where: { propertyId: fixtureA.property.id, idempotencyKey: staleAssignmentKey } }),
+    0,
+    'failed stale room assignment rolls back its idempotency claim',
   )
 
   const boardResizeKey = `board-resize-replay-${runId}`
@@ -432,7 +505,7 @@ try {
       boardMutationReservation.reservation.id,
       fixtureA.room.id,
       actorA,
-      { idempotencyKey: boardAssignmentKey },
+      { idempotencyKey: boardAssignmentKey, expectedUpdatedAt: boardAssignmentExpectedUpdatedAt },
     ),
     (error) => error?.statusCode === 409 && /superseded by a later change/.test(error.message),
     'a replay after a later reservation mutation never returns the later state as the original assignment result',
@@ -608,6 +681,315 @@ try {
     (error) => error?.statusCode === 404,
     'forged reservation guest updates are property scoped',
   )
+
+  // Lifecycle commands are intentionally tested against PostgreSQL rather than mocks: they
+  // exercise the serializable transaction, transaction-scoped advisory locks, and the durable
+  // reservation-mutation idempotency record used by the front-desk handoff.
+  const lifecycleActorA = actorFrom(managerContextA)
+  const lifecycleReservation = await createReservationFixture(fixtureA, 'LIFECYCLE')
+  const assignedLifecycleReservation = await assignRoom(
+    prisma,
+    lifecycleReservation.reservation.id,
+    fixtureA.room.id,
+    lifecycleActorA,
+    { idempotencyKey: `lifecycle-assign-${runId}` },
+  )
+  const lifecycleCheckInInput = {
+    idempotencyKey: `lifecycle-check-in-${runId}`,
+    expectedUpdatedAt: assignedLifecycleReservation.updatedAt.toISOString(),
+    allowDateOverride: true,
+    overrideReason: 'Release-gate future-date fixture.',
+    recordIdentityLater: true,
+    recordIdentityLaterReason: 'Release-gate identity fixture.',
+    allowPayLater: true,
+    payLaterReason: 'Release-gate balance fixture.',
+  }
+  await assert.rejects(
+    checkInReservation(prisma, reservationB.reservation.id, lifecycleActorA, {
+      ...lifecycleCheckInInput,
+      idempotencyKey: `lifecycle-forged-property-${runId}`,
+    }),
+    (error) => error?.statusCode === 404,
+    'forged lifecycle reservation identifiers are rejected for the active property',
+  )
+  await assert.rejects(
+    checkInReservation(prisma, lifecycleReservation.reservation.id, lifecycleActorA, {
+      ...lifecycleCheckInInput,
+      idempotencyKey: undefined,
+    }),
+    (error) => error?.statusCode === 400 && /idempotency key is required/.test(error.message),
+    'check-in requires a lifecycle idempotency key',
+  )
+  const lifecycleCheckInAuditBefore = await prisma.auditLog.count({ where: { entityId: lifecycleReservation.reservation.id } })
+  const lifecycleCheckInHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: lifecycleReservation.reservation.id } })
+  const lifecycleCheckInRoomHistoryBefore = await prisma.roomStatusLog.count({ where: { roomId: fixtureA.room.id } })
+  const lifecycleCheckInEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: lifecycleReservation.reservation.id } })
+  const checkedInLifecycleReservation = await checkInReservation(
+    prisma,
+    lifecycleReservation.reservation.id,
+    lifecycleActorA,
+    lifecycleCheckInInput,
+  )
+  const replayedLifecycleCheckIn = await checkInReservation(
+    prisma,
+    lifecycleReservation.reservation.id,
+    lifecycleActorA,
+    lifecycleCheckInInput,
+  )
+  assert.equal(replayedLifecycleCheckIn.id, checkedInLifecycleReservation.id, 'same check-in lifecycle command replays the authoritative reservation')
+  assert.equal(replayedLifecycleCheckIn.status, 'CHECKED_IN')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: lifecycleReservation.reservation.id } }), lifecycleCheckInAuditBefore + 1, 'check-in replay does not duplicate audit evidence')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: lifecycleReservation.reservation.id } }), lifecycleCheckInHistoryBefore + 1, 'check-in replay does not duplicate reservation history')
+  assert.equal(await prisma.roomStatusLog.count({ where: { roomId: fixtureA.room.id } }), lifecycleCheckInRoomHistoryBefore + 1, 'check-in replay does not duplicate room history')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: lifecycleReservation.reservation.id } }), lifecycleCheckInEventsBefore + 1, 'check-in replay does not duplicate domain events')
+  assert.equal(
+    await prisma.reservationMutationAttempt.count({
+      where: { propertyId: fixtureA.property.id, idempotencyKey: lifecycleCheckInInput.idempotencyKey, operation: 'CHECK_IN_RESERVATION' },
+    }),
+    1,
+    'check-in retry retains one property-scoped lifecycle attempt',
+  )
+  const lifecycleKeyCollisionReservation = await createReservationFixture(fixtureA, 'LIFECYCLE-KEY-COLLISION')
+  await assert.rejects(
+    checkInReservation(
+      prisma,
+      lifecycleKeyCollisionReservation.reservation.id,
+      lifecycleActorA,
+      {
+        ...lifecycleCheckInInput,
+        expectedUpdatedAt: lifecycleKeyCollisionReservation.reservation.updatedAt.toISOString(),
+      },
+    ),
+    (error) => error?.statusCode === 409 && /different command/.test(error.message),
+    'a lifecycle idempotency key cannot authorize a different reservation within the same property',
+  )
+  assert.equal(
+    await prisma.reservationMutationAttempt.count({
+      where: { propertyId: fixtureA.property.id, idempotencyKey: lifecycleCheckInInput.idempotencyKey },
+    }),
+    1,
+    'same-property lifecycle key collision leaves the original attempt authoritative',
+  )
+
+  const lifecycleActorB = actorFrom(managerContextB)
+  const crossPropertyLifecycleReservation = await createReservationFixture(fixtureB, 'LIFECYCLE-CROSS-PROPERTY')
+  const crossPropertyLifecycleRoom = await prisma.room.create({
+    data: {
+      propertyId: fixtureB.property.id,
+      roomTypeId: fixtureB.roomType.id,
+      number: `G-B-LIFECYCLE-${runId}`,
+      floor: 3,
+      operationalStatus: 'AVAILABLE',
+      currentStatus: 'VACANT_CLEAN',
+    },
+  })
+  const assignedCrossPropertyLifecycleReservation = await assignRoom(
+    prisma,
+    crossPropertyLifecycleReservation.reservation.id,
+    crossPropertyLifecycleRoom.id,
+    lifecycleActorB,
+    {
+      idempotencyKey: `lifecycle-cross-property-assign-${runId}`,
+      expectedUpdatedAt: crossPropertyLifecycleReservation.reservation.updatedAt.toISOString(),
+    },
+  )
+  const checkedInCrossPropertyLifecycleReservation = await checkInReservation(
+    prisma,
+    crossPropertyLifecycleReservation.reservation.id,
+    lifecycleActorB,
+    {
+      ...lifecycleCheckInInput,
+      expectedUpdatedAt: assignedCrossPropertyLifecycleReservation.updatedAt.toISOString(),
+    },
+  )
+  assert.equal(checkedInCrossPropertyLifecycleReservation.status, 'CHECKED_IN')
+  assert.equal(
+    await prisma.reservationMutationAttempt.count({
+      where: { idempotencyKey: lifecycleCheckInInput.idempotencyKey, operation: 'CHECK_IN_RESERVATION' },
+    }),
+    2,
+    'the same lifecycle retry key is independently scoped once per property',
+  )
+  const checkedOutCrossPropertyLifecycleReservation = await checkOutReservation(
+    prisma,
+    crossPropertyLifecycleReservation.reservation.id,
+    lifecycleActorB,
+    {
+      idempotencyKey: `lifecycle-cross-property-check-out-${runId}`,
+      expectedUpdatedAt: checkedInCrossPropertyLifecycleReservation.updatedAt.toISOString(),
+      allowUnpaidOverride: true,
+      overrideReason: 'Release-gate cross-property cleanup.',
+    },
+  )
+  assert.equal(checkedOutCrossPropertyLifecycleReservation.status, 'CHECKED_OUT')
+  await prisma.reservation.update({
+    where: { id: crossPropertyLifecycleReservation.reservation.id },
+    data: { assignedRoomId: null },
+  })
+  await prisma.room.delete({ where: { id: crossPropertyLifecycleRoom.id } })
+
+  await assert.rejects(
+    checkOutReservation(prisma, lifecycleReservation.reservation.id, lifecycleActorA, {
+      expectedUpdatedAt: checkedInLifecycleReservation.updatedAt.toISOString(),
+      allowUnpaidOverride: true,
+      overrideReason: 'Release-gate missing-key fixture.',
+    }),
+    (error) => error?.statusCode === 400 && /idempotency key is required/.test(error.message),
+    'check-out requires a lifecycle idempotency key',
+  )
+
+  const lifecycleCheckOutInput = {
+    idempotencyKey: `lifecycle-check-out-${runId}`,
+    expectedUpdatedAt: checkedInLifecycleReservation.updatedAt.toISOString(),
+    allowUnpaidOverride: true,
+    overrideReason: 'Release-gate unpaid checkout fixture.',
+  }
+  const lifecycleCheckOutAuditBefore = await prisma.auditLog.count({ where: { entityId: lifecycleReservation.reservation.id } })
+  const lifecycleCheckOutHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: lifecycleReservation.reservation.id } })
+  const lifecycleCheckOutRoomHistoryBefore = await prisma.roomStatusLog.count({ where: { roomId: fixtureA.room.id } })
+  const lifecycleCheckOutEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: lifecycleReservation.reservation.id } })
+  const checkedOutLifecycleReservation = await checkOutReservation(
+    prisma,
+    lifecycleReservation.reservation.id,
+    lifecycleActorA,
+    lifecycleCheckOutInput,
+  )
+  const replayedLifecycleCheckOut = await checkOutReservation(
+    prisma,
+    lifecycleReservation.reservation.id,
+    lifecycleActorA,
+    lifecycleCheckOutInput,
+  )
+  assert.equal(replayedLifecycleCheckOut.id, checkedOutLifecycleReservation.id, 'same check-out lifecycle command replays the authoritative reservation')
+  assert.equal(replayedLifecycleCheckOut.status, 'CHECKED_OUT')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: lifecycleReservation.reservation.id } }), lifecycleCheckOutAuditBefore + 1, 'check-out replay does not duplicate audit evidence')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: lifecycleReservation.reservation.id } }), lifecycleCheckOutHistoryBefore + 1, 'check-out replay does not duplicate reservation history')
+  assert.equal(await prisma.roomStatusLog.count({ where: { roomId: fixtureA.room.id } }), lifecycleCheckOutRoomHistoryBefore + 1, 'check-out replay does not duplicate housekeeping handoff history')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: lifecycleReservation.reservation.id } }), lifecycleCheckOutEventsBefore + 1, 'check-out replay does not duplicate domain events')
+  const supersededLifecycleAuditCount = await prisma.auditLog.count({ where: { entityId: lifecycleReservation.reservation.id } })
+  const supersededLifecycleHistoryCount = await prisma.reservationLog.count({ where: { reservationId: lifecycleReservation.reservation.id } })
+  const supersededLifecycleEventCount = await prisma.domainEvent.count({ where: { aggregateId: lifecycleReservation.reservation.id } })
+  await assert.rejects(
+    checkInReservation(
+      prisma,
+      lifecycleReservation.reservation.id,
+      lifecycleActorA,
+      lifecycleCheckInInput,
+    ),
+    (error) => error?.statusCode === 409 && /superseded by a later change/.test(error.message),
+    'a check-in replay after later check-out never returns the later state as the original result',
+  )
+  assert.equal(await prisma.auditLog.count({ where: { entityId: lifecycleReservation.reservation.id } }), supersededLifecycleAuditCount, 'superseded lifecycle replay creates no audit evidence')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: lifecycleReservation.reservation.id } }), supersededLifecycleHistoryCount, 'superseded lifecycle replay creates no history')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: lifecycleReservation.reservation.id } }), supersededLifecycleEventCount, 'superseded lifecycle replay creates no event')
+
+  const staleLifecycleReservation = await createReservationFixture(fixtureA, 'LIFECYCLE-STALE')
+  const staleLifecycleRoom = await prisma.room.create({
+    data: {
+      propertyId: fixtureA.property.id,
+      roomTypeId: fixtureA.roomType.id,
+      number: `G-A-LIFECYCLE-STALE-${runId}`,
+      floor: 2,
+      operationalStatus: 'AVAILABLE',
+      currentStatus: 'VACANT_CLEAN',
+    },
+  })
+  const assignedStaleLifecycleReservation = await assignRoom(
+    prisma,
+    staleLifecycleReservation.reservation.id,
+    staleLifecycleRoom.id,
+    lifecycleActorA,
+    { idempotencyKey: `lifecycle-stale-assign-${runId}` },
+  )
+  const staleLifecycleExpectedUpdatedAt = assignedStaleLifecycleReservation.updatedAt.toISOString()
+  const supersedingLifecycleReservation = await prisma.reservation.update({
+    where: { id: staleLifecycleReservation.reservation.id },
+    data: {
+      notes: `Superseding lifecycle edit ${runId}`,
+      updatedAt: new Date(assignedStaleLifecycleReservation.updatedAt.getTime() + 1_000),
+    },
+  })
+  const staleLifecycleCheckInKey = `lifecycle-stale-check-in-${runId}`
+  const staleLifecycleAuditBefore = await prisma.auditLog.count({ where: { entityId: staleLifecycleReservation.reservation.id } })
+  const staleLifecycleHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: staleLifecycleReservation.reservation.id } })
+  const staleLifecycleRoomHistoryBefore = await prisma.roomStatusLog.count({ where: { roomId: staleLifecycleRoom.id } })
+  const staleLifecycleEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: staleLifecycleReservation.reservation.id } })
+  await assert.rejects(
+    checkInReservation(prisma, staleLifecycleReservation.reservation.id, lifecycleActorA, {
+      ...lifecycleCheckInInput,
+      idempotencyKey: staleLifecycleCheckInKey,
+      expectedUpdatedAt: staleLifecycleExpectedUpdatedAt,
+    }),
+    (error) => error?.statusCode === 409 && /changed after the front desk loaded it/.test(error.message),
+    'stale check-in is rejected before changing reservation, room, or folio state',
+  )
+  const staleLifecycleAfter = await prisma.reservation.findUnique({ where: { id: staleLifecycleReservation.reservation.id } })
+  assert.equal(staleLifecycleAfter.status, 'CONFIRMED', 'stale lifecycle command preserves the later authoritative reservation status')
+  assert.equal(staleLifecycleAfter.updatedAt.toISOString(), supersedingLifecycleReservation.updatedAt.toISOString(), 'stale lifecycle command preserves the later authoritative reservation version')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: staleLifecycleReservation.reservation.id } }), staleLifecycleAuditBefore, 'stale check-in creates no audit evidence')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: staleLifecycleReservation.reservation.id } }), staleLifecycleHistoryBefore, 'stale check-in creates no reservation history')
+  assert.equal(await prisma.roomStatusLog.count({ where: { roomId: staleLifecycleRoom.id } }), staleLifecycleRoomHistoryBefore, 'stale check-in creates no room history')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: staleLifecycleReservation.reservation.id } }), staleLifecycleEventsBefore, 'stale check-in creates no domain event')
+  assert.equal(
+    await prisma.reservationMutationAttempt.count({ where: { propertyId: fixtureA.property.id, idempotencyKey: staleLifecycleCheckInKey } }),
+    0,
+    'failed stale check-in rolls back its lifecycle idempotency claim',
+  )
+
+  const concurrentLifecycleReservation = await createReservationFixture(fixtureA, 'LIFECYCLE-CONCURRENT')
+  const concurrentLifecycleRoom = await prisma.room.create({
+    data: {
+      propertyId: fixtureA.property.id,
+      roomTypeId: fixtureA.roomType.id,
+      number: `G-A-LIFECYCLE-${runId}`,
+      floor: 3,
+      operationalStatus: 'AVAILABLE',
+      currentStatus: 'VACANT_CLEAN',
+    },
+  })
+  const assignedConcurrentLifecycleReservation = await assignRoom(
+    prisma,
+    concurrentLifecycleReservation.reservation.id,
+    concurrentLifecycleRoom.id,
+    lifecycleActorA,
+    { idempotencyKey: `lifecycle-concurrent-assign-${runId}` },
+  )
+  const concurrentLifecycleOptions = {
+    allowDateOverride: true,
+    overrideReason: 'Release-gate concurrent future-date fixture.',
+    recordIdentityLater: true,
+    recordIdentityLaterReason: 'Release-gate concurrent identity fixture.',
+    allowPayLater: true,
+    payLaterReason: 'Release-gate concurrent balance fixture.',
+    expectedUpdatedAt: assignedConcurrentLifecycleReservation.updatedAt.toISOString(),
+  }
+  const concurrentLifecycleAuditBefore = await prisma.auditLog.count({ where: { entityId: concurrentLifecycleReservation.reservation.id } })
+  const concurrentLifecycleHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: concurrentLifecycleReservation.reservation.id } })
+  const concurrentLifecycleRoomHistoryBefore = await prisma.roomStatusLog.count({ where: { roomId: concurrentLifecycleRoom.id } })
+  const concurrentLifecycleEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: concurrentLifecycleReservation.reservation.id } })
+  const concurrentLifecycleResults = await Promise.allSettled([
+    checkInReservation(prisma, concurrentLifecycleReservation.reservation.id, lifecycleActorA, {
+      ...concurrentLifecycleOptions,
+      idempotencyKey: `lifecycle-concurrent-a-${runId}`,
+    }),
+    checkInReservation(prisma, concurrentLifecycleReservation.reservation.id, lifecycleActorA, {
+      ...concurrentLifecycleOptions,
+      idempotencyKey: `lifecycle-concurrent-b-${runId}`,
+    }),
+  ])
+  assert.equal(concurrentLifecycleResults.filter((result) => result.status === 'fulfilled').length, 1, 'only one concurrent check-in lifecycle command succeeds')
+  assert.equal(concurrentLifecycleResults.filter((result) => result.status === 'rejected').length, 1, 'a simultaneous lifecycle command receives a truthful conflict')
+  const rejectedConcurrentLifecycleResult = concurrentLifecycleResults.find((result) => result.status === 'rejected')
+  assert.ok([400, 409].includes(rejectedConcurrentLifecycleResult.reason?.statusCode), 'concurrent lifecycle loser is rejected after serialized state validation or an inventory conflict')
+  const concurrentLifecycleAfter = await prisma.reservation.findUnique({ where: { id: concurrentLifecycleReservation.reservation.id } })
+  assert.equal(concurrentLifecycleAfter.status, 'CHECKED_IN', 'one serialized lifecycle command owns the final checked-in state')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: concurrentLifecycleReservation.reservation.id } }), concurrentLifecycleAuditBefore + 1, 'concurrent lifecycle commands produce one audit record')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: concurrentLifecycleReservation.reservation.id } }), concurrentLifecycleHistoryBefore + 1, 'concurrent lifecycle commands produce one reservation history record')
+  assert.equal(await prisma.roomStatusLog.count({ where: { roomId: concurrentLifecycleRoom.id } }), concurrentLifecycleRoomHistoryBefore + 1, 'concurrent lifecycle commands produce one room history record')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: concurrentLifecycleReservation.reservation.id } }), concurrentLifecycleEventsBefore + 1, 'concurrent lifecycle commands produce one domain event')
+  await prisma.room.deleteMany({
+    where: { id: { in: [staleAssignmentRoom.id, staleLifecycleRoom.id, concurrentLifecycleRoom.id] } },
+  })
 
   const finalRoom = await prisma.room.create({
     data: {

@@ -108,6 +108,12 @@ function normalizeReservationMutationIdempotencyKey(value) {
   return key
 }
 
+function requireReservationLifecycleIdempotencyKey(value) {
+  const key = normalizeReservationMutationIdempotencyKey(value)
+  if (!key) throw new PmsValidationError('Reservation lifecycle idempotency key is required.')
+  return key
+}
+
 function stableMutationValue(value) {
   if (typeof value === 'bigint') return value.toString()
   if (value instanceof Date) return value.toISOString()
@@ -3412,8 +3418,13 @@ export async function assignRoom(prisma, reservationId, roomId, actor, options =
   const targetRoomId = normalizeNullableString(roomId)
   if (!targetRoomId) throw new PmsValidationError('Select a room before assigning the reservation.')
   const idempotencyKey = normalizeReservationMutationIdempotencyKey(options?.idempotencyKey)
+  const expectedUpdatedAt = normalizeExpectedReservationUpdatedAt(options?.expectedUpdatedAt)
   return reservationMutationTransaction(prisma, async (tx) => {
     const property = await getProperty(tx, actor)
+    await acquireReservationMutationLocks(
+      tx,
+      reservationRoomDateLockKeys(property.id, reservationId, null, null, null),
+    )
     const reservation = await tx.reservation.findFirst({ where: { id: reservationId, propertyId: property.id } })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
     await acquireReservationMutationLocks(tx, [
@@ -3425,7 +3436,10 @@ export async function assignRoom(prisma, reservationId, roomId, actor, options =
       reservationId: reservation.id,
       operation: 'ASSIGN_ROOM',
       idempotencyKey,
-      intent: { roomId: targetRoomId },
+      intent: {
+        roomId: targetRoomId,
+        expectedUpdatedAt: expectedUpdatedAt?.toISOString() || null,
+      },
     })
     if (mutationAttempt.replay) {
       const current = await tx.reservation.findFirst({
@@ -3434,8 +3448,19 @@ export async function assignRoom(prisma, reservationId, roomId, actor, options =
       })
       return replayReservationMutation(mutationAttempt.attempt, current)
     }
+    if (expectedUpdatedAt && reservation.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new PmsValidationError('This reservation changed after the booking board loaded it. Refresh before assigning a room.', 409)
+    }
     if (['CANCELLED', 'NO_SHOW', 'CHECKED_OUT'].includes(reservation.status)) {
       throw new PmsValidationError('Only active reservations can be assigned a room.')
+    }
+    if (reservation.assignedRoomId === targetRoomId) {
+      const current = await tx.reservation.findFirst({
+        where: { id: reservation.id, propertyId: property.id },
+        include: reservationInclude,
+      })
+      await completeReservationMutationAttempt(tx, mutationAttempt.attempt, current)
+      return current
     }
 
     const room = await validateRoomAssignable(tx, reservation, targetRoomId)
@@ -3455,10 +3480,40 @@ export async function assignRoom(prisma, reservationId, roomId, actor, options =
 }
 
 export async function checkInReservation(prisma, reservationId, actor, options = {}) {
-  return prisma.$transaction(async (tx) => {
+  const idempotencyKey = requireReservationLifecycleIdempotencyKey(options.idempotencyKey)
+  const expectedUpdatedAt = normalizeExpectedReservationUpdatedAt(options.expectedUpdatedAt)
+  const commandOptions = { ...options }
+  delete commandOptions.idempotencyKey
+  delete commandOptions.expectedUpdatedAt
+  return reservationMutationTransaction(prisma, async (tx) => {
     const property = await getProperty(tx, actor)
+    await acquireReservationMutationLocks(
+      tx,
+      reservationRoomDateLockKeys(property.id, reservationId, null, null, null),
+    )
     let reservation = await tx.reservation.findFirst({ where: { id: reservationId, propertyId: property.id }, include: reservationInclude })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
+    await acquireReservationMutationLocks(tx, reservationRoomDateLockKeys(
+      property.id,
+      reservation.id,
+      reservation.assignedRoomId,
+      reservation.checkIn,
+      reservation.checkOut,
+    ))
+    const mutationAttempt = await claimReservationMutationAttempt(tx, {
+      propertyId: property.id,
+      reservationId: reservation.id,
+      operation: 'CHECK_IN_RESERVATION',
+      idempotencyKey,
+      intent: {
+        options: commandOptions,
+        expectedUpdatedAt: expectedUpdatedAt?.toISOString() || null,
+      },
+    })
+    if (mutationAttempt.replay) return replayReservationMutation(mutationAttempt.attempt, reservation)
+    if (expectedUpdatedAt && reservation.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new PmsValidationError('This reservation changed after the front desk loaded it. Refresh before checking in.', 409)
+    }
     if (!['CONFIRMED', 'PENDING'].includes(reservation.status)) {
       throw new PmsValidationError('Only confirmed or pending reservations can be checked in.')
     }
@@ -3584,18 +3639,50 @@ export async function checkInReservation(prisma, reservationId, actor, options =
       },
     })
     await emitOperationalEvent(tx, reservation.propertyId, 'RESERVATION_CHECKED_IN', 'reservation', reservation.id, actor, { roomId: room.id })
-    return tx.reservation.findUnique({
+    const result = await tx.reservation.findUnique({
       where: { id: reservation.id },
       include: reservationInclude,
     })
+    await completeReservationMutationAttempt(tx, mutationAttempt.attempt, result)
+    return result
   })
 }
 
 export async function checkOutReservation(prisma, reservationId, actor, options = {}) {
-  return prisma.$transaction(async (tx) => {
+  const idempotencyKey = requireReservationLifecycleIdempotencyKey(options.idempotencyKey)
+  const expectedUpdatedAt = normalizeExpectedReservationUpdatedAt(options.expectedUpdatedAt)
+  const commandOptions = { ...options }
+  delete commandOptions.idempotencyKey
+  delete commandOptions.expectedUpdatedAt
+  return reservationMutationTransaction(prisma, async (tx) => {
     const property = await getProperty(tx, actor)
+    await acquireReservationMutationLocks(
+      tx,
+      reservationRoomDateLockKeys(property.id, reservationId, null, null, null),
+    )
     let reservation = await tx.reservation.findFirst({ where: { id: reservationId, propertyId: property.id }, include: reservationInclude })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
+    await acquireReservationMutationLocks(tx, reservationRoomDateLockKeys(
+      property.id,
+      reservation.id,
+      reservation.assignedRoomId,
+      reservation.checkIn,
+      reservation.checkOut,
+    ))
+    const mutationAttempt = await claimReservationMutationAttempt(tx, {
+      propertyId: property.id,
+      reservationId: reservation.id,
+      operation: 'CHECK_OUT_RESERVATION',
+      idempotencyKey,
+      intent: {
+        options: commandOptions,
+        expectedUpdatedAt: expectedUpdatedAt?.toISOString() || null,
+      },
+    })
+    if (mutationAttempt.replay) return replayReservationMutation(mutationAttempt.attempt, reservation)
+    if (expectedUpdatedAt && reservation.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new PmsValidationError('This reservation changed after the front desk loaded it. Refresh before checking out.', 409)
+    }
     if (reservation.status !== 'CHECKED_IN') {
       throw new PmsValidationError('Only checked-in reservations can be checked out.')
     }
@@ -3686,10 +3773,12 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
       },
     })
     await emitOperationalEvent(tx, reservation.propertyId, 'RESERVATION_CHECKED_OUT', 'reservation', reservation.id, actor, { roomId: room.id })
-    return tx.reservation.findUnique({
+    const result = await tx.reservation.findUnique({
       where: { id: reservation.id },
       include: reservationInclude,
     })
+    await completeReservationMutationAttempt(tx, mutationAttempt.attempt, result)
+    return result
   })
 }
 

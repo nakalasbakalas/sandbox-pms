@@ -35,6 +35,7 @@ export interface ArrivalItem {
   paymentStatus?: 'PAID' | 'PARTIAL' | 'UNPAID'
   roomStatus?: string
   operationalStatus?: string
+  updatedAt?: string
 }
 
 export interface DepartureItem {
@@ -62,6 +63,7 @@ export interface DepartureItem {
   lateCheckoutUntil?: string
   specialRequests?: string
   notes?: string
+  updatedAt?: string
 }
 
 export interface InHouseItem {
@@ -83,6 +85,7 @@ export interface InHouseItem {
   roomStatus: 'CLEAN' | 'DIRTY' | 'INSPECTED'
   serviceFlags: string[]
   mainAction: 'CHECK_OUT' | 'SETTLE_BALANCE' | 'MOVE_ROOM' | 'EXTEND_STAY'
+  updatedAt?: string
 }
 
 export type WorkflowGuardSeverity = 'blocker' | 'warning' | 'info'

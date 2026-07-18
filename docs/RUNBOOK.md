@@ -396,6 +396,7 @@ Authenticated PMS routes require an active membership for the configured `SANDBO
 
 - The membership migration backfills existing users. Setup and user-management operations maintain compatibility membership records.
 - Diagnose a membership denial by checking the user active state, the `SANDBOX` property, and the `(userId, propertyId)` membership. Do not change the global role as a shortcut for a missing membership.
+- Compare the role returned by login and `/api/auth/me` with the active membership role, not the legacy `User.role`. Requests re-resolve membership, so an already-issued session must be denied immediately after membership deactivation.
 - Role and membership changes require an authorized admin workflow and audit evidence. Never insert a production membership merely to make a proof script pass.
 - Property-isolation testing must use a disposable database with at least two properties and forged cross-property resource ids.
 
@@ -455,7 +456,9 @@ npm.cmd run test:reservation-commands
 
 In server mode, select an unassigned stay or an assigned timeline segment before choosing a compatible target room or editing stay dates. The PMS validates room type, room operational status, inventory blocks, overlapping reservations, capacity, and property ownership before accepting the command. Do not interpret a disabled button as proof of availability; the backend response is authoritative.
 
-The Board deliberately performs no optimistic move, resize, lifecycle, guest, or charge success. After a known success or failure it refetches the Board range. The PMS records property-scoped command fingerprints; retry an unchanged ambiguous request only with its original in-memory key. A full reload must show the persisted server state.
+The Board deliberately performs no optimistic move, resize, lifecycle, guest, or charge success. After a confirmed success or definitive client failure it refetches the Board range. The PMS records property-scoped command fingerprints; retry an unchanged network or `5xx` outcome only with its original in-memory key, request body, and reservation update token. Do not change the room, form, or stale token before reconciling an ambiguous outcome. A full reload must show the persisted server state.
+
+Room assignment and lifecycle requests send `x-reservation-expected-updated-at` and the same `expectedUpdatedAt` body value. A mismatch or stale token is a `409`: inspect the refetched reservation before creating a new command. Check-in and check-out also require an explicit lifecycle idempotency key.
 
 Use the selected-reservation command drawer for:
 
@@ -465,7 +468,9 @@ Use the selected-reservation command drawer for:
 
 If a lifecycle or guest request returns `409`, inspect the refetched reservation before trying a new command. If an extra request has an unknown network outcome, reconcile the folio before changing any material field. Never repost an extra with a new key merely because the first response was lost.
 
-Room-block creation/clearing and destructive deletion policy are not yet Board timeline commands. Use the existing permissioned inventory/settings flow until those actions are separately wired and tested.
+Guided check-in/check-out and cashier actions are sanitized navigation handoffs. Their URLs contain only allowlisted workflow and record identifiers, and the destination clears the query after consuming it. Front Desk AI may suggest or open these staff workflows, but it applies no reservation, room, folio, payment, rate, or availability change.
+
+Room-block creation/clearing is not yet a Board timeline command. Use the existing permissioned inventory/settings flow until it is separately wired and tested. Reservations are never destructively deleted from the operational Board; correct lifecycle mistakes through audited status actions, and correct posted finances only through append-only reversals/refunds.
 
 ## Accounting V2 And Direct Booking Gates
 

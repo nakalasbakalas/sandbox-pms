@@ -9,6 +9,8 @@ export type DurableAttemptOperation =
   | 'cashier-charge'
   | 'check-in-payment'
   | 'check-out-payment'
+  | 'reservation-check-in'
+  | 'reservation-check-out'
   | 'reservation-assign-room'
   | 'reservation-resize-stay'
   | 'reservation-cancel'
@@ -39,6 +41,8 @@ const ALLOWED_OPERATIONS = new Set<DurableAttemptOperation>([
   'cashier-charge',
   'check-in-payment',
   'check-out-payment',
+  'reservation-check-in',
+  'reservation-check-out',
   'reservation-assign-room',
   'reservation-resize-stay',
   'reservation-cancel',

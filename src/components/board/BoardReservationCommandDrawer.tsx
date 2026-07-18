@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react'
-import { FloppyDisk, LockSimple, Plus, UserCircle, WarningCircle } from '@phosphor-icons/react'
+import { CurrencyDollar, FloppyDisk, LockSimple, Plus, SignIn, SignOut, UserCircle, WarningCircle } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
 import { pmsApi } from '@/lib/pms-api-client'
+import type { AuthoritativeWorkflowIntent } from '@/lib/authoritative-workflow-navigation'
 import type { ServerBookingBoardReservation } from '@/types/server-booking-board'
 
 type CommandRequest = (idempotencyKey: string) => Promise<unknown>
@@ -12,10 +13,17 @@ type Props = {
   reservation: ServerBookingBoardReservation
   mutationInFlight: boolean
   canCancel: boolean
+  canCheckIn: boolean
+  canCheckOut: boolean
   canEditGuest: boolean
   canPostCharge: boolean
+  canViewCashier: boolean
   operationsAvailable: boolean
   accountingAvailable: boolean
+  requestedWorkflow: AuthoritativeWorkflowIntent | null
+  onOpenCheckIn: () => void
+  onOpenCheckOut: () => void
+  onOpenCashier: () => void
   onClose: () => void
   onMutation: (attempt: DurableAttemptDescriptor, successMessage: string, request: CommandRequest) => Promise<boolean>
 }
@@ -39,10 +47,17 @@ export function BoardReservationCommandDrawer({
   reservation,
   mutationInFlight,
   canCancel,
+  canCheckIn,
+  canCheckOut,
   canEditGuest,
   canPostCharge,
+  canViewCashier,
   operationsAvailable,
   accountingAvailable,
+  requestedWorkflow,
+  onOpenCheckIn,
+  onOpenCheckOut,
+  onOpenCashier,
   onClose,
   onMutation,
 }: Props) {
@@ -111,12 +126,71 @@ export function BoardReservationCommandDrawer({
   }
 
   const knownLifecycle = ['CANCELLED', 'NO_SHOW'].includes(reservation.status)
+  const checkInEligible = ['CONFIRMED', 'PENDING'].includes(reservation.status)
+  const checkOutEligible = reservation.status === 'CHECKED_IN'
+  const workflowButtonClass = (workflow: AuthoritativeWorkflowIntent) => requestedWorkflow === workflow
+    ? 'ring-2 ring-primary ring-offset-2'
+    : undefined
+
   return (
     <section className="mt-4 rounded-lg border bg-muted/30 p-3" aria-label="Reservation command drawer" data-board-command-drawer={reservation.id}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div><p className="text-sm font-semibold">{reservation.guestName}</p><p className="text-xs text-muted-foreground">{reservation.confirmationCode} · {reservation.status.replaceAll('_', ' ')}</p></div>
         <Button type="button" size="sm" variant="ghost" onClick={onClose} disabled={mutationInFlight}>Close drawer</Button>
       </div>
+
+      <section
+        className="mt-3 rounded-md border bg-background p-3"
+        aria-label="Guided front desk workflow"
+        data-board-workflow={requestedWorkflow || undefined}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="font-medium">Continue the stay workflow</p>
+            <p className="text-xs text-muted-foreground">These handoffs open the authoritative guided workspace. They do not change the reservation by themselves.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {checkInEligible && canCheckIn && (
+              <Button
+                type="button"
+                size="sm"
+                className={workflowButtonClass('check-in')}
+                aria-current={requestedWorkflow === 'check-in' ? 'step' : undefined}
+                data-board-workflow-highlight={requestedWorkflow === 'check-in' ? 'check-in' : undefined}
+                onClick={onOpenCheckIn}
+                disabled={mutationInFlight || !operationsAvailable}
+              >
+                <SignIn />
+                Guided check-in
+              </Button>
+            )}
+            {checkOutEligible && canCheckOut && (
+              <Button
+                type="button"
+                size="sm"
+                className={workflowButtonClass('check-out')}
+                aria-current={requestedWorkflow === 'check-out' ? 'step' : undefined}
+                data-board-workflow-highlight={requestedWorkflow === 'check-out' ? 'check-out' : undefined}
+                onClick={onOpenCheckOut}
+                disabled={mutationInFlight || !operationsAvailable}
+              >
+                <SignOut />
+                Guided check-out
+              </Button>
+            )}
+            {reservation.folio && canViewCashier && (
+              <Button type="button" size="sm" variant="outline" onClick={onOpenCashier} disabled={mutationInFlight}>
+                <CurrencyDollar />
+                Open cashier
+              </Button>
+            )}
+          </div>
+        </div>
+        {!operationsAvailable && (checkInEligible || checkOutEligible) && <GateNotice>Reservation workflows are unavailable in the server capability registry.</GateNotice>}
+        {operationsAvailable && checkInEligible && !canCheckIn && <GateNotice>Check-in permission required to open the guided arrival workflow.</GateNotice>}
+        {operationsAvailable && checkOutEligible && !canCheckOut && <GateNotice>Check-out permission required to open the guided departure workflow.</GateNotice>}
+        {!checkInEligible && !checkOutEligible && <GateNotice>No guided arrival or departure action applies while this reservation is {reservation.status.replaceAll('_', ' ').toLowerCase()}.</GateNotice>}
+      </section>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <section className="rounded-md border bg-background p-3" aria-label="Reservation lifecycle">
@@ -128,6 +202,7 @@ export function BoardReservationCommandDrawer({
             </div>
           )}
           {reasonAction && <div className="mt-3 grid gap-2 rounded border border-amber-200 bg-amber-50 p-2"><label className="grid gap-1 text-xs font-medium">Reason required<textarea className="min-h-16 rounded-md border bg-background p-2 text-sm" value={reason} onChange={(event) => setReason(event.target.value)} disabled={mutationInFlight} /></label><div className="flex gap-2"><Button type="button" size="sm" variant="destructive" onClick={() => void submitLifecycle()} disabled={mutationInFlight || !reason.trim()}>Confirm {reasonAction === 'cancel' ? 'cancellation' : 'no-show'}</Button><Button type="button" size="sm" variant="ghost" onClick={() => { setReasonAction(null); setReason('') }} disabled={mutationInFlight}>Back</Button></div></div>}
+          <p className="mt-3 text-xs text-muted-foreground">Deletion policy: reservations are never deleted from the operational Board. Corrections use audited cancellation or no-show; posted financial rows use append-only reversals.</p>
         </section>
 
         <section className="rounded-md border bg-background p-3" aria-label="Guest details">

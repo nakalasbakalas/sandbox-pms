@@ -23,6 +23,11 @@ import { useRoomSync } from '@/hooks/use-room-sync'
 import { nightsBetween } from '@/lib/hotel/business-rules'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { durableAttemptKeys } from '@/lib/durable-attempt-key'
+import {
+  clearAuthoritativeWorkflowQuery,
+  readAuthoritativeWorkflowQuery,
+  useAuthoritativeWorkflowNavigationVersion,
+} from '@/lib/authoritative-workflow-navigation'
 import { escapeHtml } from '@/lib/html-escape'
 import { toast } from 'sonner'
 import type { BoardRoomCard } from '@/types/board'
@@ -236,6 +241,7 @@ function deserializeFolio(folio: Folio): Folio {
 }
 
 export function CashierView() {
+  const workflowNavigationVersion = useAuthoritativeWorkflowNavigationVersion()
   const [foliosRaw, setFoliosRaw] = useKV<Folio[]>('cashier-folios', [])
   const [canonicalFoliosRaw, setCanonicalFolios] = useKV<Folio[]>('folios', [])
   const [, setAccountingEntries] = useKV<AccountingEntry[]>('accounting-entries', [])
@@ -244,6 +250,7 @@ export function CashierView() {
   const { rooms } = useRoomSync()
   const [serverFolios, setServerFolios] = useState<Folio[]>([])
   const [isLoadingFolios, setIsLoadingFolios] = useState(false)
+  const [serverFoliosLoaded, setServerFoliosLoaded] = useState(!SERVER_API_ENABLED)
   const [folioError, setFolioError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFolio, setSelectedFolio] = useState<Folio | null>(null)
@@ -315,6 +322,7 @@ export function CashierView() {
       return []
     } finally {
       setIsLoadingFolios(false)
+      setServerFoliosLoaded(true)
     }
   }, [authToken])
 
@@ -376,6 +384,23 @@ export function CashierView() {
     
     return result
   }, [folios, selectedTab, searchQuery])
+
+  useEffect(() => {
+    const query = readAuthoritativeWorkflowQuery()
+    if (query?.workflow !== 'cashier' || !serverFoliosLoaded) return
+
+    const folio = folios.find((candidate) => (
+      candidate.id === query.folioId
+      && candidate.reservationId === query.reservationId
+    ))
+    clearAuthoritativeWorkflowQuery()
+    if (!folio) {
+      toast.error('The requested folio is not available to this cashier session.')
+      return
+    }
+    setSelectedTab(folio.status === 'OPEN' ? 'open' : 'all')
+    setSelectedFolio(folio)
+  }, [folios, serverFoliosLoaded, workflowNavigationVersion])
   
   const stats = useMemo(() => {
     const open = folios.filter(f => f.status === 'OPEN')

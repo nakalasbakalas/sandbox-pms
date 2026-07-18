@@ -182,6 +182,7 @@ Acceptance requires:
 
 - an authenticated user without an active `UserPropertyMembership` for `SANDBOX` receives `403`;
 - membership role is the effective property role without changing username/email login compatibility;
+- login and `/api/auth/me` expose the effective membership role, and deactivating that membership denies the next request from an already-authenticated session;
 - forged room, reservation, rate, settings, housekeeping, and night-audit identifiers from a second property return no data and cause no mutation;
 - `Guest`, `Payment`, `Charge`, and `AuditLog` have required property ownership after migration, and ambiguous/ownerless legacy backfills fail the migration rather than assigning guessed ownership;
 - `/api/openapi.json` reports OpenAPI 3.1 and matches the registered HTTP methods;
@@ -293,18 +294,24 @@ Acceptance requires:
 
 - unassigned and assigned stays are selectable without reading browser-KV data;
 - room assignment and room moves call the authenticated server command with a per-attempt idempotency header;
+- room assignment sends a matching reservation update token in body and header; a stale assignment changes no reservation, inventory, attempt, audit, history, or event state;
 - the server persists one property-scoped `ReservationMutationAttempt` per idempotency key; a same-intent replay returns the authoritative reservation without duplicate audit, history, or domain-event evidence, while a changed intent returns `409`;
 - stay-date resizing sends both calendar dates to the authenticated PATCH route;
 - cancel and no-show require `cancel:reservation`, an operational reason, an idempotency key, and a matching reservation update token; future no-show and checked-in/terminal lifecycle changes are rejected;
 - same-intent lifecycle replay creates no duplicate history, audit, or domain event, while changed intent, stale state, forged property identifiers, and superseded outcomes return a truthful error;
+- check-in/check-out require a lifecycle idempotency key; the same key is isolated per property, cannot authorize another reservation or intent within one property, and a replay after a later lifecycle mutation returns `409` without new evidence;
+- ambiguous network and `5xx` outcomes retain the exact in-memory idempotency key, request body, and stale token; retrying the unchanged assignment produces one audit, history, and domain event;
 - reservation-scoped guest/VIP editing requires both `edit:reservation` and `view:guests`, supports explicit contact-field clearing, rejects stale guest state, and stores only changed field names in evidence;
 - folio extras require `post:charges`, an open folio, the `legacyFolioCharges` capability, and exact base-10 satang input; an unchanged ambiguous retry reuses the original charge key;
 - a housekeeping Board response omits contact/profile PII, channel references, reservation notes, folio identifiers, and financial values while retaining the minimum guest identity/VIP state required for operations;
 - incompatible room types and non-operational rooms are disabled in the UI and rejected definitively by the backend;
 - successful assignment, move, and resize operations survive a full browser reload and rewrite authoritative `RoomDateInventory`;
+- Board handoffs open guided Front Desk and Cashier workspaces without mutation, including when the target workspace is already mounted; consumed query parameters are cleared;
+- a membership-limited browser does not render unauthorized Board commands, and Front Desk AI has no direct mutation path or browser-storage handoff;
 - two simultaneous attempts to assign the final compatible room result in exactly one success and one `409`, with inventory owned only by the successful reservation;
 - an injected mutation conflict displays the backend failure, refetches, and preserves the prior room/dates;
 - controls are disabled while a command is pending and no optimistic timeline success state is shown; and
+- reservations have no destructive Board delete action and posted financial corrections remain append-only; and
 - dynamic room types, property scope, permission denial, inventory blocks, and overlap rules remain backend-enforced.
 
 Run `npm.cmd run test:booking-board-operations`, `npm.cmd run test:reservation-commands`, guarded `npm.cmd run test:e2e:db`, and `npm.cmd run test:e2e:server`. These are engineering evidence, not credentialed front-desk staff acceptance.
