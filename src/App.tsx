@@ -127,7 +127,7 @@ const serverHiddenCommandIds = new Set([
 const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
   today: ['view:board', 'create:reservation', 'view:housekeeping'],
   board: ['view:board'],
-  rooms: ['view:board', 'view:housekeeping'],
+  rooms: ['view:board'],
   'booking-inbox': ['view:reservations', 'view:messaging'],
   'front-desk': ['view:board', 'check-in:guest', 'check-out:guest'],
   reservations: ['view:reservations'],

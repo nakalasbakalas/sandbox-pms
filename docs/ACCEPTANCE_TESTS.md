@@ -230,6 +230,8 @@ Empty-database migration success, a sanitized restored-staging-copy migration, a
 
 - `/channels` in server mode reads configured feeds, mappings, room types/rooms, and capability evidence only from authenticated APIs; seeded browser fixtures never appear.
 - Failure of any required Channels API produces an explicit unavailable state, blocks writes, and offers an authoritative retry without local fallback.
+- `/rooms` in server mode reads property display, room types, and rooms only from authenticated `/api/front-desk/board`; injected browser room/property/type fixtures never render on a failed load, and retry plus reload show the persisted server snapshot.
+- a housekeeping membership with `view:board` can open the read-only `/rooms` operational projection, but it sees no guest contact/profile data, folio identifiers, or financial values.
 - `view:channels` can inspect server state but cannot use configuration, rotation, removal, or mapping mutation controls; `manage:channels` remains enforced by the backend.
 - Private provider import URLs are rejected and never persist in `Channel.config`; the deploy migration removes legacy values and disables inbound iCal sync.
 - Normal iCal list/configuration responses never include a previously issued export bearer URL; only initial issue or explicit rotation may return a URL. Issue/rotation requires a property/provider-scoped idempotency key: same intent returns the exact original URL without duplicate evidence only while the token is current or in grace. Changed intent, retry after disable, and retry after a superseding rotation's grace expiry return `409`.

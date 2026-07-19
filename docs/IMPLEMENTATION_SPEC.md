@@ -335,6 +335,7 @@ Notifications are backend records:
 - `GET /api/events` requires session authentication, active property membership, and `view:board`. It accepts `Last-Event-ID` or `?after=`, polls PostgreSQL in bounded batches, emits two-second updates and heartbeats, and can be disabled with `SSE_ENABLED=false`.
 - The public event payload intentionally omits actor id and metadata. It contains only string id, event type, aggregate type/id, and occurrence time.
 - The React bridge maps the existing reservation, room, payment, and charge event types to client refresh signals. Rates, settings, housekeeping, and night-audit views still need explicit event/refetch handling where their UI requires immediate refresh.
+- In server mode, `/rooms` consumes the authenticated `/api/front-desk/board` snapshot for property display, room types, and rooms. It fails closed with an unavailable/retry state when that API fails; Spark/browser-KV room, property, and room-type data remains demo-only.
 
 ## Rate And Settings Services
 

@@ -32,6 +32,12 @@ const boardGuestThree = `Board Charlie ${runId}`
 const fakeBoardRoomNumber = `LOCAL-${runId}`
 const fakeBoardGuest = `Browser Shadow ${runId}`
 const fakeChannelName = `Browser Fake Channel ${runId}`
+const fakeRoomsPropertyName = `Browser Rooms Property ${runId}`
+const fakeRoomsTypeName = `Browser Rooms Type ${runId}`
+const fakeRoomsRoomNumber = `ROOMS-LOCAL-${runId.slice(0, 8)}`
+const inspectedRoomTypeCode = `FAMILY_${runId.toUpperCase()}`
+const inspectedRoomTypeName = `Family Suite ${runId}`
+const inspectedRoomNumber = `I-${runId.slice(0, 8)}`
 const persistedChannelMappingName = `Server Channel Mapping ${runId}`
 
 function dateKeyWithOffset(offset) {
@@ -186,6 +192,27 @@ assert.ok(property, 'the guarded E2E seed must provide the SANDBOX property')
 const roomType = await prisma.roomType.findFirst({ where: { propertyId: property.id }, orderBy: { code: 'asc' } })
 const room = await prisma.room.findFirst({ where: { propertyId: property.id }, orderBy: { number: 'asc' } })
 assert.ok(roomType && room, 'the guarded E2E seed must provide room inventory')
+const inspectedRoomType = await prisma.roomType.create({
+  data: {
+    propertyId: property.id,
+    code: inspectedRoomTypeCode,
+    name: inspectedRoomTypeName,
+    baseRate: 1_234,
+    baseRateSatang: 123_400n,
+    standardOcc: 2,
+    maxOccupancy: 4,
+  },
+})
+await prisma.room.create({
+  data: {
+    propertyId: property.id,
+    roomTypeId: inspectedRoomType.id,
+    number: inspectedRoomNumber,
+    floor: 98,
+    operationalStatus: 'AVAILABLE',
+    currentStatus: 'INSPECTED',
+  },
+})
 const boardRoom = await prisma.room.create({
   data: {
     propertyId: property.id,
@@ -319,11 +346,32 @@ try {
   await authRaceContext.close()
 
   const context = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1440, height: 1000 } })
-  await context.addInitScript(({ fakeRoomNumber, fakeGuestName, fakeChannel }) => {
+  await context.addInitScript(({ fakeRoomNumber, fakeGuestName, fakeChannel, fakePropertyName, fakeRoomTypeName, fakeRoomsNumber }) => {
     window.localStorage.clear()
     const requestedFixturePath = window.sessionStorage.getItem('inject-local-operational-fixture')
     const isBoardFixture = window.location.pathname === '/board'
-    if (!isBoardFixture && window.location.pathname !== requestedFixturePath) return
+    const isRoomsFixture = window.location.pathname === '/rooms' && requestedFixturePath === '/rooms'
+    if (!isBoardFixture && !isRoomsFixture && window.location.pathname !== requestedFixturePath) return
+    if (isRoomsFixture) {
+      window.localStorage.setItem('pms-rooms', JSON.stringify([{
+        roomId: 'browser-fake-rooms-room',
+        number: fakeRoomsNumber,
+        floor: 77,
+        roomTypeId: 'browser-fake-rooms-type',
+        roomTypeCode: 'BROWSER_LOCAL',
+        roomTypeName: fakeRoomTypeName,
+        status: 'VACANT_CLEAN',
+        cleanStatus: 'CLEAN',
+      }]))
+      window.localStorage.setItem('onboarding-property', JSON.stringify({ name: fakePropertyName }))
+      window.localStorage.setItem('onboarding-room-types', JSON.stringify([{
+        id: 'browser-fake-rooms-type', code: 'BROWSER_LOCAL', name: fakeRoomTypeName,
+      }]))
+      window.localStorage.setItem('room-types-config', JSON.stringify([{
+        id: 'browser-fake-rooms-type', code: 'BROWSER_LOCAL', name: fakeRoomTypeName,
+      }]))
+      return
+    }
     if (window.location.pathname === '/channels') {
       window.localStorage.setItem('channels', JSON.stringify([{
         id: 'browser-fake-channel',
@@ -392,7 +440,14 @@ try {
       lastName: 'Shadow',
       fullName: fakeGuestName,
     }]))
-  }, { fakeRoomNumber: fakeBoardRoomNumber, fakeGuestName: fakeBoardGuest, fakeChannel: fakeChannelName })
+  }, {
+    fakeRoomNumber: fakeBoardRoomNumber,
+    fakeGuestName: fakeBoardGuest,
+    fakeChannel: fakeChannelName,
+    fakePropertyName: fakeRoomsPropertyName,
+    fakeRoomTypeName: fakeRoomsTypeName,
+    fakeRoomsNumber: fakeRoomsRoomNumber,
+  })
   const login = await context.request.post('/api/auth/login', { data: { identity: username, password } })
   assert.equal(login.status(), 200, `server login failed: ${await login.text()}`)
 
@@ -538,6 +593,14 @@ try {
   assert.equal(await limitedPage.getByRole('button', { name: 'New reservation', exact: false }).isDisabled(), true, 'a membership-limited browser sees no create-reservation affordance')
   assert.equal(await limitedPage.locator('[data-board-command-drawer]').count(), 0, 'a membership-limited browser cannot render the Board command drawer')
   assert.equal(await limitedPage.getByRole('button', { name: 'Guided check-in', exact: true }).count(), 0, 'a membership-limited browser sees no check-in command')
+  await limitedPage.goto('/rooms', { waitUntil: 'domcontentloaded' })
+  await limitedPage.getByTestId('server-rooms-view').waitFor({ state: 'visible' })
+  await limitedPage.getByText(property.name, { exact: true }).waitFor({ state: 'visible' })
+  const limitedInspectedTile = limitedPage.getByRole('button').filter({ hasText: inspectedRoomNumber })
+  await limitedInspectedTile.getByText(inspectedRoomTypeName, { exact: true }).waitFor({ state: 'visible' })
+  await limitedInspectedTile.getByText('Ready', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await limitedPage.getByText(`board-alpha-${runId}@example.test`, { exact: false }).count(), 0, 'a housekeeping Rooms projection does not render guest contact data')
+  assert.equal(await limitedPage.getByText(/฿|THB/).count(), 0, 'a housekeeping Rooms projection does not render financial values')
   await prisma.userPropertyMembership.updateMany({
     where: { userId: limitedUser.id, propertyId: property.id },
     data: { active: false },
@@ -682,6 +745,55 @@ try {
   assert.equal(await page.getByText(boardGuestTwo, { exact: true }).count(), 1, 'the second same-room stay renders as one distinct segment')
   assert.equal(await page.getByRole('alert').count(), 0, 'retry replaces the truthful error with authoritative board data')
   await assertNoOperationalBrowserStorage('server-mode booking board after retry')
+
+  // Server-mode Rooms must not display browser-owned property, type, or room data when its
+  // authoritative Board snapshot is unavailable. A successful retry and reload must show
+  // the persisted server snapshot instead.
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/rooms'))
+  await page.route('**/api/front-desk/board*', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Rooms authoritative snapshot failure.' }),
+    })
+  })
+  await page.goto('/rooms', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-rooms-error').waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: 'Rooms unavailable', exact: true }).waitFor({ state: 'visible' })
+  await page.getByText('Injected Rooms authoritative snapshot failure.', { exact: false }).waitFor({ state: 'visible' })
+  for (const fakeValue of [fakeRoomsPropertyName, fakeRoomsTypeName, fakeRoomsRoomNumber]) {
+    assert.equal(await page.getByText(fakeValue, { exact: false }).count(), 0, `Rooms failure does not display fake browser-owned value: ${fakeValue}`)
+  }
+  const injectedRoomsStorage = await page.evaluate((keys) => Object.fromEntries(keys.map((key) => [key, window.localStorage.getItem(key)])), [
+    'pms-rooms', 'onboarding-property', 'onboarding-room-types', 'room-types-config',
+  ])
+  assert.match(injectedRoomsStorage['pms-rooms'] || '', new RegExp(fakeRoomsRoomNumber), 'the fake room fixture existed while server Rooms ignored it')
+  assert.match(injectedRoomsStorage['onboarding-property'] || '', new RegExp(fakeRoomsPropertyName), 'the fake property fixture existed while server Rooms ignored it')
+  await page.unroute('**/api/front-desk/board*')
+  await page.getByRole('button', { name: /retry/i }).click()
+  await page.getByTestId('server-rooms-view').waitFor({ state: 'visible' })
+  await page.getByText(property.name, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: roomType.name, exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(boardRoomNumber, { exact: true }).waitFor({ state: 'visible' })
+  const inspectedTile = page.getByRole('button').filter({ hasText: inspectedRoomNumber })
+  await inspectedTile.getByText(inspectedRoomTypeName, { exact: true }).waitFor({ state: 'visible' })
+  await inspectedTile.getByText('Ready', { exact: true }).waitFor({ state: 'visible' })
+  for (const fakeValue of [fakeRoomsPropertyName, fakeRoomsTypeName, fakeRoomsRoomNumber]) {
+    assert.equal(await page.getByText(fakeValue, { exact: false }).count(), 0, `Rooms retry remains free of fake browser-owned value: ${fakeValue}`)
+  }
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-rooms-view').waitFor({ state: 'visible' })
+  await page.getByText(property.name, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: roomType.name, exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(boardRoomNumber, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('button').filter({ hasText: inspectedRoomNumber }).getByText(inspectedRoomTypeName, { exact: true }).waitFor({ state: 'visible' })
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+  }, Object.keys(injectedRoomsStorage))
+  await assertNoOperationalBrowserStorage('server-mode Rooms authority and reload')
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
 
   // Simulate the visible Booking Board form losing an otherwise successful create response.
   // The form must keep its input and logical key, replay the original server result on the

@@ -56,7 +56,7 @@ const primaryNavItems: readonly NavItem[] = [
   { id: 'reservations', labelKey: 'nav.reservations', icon: CalendarBlank, permission: 'view:reservations' as const },
   { id: 'booking-inbox', labelKey: 'nav.bookingInbox', icon: Envelope, anyOf: ['view:reservations', 'view:messaging'] as const },
   { id: 'board', labelKey: 'nav.frontDeskBoard', icon: SquaresFour, permission: 'view:board' as const },
-  { id: 'rooms', labelKey: 'nav.rooms', icon: Bed, anyOf: ['view:board', 'view:housekeeping'] as const },
+  { id: 'rooms', labelKey: 'nav.rooms', icon: Bed, permission: 'view:board' as const },
   { id: 'housekeeping', labelKey: 'nav.housekeeping', icon: Broom, permission: 'view:housekeeping' as const },
   { id: 'guests', labelKey: 'nav.guests', icon: Users, permission: 'view:guests' as const },
   { id: 'cashier', labelKey: 'nav.payments', icon: CurrencyDollar, permission: 'view:cashier' as const },
