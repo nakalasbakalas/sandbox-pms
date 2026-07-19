@@ -52,6 +52,7 @@ const systemCapabilities = getSystemCapabilities({
 })
 assert.equal(systemCapabilities.sourceOfTruth, 'server', 'capability registry declares the backend source of truth')
 assert.equal(systemCapabilities.operations.nightAudit.status, 'available', 'persistent night audit is presented as an operational backend capability')
+assert.equal(systemCapabilities.finance.legacyFolioCharges.status, 'available', 'exact-satang legacy folio charge posting is separately capability-gated from disabled Accounting V2')
 assert.equal(systemCapabilities.operations.nightAudit.writeMode, 'controlled', 'night audit writes remain controlled')
 assert.equal(systemCapabilities.operations.rates.status, 'available', 'persistent rate services are presented as operational')
 assert.equal(systemCapabilities.integrations.ota.writeMode, 'dry-run', 'OTA live writes remain dry-run by default')
@@ -475,22 +476,24 @@ const bookingEmailWorkflow = await importTypeScriptModule(resolve('src/lib/booki
 const opsNotificationDisplay = await importTypeScriptModule(resolve('src/lib/ops-notification-display.ts'))
 const ical = await importTypeScriptModule(resolve('src/lib/ical.ts'))
 const durableAttemptKeySource = await readFile(resolve('src/lib/durable-attempt-key.ts'), 'utf8')
-assert.equal(/(?:localStorage|sessionStorage)/.test(durableAttemptKeySource), false, 'server-mode attempt keys never use browser persistence')
+assert.match(durableAttemptKeySource, /window\.sessionStorage/, 'opaque uncertain-write attempt evidence survives a same-tab reload')
+assert.doesNotMatch(durableAttemptKeySource, /localStorage/, 'attempt evidence is never retained beyond the browser tab')
+assert.match(durableAttemptKeySource, /JSON\.stringify\(\{ version: 1, fingerprint, key \}/, 'browser attempt evidence contains only version, fingerprint, and opaque key')
 const cashierAttemptSource = await readFile(resolve('src/components/views/CashierView.tsx'), 'utf8')
 assert.match(
   cashierAttemptSource,
   /operation: 'cashier-charge'[\s\S]{0,1000}pmsApi\('\/api\/charges'[\s\S]{0,300}headers: \{ 'x-idempotency-key': idempotencyKey \}/,
   'Cashier charge submissions send the durable attempt key through the backend idempotency header contract',
 )
-for (const paymentSurface of [
+for (const lifecycleSurface of [
   'src/components/front-desk/FrontDeskView.tsx',
   'src/components/views/ReservationsView.tsx',
-  'src/components/board/Board.tsx',
 ]) {
-  const source = await readFile(resolve(paymentSurface), 'utf8')
-  assert.match(source, /operation: 'check-in-payment'/, `${paymentSurface} uses durable check-in payment attempts`)
-  assert.match(source, /operation: 'check-out-payment'/, `${paymentSurface} uses durable check-out payment attempts`)
-  assert.match(source, /durableAttemptKeys\.confirmSuccess/, `${paymentSurface} clears attempt keys only after confirmed success`)
+  const source = await readFile(resolve(lifecycleSurface), 'utf8')
+  assert.match(source, /operation: 'reservation-check-in'/, `${lifecycleSurface} protects the complete check-in lifecycle`)
+  assert.match(source, /operation: 'reservation-check-out'/, `${lifecycleSurface} protects the complete check-out lifecycle`)
+  assert.match(source, /'x-reservation-expected-updated-at'/, `${lifecycleSurface} sends the authoritative stale-write token`)
+  assert.match(source, /durableAttemptKeys\.confirmSuccess/, `${lifecycleSurface} retires keys only after a known outcome`)
 }
 
 const durableAttemptStorageRows = new Map()

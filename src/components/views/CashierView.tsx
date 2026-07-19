@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
+import { z } from 'zod'
 import { useKV } from '@github/spark/hooks'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -23,11 +24,18 @@ import { useRoomSync } from '@/hooks/use-room-sync'
 import { nightsBetween } from '@/lib/hotel/business-rules'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { durableAttemptKeys } from '@/lib/durable-attempt-key'
+import {
+  clearAuthoritativeWorkflowQuery,
+  readAuthoritativeWorkflowQuery,
+  useAuthoritativeWorkflowNavigationVersion,
+} from '@/lib/authoritative-workflow-navigation'
 import { escapeHtml } from '@/lib/html-escape'
 import { toast } from 'sonner'
 import type { BoardRoomCard } from '@/types/board'
 import type { PropertySetup } from '@/types/onboarding'
 import { capabilityEnabled, useSystemCapabilities } from '@/hooks/use-system-capabilities'
+import { formatMoneySatang, parseMoneySatang, type MoneySatang } from '@/types/money'
+import { useAuth } from '@/hooks/use-auth'
 
 function calculateTax(amount: number, taxRate: number = 7) {
   const subtotal = amount / (1 + taxRate / 100)
@@ -50,6 +58,8 @@ interface FolioCharge {
   tax: number
   total: number
   postedBy: string
+  unitPriceSatang?: MoneySatang
+  totalSatang?: MoneySatang
 }
 
 interface FolioPayment {
@@ -59,6 +69,7 @@ interface FolioPayment {
   amount: number
   reference?: string
   receivedBy: string
+  amountSatang?: MoneySatang
 }
 
 interface Folio {
@@ -68,7 +79,7 @@ interface Folio {
   roomNumber: string
   checkIn: Date
   checkOut?: Date
-  status: 'OPEN' | 'CLOSED' | 'VOID'
+  status: 'OPEN' | 'CLOSED' | 'VOID' | 'REFUNDED'
   
   charges: FolioCharge[]
   payments: FolioPayment[]
@@ -82,6 +93,11 @@ interface Folio {
   createdAt: Date
   updatedAt: Date
   closedAt?: Date
+  subtotalSatang?: MoneySatang
+  taxSatang?: MoneySatang
+  totalSatang?: MoneySatang
+  paidSatang?: MoneySatang
+  balanceSatang?: MoneySatang
 }
 
 interface AccountingEntry {
@@ -99,6 +115,28 @@ interface AccountingEntry {
   createdBy: string
   createdAt: string
 }
+
+type ServerCashierState = 'loading' | 'ready' | 'error'
+type FolioListSetter = (updater: Folio[] | ((current: Folio[]) => Folio[])) => void
+type AccountingEntrySetter = (updater: AccountingEntry[] | ((current: AccountingEntry[]) => AccountingEntry[])) => void
+
+interface CashierWorkspaceSource {
+  foliosRaw: Folio[]
+  setFoliosRaw: FolioListSetter
+  canonicalFoliosRaw: Folio[]
+  setCanonicalFolios: FolioListSetter
+  setAccountingEntries: AccountingEntrySetter
+  propertyData: Pick<PropertySetup, 'name' | 'currency'>
+  rooms: BoardRoomCard[]
+  serverFolios: Folio[]
+  setServerFolios: FolioListSetter
+  serverCashierState: ServerCashierState
+  serverSnapshotError: string | null
+  refreshServerFolios: () => Promise<Folio[]>
+}
+
+const noOpFolioListSetter: FolioListSetter = () => undefined
+const noOpAccountingEntrySetter: AccountingEntrySetter = () => undefined
 
 function folioFromRoom(room: BoardRoomCard): Folio | null {
   if (!room.guestName || !room.checkIn) return null
@@ -164,55 +202,131 @@ function normalizePaymentMethod(method: string): FolioPayment['method'] {
   return 'OTHER'
 }
 
-function folioFromServerReservation(record: any): Folio | null {
-  if (!record?.folio) return null
+function satangToDisplayBaht(value: MoneySatang): number {
+  const satang = parseMoneySatang(value)
+  const whole = satang / 100n
+  if (whole > BigInt(Number.MAX_SAFE_INTEGER) || whole < BigInt(Number.MIN_SAFE_INTEGER)
+    || satang > BigInt(Number.MAX_SAFE_INTEGER) || satang < BigInt(Number.MIN_SAFE_INTEGER)) {
+    throw new TypeError('Cashier amount exceeds the safe display range.')
+  }
+  return Number(satang) / 100
+}
 
-  const guestName = record.guest
-    ? `${record.guest.firstName || ''} ${record.guest.lastName || ''}`.trim()
-    : 'Guest'
-  const roomNumber = record.assignedRoom?.number || 'Unassigned'
-  const charges = (record.folio.charges || []).map((charge: any): FolioCharge => ({
+function parseBahtInputToSatang(value: string): MoneySatang {
+  const match = value.trim().match(/^(\d+)(?:\.(\d{1,2}))?$/)
+  if (!match) throw new TypeError('Enter an amount with no more than two decimal places.')
+  const whole = BigInt(match[1])
+  const fraction = BigInt((match[2] || '').padEnd(2, '0') || '0')
+  return (whole * 100n + fraction).toString() as MoneySatang
+}
+
+function moneySatangToDecimal(value: MoneySatang): string {
+  const satang = parseMoneySatang(value)
+  const sign = satang < 0n ? '-' : ''
+  const absolute = satang < 0n ? -satang : satang
+  return `${sign}${absolute / 100n}.${(absolute % 100n).toString().padStart(2, '0')}`
+}
+
+const serverMoneySatangSchema = z.string()
+  .regex(/^[+-]?\d+$/, 'Money satang must be a base-10 integer string.')
+  .transform((value) => value as MoneySatang)
+const serverTimestampSchema = z.string().datetime({ offset: true })
+const serverChargeCategorySchema = z.enum(['ROOM', 'EXTRA_GUEST', 'CHILD', 'CAFE', 'LAUNDRY', 'MINIBAR', 'DAMAGE', 'OTHER'])
+const serverPaymentMethodSchema = z.enum(['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE', 'OTHER'])
+
+const serverCashierFolioSchema = z.object({
+  id: z.string().min(1),
+  reservationId: z.string().min(1),
+  guestName: z.string().min(1),
+  roomNumber: z.string().min(1),
+  checkIn: serverTimestampSchema,
+  checkOut: serverTimestampSchema.nullable(),
+  status: z.enum(['OPEN', 'CLOSED', 'REFUNDED']),
+  charges: z.array(z.object({
+    id: z.string().min(1),
+    postedAt: serverTimestampSchema,
+    category: serverChargeCategorySchema,
+    description: z.string().min(1),
+    quantity: z.number().int().positive(),
+    unitPriceSatang: serverMoneySatangSchema,
+    totalSatang: serverMoneySatangSchema,
+    postedBy: z.string().nullable().optional(),
+  }).strict()),
+  payments: z.array(z.object({
+    id: z.string().min(1),
+    postedAt: serverTimestampSchema,
+    method: serverPaymentMethodSchema,
+    amountSatang: serverMoneySatangSchema,
+    reference: z.string().nullable().optional(),
+    receivedBy: z.string().nullable().optional(),
+  }).strict()),
+  subtotalSatang: serverMoneySatangSchema,
+  taxSatang: serverMoneySatangSchema,
+  totalSatang: serverMoneySatangSchema,
+  paidSatang: serverMoneySatangSchema,
+  balanceSatang: serverMoneySatangSchema,
+  createdAt: serverTimestampSchema,
+  updatedAt: serverTimestampSchema,
+}).strict()
+
+const serverCashierFoliosResponseSchema = z.object({
+  property: z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    currency: z.string().regex(/^[A-Z]{3}$/, 'Property currency must be a three-letter ISO code.'),
+  }).strict(),
+  folios: z.array(serverCashierFolioSchema),
+}).strict()
+
+type ServerCashierFolio = z.infer<typeof serverCashierFolioSchema>
+
+function folioFromServerDto(record: ServerCashierFolio): Folio {
+  const charges = record.charges.map((charge): FolioCharge => ({
     id: charge.id,
-    date: new Date(charge.date || charge.createdAt || record.checkIn),
+    date: new Date(charge.postedAt),
     category: normalizeChargeCategory(charge.category),
-    description: charge.description || 'Folio charge',
-    quantity: Number(charge.quantity || 1),
-    unitPrice: Number(charge.amount || charge.total || 0),
-    subtotal: Number(charge.total || 0),
+    description: charge.description,
+    quantity: charge.quantity,
+    unitPrice: satangToDisplayBaht(charge.unitPriceSatang),
+    subtotal: satangToDisplayBaht(charge.totalSatang),
     tax: 0,
-    total: Number(charge.total || 0),
-    postedBy: charge.createdBy || 'System',
+    total: satangToDisplayBaht(charge.totalSatang),
+    postedBy: charge.postedBy || 'System',
+    unitPriceSatang: charge.unitPriceSatang,
+    totalSatang: charge.totalSatang,
   }))
-  const payments = (record.folio.payments || []).map((payment: any): FolioPayment => ({
+  const payments = record.payments.map((payment): FolioPayment => ({
     id: payment.id,
-    date: new Date(payment.createdAt || payment.date || record.updatedAt || new Date()),
+    date: new Date(payment.postedAt),
     method: normalizePaymentMethod(payment.method),
-    amount: Number(payment.amount || 0),
+    amount: satangToDisplayBaht(payment.amountSatang),
     reference: payment.reference || undefined,
-    receivedBy: payment.processedBy || 'Cashier',
+    receivedBy: payment.receivedBy || 'Cashier',
+    amountSatang: payment.amountSatang,
   }))
-  const status = record.folio.status === 'CLOSED' || record.status === 'CHECKED_OUT' && Number(record.folio.balance || 0) <= 0
-    ? 'CLOSED'
-    : 'OPEN'
 
   return {
-    id: record.folio.id,
-    reservationId: record.id,
-    guestName,
-    roomNumber,
+    id: record.id,
+    reservationId: record.reservationId,
+    guestName: record.guestName,
+    roomNumber: record.roomNumber,
     checkIn: new Date(record.checkIn),
     checkOut: record.checkOut ? new Date(record.checkOut) : undefined,
-    status,
+    status: record.status,
     charges,
     payments,
-    subtotal: Number(record.folio.subtotal || 0),
-    tax: Number(record.folio.tax || 0),
-    total: Number(record.folio.total || 0),
-    paid: Number(record.folio.paid || 0),
-    balance: Number(record.folio.balance || 0),
-    createdAt: new Date(record.folio.createdAt || record.createdAt || record.checkIn),
-    updatedAt: new Date(record.folio.updatedAt || record.updatedAt || new Date()),
-    closedAt: status === 'CLOSED' ? new Date(record.actualCheckOut || record.folio.updatedAt || new Date()) : undefined,
+    subtotal: satangToDisplayBaht(record.subtotalSatang),
+    tax: satangToDisplayBaht(record.taxSatang),
+    total: satangToDisplayBaht(record.totalSatang),
+    paid: satangToDisplayBaht(record.paidSatang),
+    balance: satangToDisplayBaht(record.balanceSatang),
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(record.updatedAt),
+    subtotalSatang: record.subtotalSatang,
+    taxSatang: record.taxSatang,
+    totalSatang: record.totalSatang,
+    paidSatang: record.paidSatang,
+    balanceSatang: record.balanceSatang,
   }
 }
 
@@ -236,15 +350,123 @@ function deserializeFolio(folio: Folio): Folio {
 }
 
 export function CashierView() {
+  return SERVER_API_ENABLED ? <ServerCashierView /> : <DemoCashierView />
+}
+
+function DemoCashierView() {
   const [foliosRaw, setFoliosRaw] = useKV<Folio[]>('cashier-folios', [])
   const [canonicalFoliosRaw, setCanonicalFolios] = useKV<Folio[]>('folios', [])
   const [, setAccountingEntries] = useKV<AccountingEntry[]>('accounting-entries', [])
-  const authToken = null
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
   const { rooms } = useRoomSync()
+
+  return (
+    <CashierWorkspace
+      source={{
+        foliosRaw,
+        setFoliosRaw,
+        canonicalFoliosRaw,
+        setCanonicalFolios,
+        setAccountingEntries,
+        propertyData,
+        rooms,
+        serverFolios: [],
+        setServerFolios: noOpFolioListSetter,
+        serverCashierState: 'ready',
+        serverSnapshotError: null,
+        refreshServerFolios: async () => [],
+      }}
+    />
+  )
+}
+
+function ServerCashierView() {
   const [serverFolios, setServerFolios] = useState<Folio[]>([])
-  const [isLoadingFolios, setIsLoadingFolios] = useState(false)
-  const [folioError, setFolioError] = useState<string | null>(null)
+  const [serverPropertyData, setServerPropertyData] = useState<Pick<PropertySetup, 'name' | 'currency'>>({ name: '', currency: '' })
+  const [serverCashierState, setServerCashierState] = useState<ServerCashierState>('loading')
+  const [serverSnapshotError, setServerSnapshotError] = useState<string | null>(null)
+
+  const refreshServerFolios = useCallback(async () => {
+    setServerCashierState('loading')
+    setServerSnapshotError(null)
+    try {
+      const payload = await pmsApi<{ ok: true; data: unknown }>('/api/cashier/folios', null)
+      const snapshot = serverCashierFoliosResponseSchema.parse(payload.data)
+      const nextFolios = snapshot.folios.map(folioFromServerDto)
+      setServerFolios(nextFolios)
+      setServerPropertyData({ name: snapshot.property.name, currency: snapshot.property.currency })
+      setServerCashierState('ready')
+      return nextFolios
+    } catch (error) {
+      setServerFolios([])
+      setServerPropertyData({ name: '', currency: '' })
+      setServerCashierState('error')
+      setServerSnapshotError('The PMS cashier snapshot is unavailable. Retry before recording a payment or charge.')
+      throw error
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshServerFolios().catch(() => undefined)
+  }, [refreshServerFolios])
+
+  useEffect(() => {
+    let refreshTimer: number | undefined
+    const onDomainEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ aggregateType?: unknown }>).detail
+      const aggregateType = typeof detail?.aggregateType === 'string' ? detail.aggregateType.toLowerCase() : ''
+      if (!['payment', 'charge', 'folio', 'reservation'].includes(aggregateType)) return
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => {
+        void refreshServerFolios().catch(() => undefined)
+      }, 100)
+    }
+
+    window.addEventListener('pms:domain-event', onDomainEvent)
+    return () => {
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
+      window.removeEventListener('pms:domain-event', onDomainEvent)
+    }
+  }, [refreshServerFolios])
+
+  return (
+    <CashierWorkspace
+      source={{
+        foliosRaw: [],
+        setFoliosRaw: noOpFolioListSetter,
+        canonicalFoliosRaw: [],
+        setCanonicalFolios: noOpFolioListSetter,
+        setAccountingEntries: noOpAccountingEntrySetter,
+        propertyData: serverPropertyData,
+        rooms: [],
+        serverFolios,
+        setServerFolios,
+        serverCashierState,
+        serverSnapshotError,
+        refreshServerFolios,
+      }}
+    />
+  )
+}
+
+function CashierWorkspace({ source }: { source: CashierWorkspaceSource }) {
+  const workflowNavigationVersion = useAuthoritativeWorkflowNavigationVersion()
+  const {
+    foliosRaw,
+    setFoliosRaw,
+    canonicalFoliosRaw,
+    setCanonicalFolios,
+    setAccountingEntries,
+    propertyData,
+    rooms,
+    serverFolios,
+    setServerFolios,
+    serverCashierState,
+    serverSnapshotError,
+    refreshServerFolios,
+  } = source
+  const authToken = null
+  const { hasPermission } = useAuth()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFolio, setSelectedFolio] = useState<Folio | null>(null)
   const [selectedTab, setSelectedTab] = useState<'open' | 'closed' | 'all' | 'accounting' | 'reconciliation'>('open')
@@ -262,7 +484,8 @@ export function CashierView() {
   const [chargeError, setChargeError] = useState<string | null>(null)
   const [isSubmittingCharge, setIsSubmittingCharge] = useState(false)
   const { registry } = useSystemCapabilities()
-  const accountingV2Available = !SERVER_API_ENABLED || capabilityEnabled(registry?.finance.accountingV2)
+  // The browser-backed accounting widgets are demo-only until Accounting V2 has its own server authority surface.
+  const accountingV2Available = !SERVER_API_ENABLED && capabilityEnabled(registry?.finance.accountingV2)
 
   useEffect(() => {
     if (!accountingV2Available && (selectedTab === 'accounting' || selectedTab === 'reconciliation')) {
@@ -274,7 +497,50 @@ export function CashierView() {
   const paymentRemainingBalance = paymentFolio
     ? Math.max(0, Math.round((paymentFolio.balance - paymentAmountNumber) * 100) / 100)
     : 0
+  const paymentPreview = useMemo(() => {
+    if (!SERVER_API_ENABLED || !paymentFolio?.balanceSatang) return undefined
+    try {
+      const balance = parseMoneySatang(paymentFolio.balanceSatang)
+      const payment = parseMoneySatang(parseBahtInputToSatang(paymentAmount || '0'))
+      const remaining = balance - payment
+      return {
+        remainingSatang: (remaining > 0n ? remaining : 0n).toString() as MoneySatang,
+        closesFolio: payment > 0n && payment === balance,
+      }
+    } catch {
+      return { remainingSatang: paymentFolio.balanceSatang, closesFolio: false }
+    }
+  }, [paymentAmount, paymentFolio])
+  const paymentRemainingBalanceSatang = paymentPreview?.remainingSatang
+  const paymentWillClose = SERVER_API_ENABLED
+    ? paymentPreview?.closesFolio === true
+    : paymentAmountNumber > 0 && paymentAmountNumber <= (paymentFolio?.balance || 0) && paymentRemainingBalance <= 0
   const paymentReferenceRequired = ['CARD', 'BANK_TRANSFER', 'ONLINE'].includes(paymentMethod)
+  const canProcessPayment = hasPermission('process:payment')
+  const canPostCharges = hasPermission('post:charges')
+  const currency = propertyData?.currency?.trim().toUpperCase() || 'THB'
+  const formatAmount = useCallback((amount: number, satang?: MoneySatang) => {
+    if (SERVER_API_ENABLED) {
+      if (!satang) throw new TypeError('Authoritative Cashier money is missing exact satang.')
+      return formatMoneySatang(satang, currency)
+    }
+    return new Intl.NumberFormat('en-TH', { style: 'currency', currency }).format(amount)
+  }, [currency])
+  const exportAmount = useCallback((amount: number, satang?: MoneySatang) => {
+    if (SERVER_API_ENABLED) {
+      if (!satang) throw new TypeError('Authoritative Cashier export is missing exact satang.')
+      return moneySatangToDecimal(satang)
+    }
+    return amount.toFixed(2)
+  }, [])
+
+  const requireAuthoritativeSnapshot = () => {
+    if (!SERVER_API_ENABLED || serverCashierState === 'ready') return true
+    toast.error('Cashier is unavailable until the authoritative PMS snapshot is restored.')
+    return false
+  }
+  const isLoadingFolios = SERVER_API_ENABLED && serverCashierState === 'loading'
+  const folioError = SERVER_API_ENABLED && serverCashierState === 'error' ? serverSnapshotError : null
 
   const postAccountingReceipt = useCallback((folio: Folio, amount: number, method: FolioPayment['method'], reference?: string) => {
     if (SERVER_API_ENABLED) return null
@@ -300,28 +566,6 @@ export function CashierView() {
     return entry
   }, [setAccountingEntries])
 
-  const refreshServerFolios = useCallback(async () => {
-    if (!SERVER_API_ENABLED) return []
-    setIsLoadingFolios(true)
-    setFolioError(null)
-    try {
-      const payload = await pmsApi<{ ok: true; data: any[] }>('/api/reservations', authToken)
-      const nextFolios = payload.data.map(folioFromServerReservation).filter(Boolean) as Folio[]
-      setServerFolios(nextFolios)
-      return nextFolios
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to load cashier folios.'
-      setFolioError(message)
-      return []
-    } finally {
-      setIsLoadingFolios(false)
-    }
-  }, [authToken])
-
-  useEffect(() => {
-    void refreshServerFolios()
-  }, [refreshServerFolios])
-  
   const folios = useMemo(() => {
     if (SERVER_API_ENABLED) return serverFolios
 
@@ -336,7 +580,7 @@ export function CashierView() {
       if (folio && !merged.has(folio.id)) merged.set(folio.id, folio)
     })
     return [...merged.values()]
-  }, [authToken, canonicalFoliosRaw, foliosRaw, rooms, serverFolios])
+  }, [canonicalFoliosRaw, foliosRaw, rooms, serverFolios])
   
   const setFolios = (updater: Folio[] | ((current: Folio[]) => Folio[])) => {
     if (SERVER_API_ENABLED) {
@@ -361,7 +605,7 @@ export function CashierView() {
         result = result.filter(f => f.status === 'OPEN')
         break
       case 'closed':
-        result = result.filter(f => f.status === 'CLOSED')
+        result = result.filter(f => f.status === 'CLOSED' || f.status === 'REFUNDED')
         break
     }
     
@@ -376,9 +620,42 @@ export function CashierView() {
     
     return result
   }, [folios, selectedTab, searchQuery])
+
+  useEffect(() => {
+    const query = readAuthoritativeWorkflowQuery()
+    if (query?.workflow !== 'cashier' || serverCashierState !== 'ready') return
+
+    const folio = folios.find((candidate) => (
+      candidate.id === query.folioId
+      && candidate.reservationId === query.reservationId
+    ))
+    clearAuthoritativeWorkflowQuery()
+    if (!folio) {
+      toast.error('The requested folio is not available to this cashier session.')
+      return
+    }
+    setSelectedTab(folio.status === 'OPEN' ? 'open' : 'all')
+    setSelectedFolio(folio)
+  }, [folios, serverCashierState, workflowNavigationVersion])
   
   const stats = useMemo(() => {
     const open = folios.filter(f => f.status === 'OPEN')
+    if (SERVER_API_ENABLED) {
+      const sumSatang = (items: Folio[], field: 'balanceSatang' | 'totalSatang' | 'paidSatang') => items.reduce((total, folio) => {
+        const value = folio[field]
+        if (!value) throw new TypeError(`Authoritative folio ${folio.id} is missing ${field}.`)
+        return total + parseMoneySatang(value)
+      }, 0n)
+      return {
+        openFolios: open.length,
+        totalOutstanding: satangToDisplayBaht(sumSatang(open, 'balanceSatang').toString() as MoneySatang),
+        totalRevenue: satangToDisplayBaht(sumSatang(folios, 'totalSatang').toString() as MoneySatang),
+        totalCollected: satangToDisplayBaht(sumSatang(folios, 'paidSatang').toString() as MoneySatang),
+        totalOutstandingSatang: sumSatang(open, 'balanceSatang').toString() as MoneySatang,
+        totalRevenueSatang: sumSatang(folios, 'totalSatang').toString() as MoneySatang,
+        totalCollectedSatang: sumSatang(folios, 'paidSatang').toString() as MoneySatang,
+      }
+    }
     const totalOutstanding = open.reduce((sum, f) => sum + f.balance, 0)
     const totalRevenue = folios.reduce((sum, f) => sum + f.total, 0)
     const totalCollected = folios.reduce((sum, f) => sum + f.paid, 0)
@@ -387,7 +664,10 @@ export function CashierView() {
       openFolios: open.length,
       totalOutstanding,
       totalRevenue,
-      totalCollected
+      totalCollected,
+      totalOutstandingSatang: undefined,
+      totalRevenueSatang: undefined,
+      totalCollectedSatang: undefined,
     }
   }, [folios])
   
@@ -415,14 +695,28 @@ export function CashierView() {
   }
 
   const openPaymentDialog = (folio: Folio) => {
+    if (!requireAuthoritativeSnapshot()) return
+    if (!canProcessPayment) {
+      toast.error('Payment processing permission is required.')
+      return
+    }
     setPaymentFolio(folio)
-    setPaymentAmount(folio.balance > 0 ? String(folio.balance.toFixed(2)) : '')
+    setPaymentAmount(
+      SERVER_API_ENABLED && folio.balanceSatang
+        ? moneySatangToDecimal(folio.balanceSatang)
+        : folio.balance > 0 ? String(folio.balance.toFixed(2)) : '',
+    )
     setPaymentMethod('CASH')
     setPaymentReference('')
     setPaymentError(null)
   }
 
   const openChargeDialog = (folio: Folio) => {
+    if (!requireAuthoritativeSnapshot()) return
+    if (!canPostCharges) {
+      toast.error('Charge posting permission is required.')
+      return
+    }
     setChargeFolio(folio)
     setChargeCategory('OTHER')
     setChargeDescription('')
@@ -432,6 +726,11 @@ export function CashierView() {
   }
 
   const openPostChargeFromHeader = () => {
+    if (!requireAuthoritativeSnapshot()) return
+    if (!canPostCharges) {
+      toast.error('Charge posting permission is required.')
+      return
+    }
     const openFolios = folios.filter((folio) => folio.status === 'OPEN')
     if (openFolios.length === 1) {
       openChargeDialog(openFolios[0])
@@ -449,15 +748,14 @@ export function CashierView() {
     }
 
     const propertyName = propertyData?.name?.trim() || 'Hotel'
-    const currency = propertyData?.currency?.trim() || 'THB'
     const chargeRows = folio.charges.map((charge) => `
       <tr>
         <td>${format(charge.date, 'yyyy-MM-dd')}</td>
         <td>${escapeHtml(charge.category)}</td>
         <td>${escapeHtml(charge.description)}</td>
         <td class="num">${charge.quantity}</td>
-        <td class="num">${escapeHtml(currency)} ${charge.unitPrice.toLocaleString()}</td>
-        <td class="num">${escapeHtml(currency)} ${charge.total.toLocaleString()}</td>
+        <td class="num">${escapeHtml(formatAmount(charge.unitPrice, charge.unitPriceSatang))}</td>
+        <td class="num">${escapeHtml(formatAmount(charge.total, charge.totalSatang))}</td>
       </tr>
     `).join('')
     const paymentRows = folio.payments.map((payment) => `
@@ -465,7 +763,7 @@ export function CashierView() {
         <td>${format(payment.date, 'yyyy-MM-dd HH:mm')}</td>
         <td>${escapeHtml(payment.method.replace('_', ' '))}</td>
         <td>${escapeHtml(payment.reference || '')}</td>
-        <td class="num">${escapeHtml(currency)} ${payment.amount.toLocaleString()}</td>
+        <td class="num">${escapeHtml(formatAmount(payment.amount, payment.amountSatang))}</td>
       </tr>
     `).join('')
 
@@ -495,9 +793,9 @@ export function CashierView() {
           <h2>Payments</h2>
           <table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th class="num">Amount</th></tr></thead><tbody>${paymentRows || '<tr><td colspan="4">No payments</td></tr>'}</tbody></table>
           <div class="totals">
-            <div><span>Subtotal</span><span>${escapeHtml(currency)} ${folio.subtotal.toLocaleString()}</span></div>
-            <div><span>Paid</span><span>${escapeHtml(currency)} ${folio.paid.toLocaleString()}</span></div>
-            <div class="balance"><span>Balance</span><span>${escapeHtml(currency)} ${folio.balance.toLocaleString()}</span></div>
+            <div><span>Subtotal</span><span>${escapeHtml(formatAmount(folio.subtotal, folio.subtotalSatang))}</span></div>
+            <div><span>Paid</span><span>${escapeHtml(formatAmount(folio.paid, folio.paidSatang))}</span></div>
+            <div class="balance"><span>Balance</span><span>${escapeHtml(formatAmount(folio.balance, folio.balanceSatang))}</span></div>
           </div>
         </body>
       </html>
@@ -510,11 +808,11 @@ export function CashierView() {
   const exportSelectedFolio = (folio: Folio) => {
     const rows = [
       ['type', 'date', 'category_or_method', 'description_or_reference', 'quantity', 'amount', 'total'],
-      ...folio.charges.map((charge) => ['charge', format(charge.date, 'yyyy-MM-dd'), charge.category, charge.description, String(charge.quantity), String(charge.unitPrice), String(charge.total)]),
-      ...folio.payments.map((payment) => ['payment', format(payment.date, 'yyyy-MM-dd HH:mm'), payment.method, payment.reference || '', '', String(payment.amount), String(payment.amount)]),
-      ['summary', '', 'subtotal', '', '', '', String(folio.subtotal)],
-      ['summary', '', 'paid', '', '', '', String(folio.paid)],
-      ['summary', '', 'balance', '', '', '', String(folio.balance)],
+      ...folio.charges.map((charge) => ['charge', format(charge.date, 'yyyy-MM-dd'), charge.category, charge.description, String(charge.quantity), exportAmount(charge.unitPrice, charge.unitPriceSatang), exportAmount(charge.total, charge.totalSatang)]),
+      ...folio.payments.map((payment) => ['payment', format(payment.date, 'yyyy-MM-dd HH:mm'), payment.method, payment.reference || '', '', exportAmount(payment.amount, payment.amountSatang), exportAmount(payment.amount, payment.amountSatang)]),
+      ['summary', '', 'subtotal', '', '', '', exportAmount(folio.subtotal, folio.subtotalSatang)],
+      ['summary', '', 'paid', '', '', '', exportAmount(folio.paid, folio.paidSatang)],
+      ['summary', '', 'balance', '', '', '', exportAmount(folio.balance, folio.balanceSatang)],
     ]
     const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
@@ -528,14 +826,36 @@ export function CashierView() {
 
   const handleSubmitPayment = async () => {
     if (!paymentFolio) return
-    const amount = Number(paymentAmount)
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setPaymentError('Payment amount must be greater than zero.')
+    if (!requireAuthoritativeSnapshot()) return
+    if (!canProcessPayment) {
+      setPaymentError('Payment processing permission is required.')
       return
     }
-    if (amount > paymentFolio.balance) {
-      setPaymentError('Payment cannot exceed the remaining balance.')
-      return
+    let amount: number
+    let amountSatang: MoneySatang | undefined
+    if (SERVER_API_ENABLED) {
+      try {
+        amountSatang = parseBahtInputToSatang(paymentAmount)
+        if (parseMoneySatang(amountSatang) <= 0n) throw new TypeError('Payment amount must be greater than zero.')
+        if (!paymentFolio.balanceSatang) throw new TypeError('Authoritative folio balance is unavailable.')
+        if (parseMoneySatang(amountSatang) > parseMoneySatang(paymentFolio.balanceSatang)) {
+          throw new TypeError('Payment cannot exceed the remaining balance.')
+        }
+        amount = satangToDisplayBaht(amountSatang)
+      } catch (error) {
+        setPaymentError(error instanceof Error ? error.message : 'Payment amount must be a valid exact amount.')
+        return
+      }
+    } else {
+      amount = Number(paymentAmount)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        setPaymentError('Payment amount must be greater than zero.')
+        return
+      }
+      if (amount > paymentFolio.balance) {
+        setPaymentError('Payment cannot exceed the remaining balance.')
+        return
+      }
     }
     if (paymentReferenceRequired && !paymentReference.trim()) {
       setPaymentError('Reference is required for card, transfer, and online payments.')
@@ -548,7 +868,7 @@ export function CashierView() {
       if (SERVER_API_ENABLED) {
         const requestBody = {
           folioId: paymentFolio.id,
-          amount,
+          amountSatang: amountSatang!,
           method: paymentMethod,
           reference: paymentReference.trim() || undefined,
         }
@@ -607,15 +927,33 @@ export function CashierView() {
 
   const handleSubmitCharge = async () => {
     if (!chargeFolio) return
-    const amount = Number(chargeAmount)
+    if (!requireAuthoritativeSnapshot()) return
+    if (!canPostCharges) {
+      setChargeError('Charge posting permission is required.')
+      return
+    }
+    let amount: number
+    let amountSatang: MoneySatang | undefined
     const quantity = Number(chargeQuantity)
     if (!chargeDescription.trim()) {
       setChargeError('Charge description is required.')
       return
     }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setChargeError('Charge amount must be greater than zero.')
-      return
+    if (SERVER_API_ENABLED) {
+      try {
+        amountSatang = parseBahtInputToSatang(chargeAmount)
+        if (parseMoneySatang(amountSatang) <= 0n) throw new TypeError('Charge amount must be greater than zero.')
+        amount = satangToDisplayBaht(amountSatang)
+      } catch (error) {
+        setChargeError(error instanceof Error ? error.message : 'Charge amount must be a valid exact amount.')
+        return
+      }
+    } else {
+      amount = Number(chargeAmount)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        setChargeError('Charge amount must be greater than zero.')
+        return
+      }
     }
     if (!Number.isInteger(quantity) || quantity < 1) {
       setChargeError('Quantity must be at least 1.')
@@ -630,7 +968,7 @@ export function CashierView() {
           folioId: chargeFolio.id,
           category: chargeCategory,
           description: chargeDescription,
-          amount,
+          amountSatang: amountSatang!,
           quantity,
         }
         const attempt = {
@@ -687,9 +1025,35 @@ export function CashierView() {
       setIsSubmittingCharge(false)
     }
   }
+
+  if (SERVER_API_ENABLED && serverCashierState !== 'ready') {
+    if (serverCashierState === 'loading') {
+      return (
+        <div className="flex min-h-full items-center justify-center bg-muted/20 p-6" data-testid="server-cashier-loading">
+          <div className="rounded-lg border bg-background px-4 py-3 text-sm text-muted-foreground shadow-sm">
+            Loading authoritative cashier folios…
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="flex min-h-full items-center justify-center bg-muted/20 p-6" data-testid="server-cashier-error">
+        <Card className="max-w-md p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold text-foreground">Cashier unavailable</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {serverSnapshotError || 'The PMS cashier snapshot is unavailable. Retry before recording a payment or charge.'}
+          </p>
+          <Button className="mt-4" variant="outline" onClick={() => void refreshServerFolios().catch(() => undefined)}>
+            Retry
+          </Button>
+        </Card>
+      </div>
+    )
+  }
   
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-background" data-testid={SERVER_API_ENABLED ? 'server-cashier-view' : undefined}>
       <div className="flex-none border-b border-border bg-card">
         <div className="px-4 py-2.5">
           <div className="flex items-center justify-between mb-3">
@@ -699,10 +1063,12 @@ export function CashierView() {
                 Manage guest folios and payments
               </p>
             </div>
-            <Button size="sm" className="gap-1.5 h-7 text-xs" onClick={openPostChargeFromHeader}>
-              <Plus size={14} weight="bold" />
-              Post Charge
-            </Button>
+            {canPostCharges && (
+              <Button size="sm" className="gap-1.5 h-7 text-xs" onClick={openPostChargeFromHeader}>
+                <Plus size={14} weight="bold" />
+                Post Charge
+              </Button>
+            )}
           </div>
           
           <div className="relative max-w-sm">
@@ -729,15 +1095,15 @@ export function CashierView() {
             </Card>
             <Card className="p-2">
               <div className="text-[10px] font-medium text-muted-foreground mb-0.5">Outstanding</div>
-              <div className="text-lg font-bold text-orange-600">฿{stats.totalOutstanding.toLocaleString()}</div>
+              <div className="text-lg font-bold text-orange-600">{formatAmount(stats.totalOutstanding, stats.totalOutstandingSatang)}</div>
             </Card>
             <Card className="p-2">
               <div className="text-[10px] font-medium text-muted-foreground mb-0.5">Revenue</div>
-              <div className="text-lg font-bold text-emerald-600">฿{stats.totalRevenue.toLocaleString()}</div>
+              <div className="text-lg font-bold text-emerald-600">{formatAmount(stats.totalRevenue, stats.totalRevenueSatang)}</div>
             </Card>
             <Card className="p-2">
               <div className="text-[10px] font-medium text-muted-foreground mb-0.5">Collected</div>
-              <div className="text-lg font-bold text-blue-600">฿{stats.totalCollected.toLocaleString()}</div>
+              <div className="text-lg font-bold text-blue-600">{formatAmount(stats.totalCollected, stats.totalCollectedSatang)}</div>
             </Card>
           </div>
         </div>
@@ -801,7 +1167,7 @@ export function CashierView() {
                             className={cn(
                               'text-[10px] border py-0 h-4',
                               folio.status === 'OPEN' && 'bg-blue-100 text-blue-800 border-blue-200',
-                              folio.status === 'CLOSED' && 'bg-slate-100 text-slate-600 border-slate-200'
+                              (folio.status === 'CLOSED' || folio.status === 'REFUNDED') && 'bg-slate-100 text-slate-600 border-slate-200'
                             )}
                           >
                             {folio.status}
@@ -835,35 +1201,35 @@ export function CashierView() {
                         <div className="space-y-0.5 text-xs mb-1.5">
                           <div className="flex justify-between text-muted-foreground">
                             <span>Subtotal:</span>
-                            <span>฿{folio.subtotal.toLocaleString()}</span>
+                            <span>{formatAmount(folio.subtotal, folio.subtotalSatang)}</span>
                           </div>
                           <div className="flex justify-between text-muted-foreground">
                             <span>Included tax:</span>
-                            <span>฿{folio.tax.toLocaleString()}</span>
+                            <span>{formatAmount(folio.tax, folio.taxSatang)}</span>
                           </div>
                           <Separator className="my-0.5" />
                           <div className="flex justify-between font-semibold text-sm text-foreground">
                             <span>Total:</span>
-                            <span>฿{folio.total.toLocaleString()}</span>
+                            <span>{formatAmount(folio.total, folio.totalSatang)}</span>
                           </div>
                           <div className="flex justify-between text-emerald-600 text-xs">
                             <span>Paid:</span>
-                            <span>฿{folio.paid.toLocaleString()}</span>
+                            <span>{formatAmount(folio.paid, folio.paidSatang)}</span>
                           </div>
                           {folio.balance > 0 && (
                             <div className="flex justify-between font-bold text-orange-600 text-xs">
                               <span>Balance:</span>
-                              <span>฿{folio.balance.toLocaleString()}</span>
+                              <span>{formatAmount(folio.balance, folio.balanceSatang)}</span>
                             </div>
                           )}
                         </div>
-                        {folio.balance === 0 && folio.status === 'CLOSED' && (
+                        {folio.balance === 0 && (folio.status === 'CLOSED' || folio.status === 'REFUNDED') && (
                           <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px] w-full justify-center py-0 h-4">
                             <CheckCircle size={10} weight="fill" className="mr-0.5" />
                             Paid in Full
                           </Badge>
                         )}
-                        {folio.status === 'OPEN' && folio.balance > 0 && (
+                          {folio.status === 'OPEN' && folio.balance > 0 && canProcessPayment && (
                           <Button
                             size="sm"
                             className="mt-2 h-7 w-full gap-1.5 text-xs"
@@ -898,7 +1264,7 @@ export function CashierView() {
                       className={cn(
                         'text-xs',
                         selectedFolio.status === 'OPEN' && 'bg-blue-100 text-blue-800',
-                        selectedFolio.status === 'CLOSED' && 'bg-slate-100 text-slate-600'
+                        (selectedFolio.status === 'CLOSED' || selectedFolio.status === 'REFUNDED') && 'bg-slate-100 text-slate-600'
                       )}
                     >
                       {selectedFolio.status}
@@ -951,9 +1317,9 @@ export function CashierView() {
                           </td>
                           <td className="p-3 text-foreground">{charge.description}</td>
                           <td className="p-3 text-right text-muted-foreground">{charge.quantity}</td>
-                          <td className="p-3 text-right text-foreground">฿{charge.unitPrice.toLocaleString()}</td>
-                          <td className="p-3 text-right text-muted-foreground">฿{charge.tax.toLocaleString()}</td>
-                          <td className="p-3 text-right font-medium text-foreground">฿{charge.total.toLocaleString()}</td>
+                          <td className="p-3 text-right text-foreground">{formatAmount(charge.unitPrice, charge.unitPriceSatang)}</td>
+                          <td className="p-3 text-right text-muted-foreground">{formatAmount(charge.tax, SERVER_API_ENABLED ? '0' as MoneySatang : undefined)}</td>
+                          <td className="p-3 text-right font-medium text-foreground">{formatAmount(charge.total, charge.totalSatang)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -989,7 +1355,7 @@ export function CashierView() {
                             </td>
                             <td className="p-3 text-muted-foreground font-mono text-xs">{payment.reference || '—'}</td>
                             <td className="p-3 text-muted-foreground">{payment.receivedBy}</td>
-                            <td className="p-3 text-right font-medium text-emerald-600">฿{payment.amount.toLocaleString()}</td>
+                            <td className="p-3 text-right font-medium text-emerald-600">{formatAmount(payment.amount, payment.amountSatang)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1002,20 +1368,20 @@ export function CashierView() {
                 <div className="space-y-2 text-sm max-w-md ml-auto">
                   <div className="flex justify-between text-muted-foreground">
                     <span>Subtotal:</span>
-                    <span>฿{selectedFolio.subtotal.toLocaleString()}</span>
+                    <span>{formatAmount(selectedFolio.subtotal, selectedFolio.subtotalSatang)}</span>
                   </div>
                   <div className="flex justify-between text-muted-foreground">
                     <span>Included tax:</span>
-                    <span>฿{selectedFolio.tax.toLocaleString()}</span>
+                    <span>{formatAmount(selectedFolio.tax, selectedFolio.taxSatang)}</span>
                   </div>
                   <Separator className="my-2" />
                   <div className="flex justify-between font-semibold text-base text-foreground">
                     <span>Total:</span>
-                    <span>฿{selectedFolio.total.toLocaleString()}</span>
+                    <span>{formatAmount(selectedFolio.total, selectedFolio.totalSatang)}</span>
                   </div>
                   <div className="flex justify-between text-emerald-600">
                     <span>Paid:</span>
-                    <span>฿{selectedFolio.paid.toLocaleString()}</span>
+                    <span>{formatAmount(selectedFolio.paid, selectedFolio.paidSatang)}</span>
                   </div>
                   <Separator className="my-2" />
                   <div className={cn(
@@ -1023,21 +1389,25 @@ export function CashierView() {
                     selectedFolio.balance > 0 ? 'text-orange-600' : 'text-emerald-600'
                   )}>
                     <span>Balance Due:</span>
-                    <span>฿{selectedFolio.balance.toLocaleString()}</span>
+                    <span>{formatAmount(selectedFolio.balance, selectedFolio.balanceSatang)}</span>
                   </div>
                 </div>
               </div>
               
-              {selectedFolio.status === 'OPEN' && selectedFolio.balance > 0 && (
+              {selectedFolio.status === 'OPEN' && selectedFolio.balance > 0 && (canProcessPayment || canPostCharges) && (
                 <div className="flex gap-3">
-                  <Button className="flex-1 gap-2" onClick={() => openPaymentDialog(selectedFolio)}>
-                    <Money size={18} />
-                    Collect Payment
-                  </Button>
-                  <Button variant="outline" className="flex-1 gap-2" onClick={() => openChargeDialog(selectedFolio)}>
-                    <Plus size={18} />
-                    Add Charge
-                  </Button>
+                  {canProcessPayment && (
+                    <Button className="flex-1 gap-2" onClick={() => openPaymentDialog(selectedFolio)}>
+                      <Money size={18} />
+                      Collect Payment
+                    </Button>
+                  )}
+                  {canPostCharges && (
+                    <Button variant="outline" className="flex-1 gap-2" onClick={() => openChargeDialog(selectedFolio)}>
+                      <Plus size={18} />
+                      Add Charge
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -1056,7 +1426,7 @@ export function CashierView() {
                 <div className="font-medium">{paymentFolio.guestName}</div>
                 <div className="text-muted-foreground">Folio #{paymentFolio.id} · Room {paymentFolio.roomNumber}</div>
                 <div className="mt-2 font-semibold text-orange-600">
-                  Balance due: ฿{paymentFolio.balance.toLocaleString()}
+                  Balance due: {formatAmount(paymentFolio.balance, paymentFolio.balanceSatang)}
                 </div>
               </div>
 
@@ -1067,7 +1437,11 @@ export function CashierView() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setPaymentAmount(paymentFolio.balance.toFixed(2))}
+                    onClick={() => setPaymentAmount(
+                      SERVER_API_ENABLED && paymentFolio.balanceSatang
+                        ? moneySatangToDecimal(paymentFolio.balanceSatang)
+                        : paymentFolio.balance.toFixed(2),
+                    )}
                   >
                     Full
                   </Button>
@@ -1075,7 +1449,11 @@ export function CashierView() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setPaymentAmount((Math.round((paymentFolio.balance / 2) * 100) / 100).toFixed(2))}
+                    onClick={() => setPaymentAmount(
+                      SERVER_API_ENABLED && paymentFolio.balanceSatang
+                        ? moneySatangToDecimal(((parseMoneySatang(paymentFolio.balanceSatang) + 1n) / 2n).toString() as MoneySatang)
+                        : (Math.round((paymentFolio.balance / 2) * 100) / 100).toFixed(2),
+                    )}
                   >
                     Half
                   </Button>
@@ -1099,11 +1477,11 @@ export function CashierView() {
                 <div className="rounded-md border bg-muted/40 p-3 text-xs">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Remaining after payment</span>
-                    <span className={cn('font-semibold', paymentRemainingBalance > 0 ? 'text-orange-600' : 'text-emerald-600')}>
-                      à¸¿{paymentRemainingBalance.toLocaleString()}
+                    <span className={cn('font-semibold', paymentWillClose ? 'text-emerald-600' : 'text-orange-600')}>
+                      {formatAmount(paymentRemainingBalance, paymentRemainingBalanceSatang)}
                     </span>
                   </div>
-                  {paymentAmountNumber > 0 && paymentRemainingBalance <= 0 && (
+                  {paymentWillClose && (
                     <div className="mt-1 flex items-center gap-1 text-emerald-600">
                       <CheckCircle size={12} weight="fill" />
                       This payment will close the folio.

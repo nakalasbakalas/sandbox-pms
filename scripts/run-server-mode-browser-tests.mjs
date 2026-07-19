@@ -1,4 +1,4 @@
-/* global AbortController, clearTimeout, console, fetch, process, setTimeout, TextDecoder, window */
+/* global AbortController, clearTimeout, console, document, fetch, PopStateEvent, process, setTimeout, TextDecoder, URL, URLSearchParams, window */
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -18,8 +18,42 @@ const prisma = createPrismaClient()
 const runId = randomUUID().replaceAll('-', '').slice(0, 12)
 const username = `server-browser-${runId}`
 const password = `Server-Browser-${runId}-Pass!`
+const limitedUsername = `server-browser-limited-${runId}`
+const limitedPassword = `Server-Browser-Limited-${runId}-Pass!`
+const channelViewerUsername = `server-browser-channel-viewer-${runId}`
+const channelViewerPassword = `Server-Browser-Channel-Viewer-${runId}-Pass!`
+const cafeCashierUsername = `server-browser-cafe-cashier-${runId}`
+const cafeCashierPassword = `Server-Browser-Cafe-Cashier-${runId}-Pass!`
+const guestViewerUsername = `server-browser-guest-viewer-${runId}`
+const guestViewerPassword = `Server-Browser-Guest-Viewer-${runId}-Pass!`
 const taskTitle = `Server reload task ${runId}`
 const ruleName = `Server reload rate ${runId}`
+const boardRoomNumber = `B-${runId.slice(0, 8)}`
+const boardMoveRoomNumber = `M-${runId.slice(0, 8)}`
+const boardGuestOne = `Board Alpha ${runId}`
+const boardGuestTwo = `Board Bravo ${runId}`
+const boardGuestThree = `Board Charlie ${runId}`
+const cashierMutationGuest = `Cashier Mutation ${runId}`
+const fakeBoardRoomNumber = `LOCAL-${runId}`
+const fakeBoardGuest = `Browser Shadow ${runId}`
+const fakeGuestDirectoryName = `Browser Guest Directory Shadow ${runId}`
+const fakeChannelName = `Browser Fake Channel ${runId}`
+const fakeRoomsPropertyName = `Browser Rooms Property ${runId}`
+const fakeRoomsTypeName = `Browser Rooms Type ${runId}`
+const fakeRoomsRoomNumber = `ROOMS-LOCAL-${runId.slice(0, 8)}`
+const fakeCashierGuest = `Browser Cashier Shadow ${runId}`
+const fakeCashierFolioNumber = `LOCAL-FOLIO-${runId.slice(0, 8)}`
+const inspectedRoomTypeCode = `FAMILY_${runId.toUpperCase()}`
+const inspectedRoomTypeName = `Family Suite ${runId}`
+const inspectedRoomNumber = `I-${runId.slice(0, 8)}`
+const persistedChannelMappingName = `Server Channel Mapping ${runId}`
+
+function dateKeyWithOffset(offset) {
+  const date = new Date()
+  date.setUTCHours(12, 0, 0, 0)
+  date.setUTCDate(date.getUTCDate() + offset)
+  return date.toISOString().slice(0, 10)
+}
 
 function availablePort() {
   return new Promise((resolvePort, reject) => {
@@ -44,7 +78,7 @@ function startServer(port) {
       SESSION_SECRET: `server-browser-session-${runId}-01234567890123456789`,
       VITE_PMS_API_MODE: 'server',
       SSE_ENABLED: 'true',
-      ACCOUNTING_V2_ENABLED: 'false',
+      ACCOUNTING_V2_ENABLED: 'true',
       DIRECT_BOOKING_ENABLED: 'false',
       OTA_LIVE_WRITES_ENABLED: 'false',
       BOOKING_EMAIL_NEAR_LIVE_ENABLED: 'false',
@@ -75,6 +109,64 @@ function stopProcessTree(child) {
   })
 }
 
+function boundedSignal(signal, label, timeoutMs = 15_000) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error(`${label} timed out. Confirm the frontend was built with VITE_PMS_API_MODE=server.`)),
+      timeoutMs,
+    )
+    signal.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
+  })
+}
+
+async function armDomainEventProbe(page, expected) {
+  await page.evaluate((target) => {
+    const previous = window.__pmsDomainEventProbe
+    if (previous?.onEvent) window.removeEventListener('pms:domain-event', previous.onEvent)
+    const seenAtById = {}
+    const onEvent = (event) => {
+      const detail = event.detail || {}
+      if (
+        detail.type === target.type
+        && detail.aggregateType === target.aggregateType
+        && detail.aggregateId === target.aggregateId
+      ) {
+        seenAtById[String(detail.id)] = Date.now()
+      }
+    }
+    window.__pmsDomainEventProbe = { target, seenAtById, onEvent }
+    window.addEventListener('pms:domain-event', onEvent)
+  }, expected)
+}
+
+async function waitForDomainEventProbe(page, expected) {
+  await page.waitForFunction((target) => {
+    const probe = window.__pmsDomainEventProbe
+    return Boolean(
+      probe?.target?.type === target.type
+      && probe.target?.aggregateType === target.aggregateType
+      && probe.target?.aggregateId === target.aggregateId
+      && probe.seenAtById?.[String(target.id)],
+    )
+  }, expected)
+  return page.evaluate((target) => {
+    const probe = window.__pmsDomainEventProbe
+    const seenAt = probe?.seenAtById?.[String(target.id)]
+    if (probe?.onEvent) window.removeEventListener('pms:domain-event', probe.onEvent)
+    window.__pmsDomainEventProbe = undefined
+    return seenAt
+  }, expected)
+}
+
 async function waitForHttp(url, server) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (server.child.exitCode !== null) throw new Error(`PMS server exited early.\n${server.output()}`)
@@ -89,11 +181,13 @@ async function waitForHttp(url, server) {
   throw new Error(`PMS server did not become ready.\n${server.output()}`)
 }
 
-async function apiJson(request, method, path, data) {
+async function apiJson(request, method, path, data, extraHeaders = {}) {
   const response = await request.fetch(path, {
     method,
     ...(data === undefined ? {} : { data }),
-    headers: data === undefined ? undefined : { 'content-type': 'application/json' },
+    headers: data === undefined && Object.keys(extraHeaders).length === 0
+      ? undefined
+      : { ...(data === undefined ? {} : { 'content-type': 'application/json' }), ...extraHeaders },
   })
   const payload = await response.json().catch(() => ({}))
   assert.equal(response.ok(), true, `${method} ${path} failed (${response.status()}): ${payload.error || JSON.stringify(payload)}`)
@@ -135,6 +229,32 @@ async function readNextSseEvent({ url, cookie, lastEventId, trigger }) {
   }
 }
 
+async function readSseAccessRevoked({ url, cookie, lastEventId, trigger }) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15_000)
+  try {
+    const response = await fetch(`${url}/api/events?after=${encodeURIComponent(String(lastEventId))}`, {
+      headers: { cookie },
+      signal: controller.signal,
+    })
+    assert.equal(response.status, 200, 'authorized SSE connection opens before membership revocation')
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    await trigger()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) throw new Error('SSE stream closed without an access-revoked frame.')
+      buffer += decoder.decode(value, { stream: true })
+      if (buffer.includes('event: access_revoked') && buffer.includes('"reconnect":true')) return
+      if (buffer.length > 20_000) buffer = buffer.slice(-20_000)
+    }
+  } finally {
+    clearTimeout(timeout)
+    controller.abort()
+  }
+}
+
 console.log(`Server-mode browser DB target: ${redactDatabaseUrl(e2eDatabaseUrl)}`)
 await access(resolve(repoRoot, 'dist', 'index.html')).catch(() => {
   throw new Error('Server-mode browser tests require a server-mode build. Run VITE_PMS_API_MODE=server npm run build first.')
@@ -145,6 +265,47 @@ assert.ok(property, 'the guarded E2E seed must provide the SANDBOX property')
 const roomType = await prisma.roomType.findFirst({ where: { propertyId: property.id }, orderBy: { code: 'asc' } })
 const room = await prisma.room.findFirst({ where: { propertyId: property.id }, orderBy: { number: 'asc' } })
 assert.ok(roomType && room, 'the guarded E2E seed must provide room inventory')
+const inspectedRoomType = await prisma.roomType.create({
+  data: {
+    propertyId: property.id,
+    code: inspectedRoomTypeCode,
+    name: inspectedRoomTypeName,
+    baseRate: 1_234,
+    baseRateSatang: 123_400n,
+    standardOcc: 2,
+    maxOccupancy: 4,
+  },
+})
+await prisma.room.create({
+  data: {
+    propertyId: property.id,
+    roomTypeId: inspectedRoomType.id,
+    number: inspectedRoomNumber,
+    floor: 98,
+    operationalStatus: 'AVAILABLE',
+    currentStatus: 'INSPECTED',
+  },
+})
+const boardRoom = await prisma.room.create({
+  data: {
+    propertyId: property.id,
+    roomTypeId: roomType.id,
+    number: boardRoomNumber,
+    floor: 99,
+    operationalStatus: 'AVAILABLE',
+    currentStatus: 'VACANT_CLEAN',
+  },
+})
+const boardMoveRoom = await prisma.room.create({
+  data: {
+    propertyId: property.id,
+    roomTypeId: roomType.id,
+    number: boardMoveRoomNumber,
+    floor: 99,
+    operationalStatus: 'AVAILABLE',
+    currentStatus: 'VACANT_CLEAN',
+  },
+})
 
 await prisma.user.create({
   data: {
@@ -155,6 +316,54 @@ await prisma.user.create({
     lastName: 'Browser',
     role: 'ADMIN',
     propertyMemberships: { create: { propertyId: property.id, role: 'ADMIN', active: true } },
+  },
+})
+
+await prisma.user.create({
+  data: {
+    username: cafeCashierUsername,
+    email: `${cafeCashierUsername}@example.test`,
+    passwordHash: await createPasswordHash(cafeCashierPassword),
+    firstName: 'Cafe',
+    lastName: 'Cashier',
+    role: 'ADMIN',
+    propertyMemberships: { create: { propertyId: property.id, role: 'CAFE_STAFF', active: true } },
+  },
+})
+
+await prisma.user.create({
+  data: {
+    username: guestViewerUsername,
+    email: `${guestViewerUsername}@example.test`,
+    passwordHash: await createPasswordHash(guestViewerPassword),
+    firstName: 'Guest',
+    lastName: 'Viewer',
+    role: 'ADMIN',
+    propertyMemberships: { create: { propertyId: property.id, role: 'CASHIER', active: true } },
+  },
+})
+
+const limitedUser = await prisma.user.create({
+  data: {
+    username: limitedUsername,
+    email: `${limitedUsername}@example.test`,
+    passwordHash: await createPasswordHash(limitedPassword),
+    firstName: 'Membership',
+    lastName: 'Limited',
+    role: 'ADMIN',
+    propertyMemberships: { create: { propertyId: property.id, role: 'HOUSEKEEPING', active: true } },
+  },
+})
+
+await prisma.user.create({
+  data: {
+    username: channelViewerUsername,
+    email: `${channelViewerUsername}@example.test`,
+    passwordHash: await createPasswordHash(channelViewerPassword),
+    firstName: 'Channel',
+    lastName: 'Viewer',
+    role: 'ADMIN',
+    propertyMemberships: { create: { propertyId: property.id, role: 'MANAGER', active: true } },
   },
 })
 
@@ -182,10 +391,402 @@ try {
   assert.equal(unauthenticatedSse.status, 401, 'SSE requires an authenticated session')
 
   browser = await chromium.launch({ headless: true })
+
+  const authRaceContext = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 800 } })
+  const authRacePage = await authRaceContext.newPage()
+  let releaseStaleBootstrap
+  let resolveBootstrapIntercepted
+  let resolveBootstrapCompleted
+  const staleBootstrapRelease = new Promise((resolveRelease) => {
+    releaseStaleBootstrap = resolveRelease
+  })
+  const bootstrapIntercepted = new Promise((resolveIntercepted) => {
+    resolveBootstrapIntercepted = resolveIntercepted
+  })
+  const bootstrapCompleted = new Promise((resolveCompleted) => {
+    resolveBootstrapCompleted = resolveCompleted
+  })
+  await authRacePage.route('**/api/auth/me', async (route) => {
+    resolveBootstrapIntercepted()
+    await staleBootstrapRelease
+    await route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'Delayed stale bootstrap response' }),
+    })
+    resolveBootstrapCompleted()
+  })
+  await authRacePage.goto('/board', { waitUntil: 'domcontentloaded' })
+  await boundedSignal(bootstrapIntercepted, 'Server-auth bootstrap interception')
+  await authRacePage.locator('[data-slot="card-title"]', { hasText: 'Sign In' }).waitFor({ state: 'visible' })
+  await authRacePage.getByLabel('Username or email').fill(username)
+  await authRacePage.getByLabel('Password').fill(password)
+  const interactiveLogin = authRacePage.waitForResponse((response) =>
+    response.url().endsWith('/api/auth/login') && response.request().method() === 'POST',
+  )
+  await authRacePage.getByRole('button', { name: 'Sign In', exact: true }).click()
+  assert.equal((await interactiveLogin).status(), 200, 'interactive server login succeeds while the bootstrap request is pending')
+  releaseStaleBootstrap()
+  await boundedSignal(bootstrapCompleted, 'Delayed server-auth bootstrap completion')
+  await authRacePage.waitForTimeout(100)
+  await authRacePage.getByText('Booking Board', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(
+    await authRacePage.locator('[data-slot="card-title"]', { hasText: 'Sign In' }).count(),
+    0,
+    'a delayed failed bootstrap response cannot clear a newer interactive login',
+  )
+  assert.equal(
+    await authRacePage.evaluate(() => window.localStorage.getItem('auth:current-user')),
+    null,
+    'interactive server login keeps identity out of browser storage',
+  )
+  await authRaceContext.close()
+
   const context = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1440, height: 1000 } })
-  await context.addInitScript(() => window.localStorage.clear())
+  await context.addInitScript(({ fakeRoomNumber, fakeGuestName, fakeGuestDirectoryName, fakeChannel, fakePropertyName, fakeRoomTypeName, fakeRoomsNumber, fakeCashierGuestName, fakeCashierFolio }) => {
+    window.localStorage.clear()
+    const requestedFixturePath = window.sessionStorage.getItem('inject-local-operational-fixture')
+    const isBoardFixture = window.location.pathname === '/board'
+    const isRoomsFixture = window.location.pathname === '/rooms' && requestedFixturePath === '/rooms'
+    const isGuestsFixture = window.location.pathname === '/guests' && requestedFixturePath === '/guests'
+    const isCashierFixture = window.location.pathname === '/cashier' && requestedFixturePath === '/cashier'
+    if (!isBoardFixture && !isRoomsFixture && !isGuestsFixture && !isCashierFixture && window.location.pathname !== requestedFixturePath) return
+    if (isRoomsFixture) {
+      window.localStorage.setItem('pms-rooms', JSON.stringify([{
+        roomId: 'browser-fake-rooms-room',
+        number: fakeRoomsNumber,
+        floor: 77,
+        roomTypeId: 'browser-fake-rooms-type',
+        roomTypeCode: 'BROWSER_LOCAL',
+        roomTypeName: fakeRoomTypeName,
+        status: 'VACANT_CLEAN',
+        cleanStatus: 'CLEAN',
+      }]))
+      window.localStorage.setItem('onboarding-property', JSON.stringify({ name: fakePropertyName }))
+      window.localStorage.setItem('onboarding-room-types', JSON.stringify([{
+        id: 'browser-fake-rooms-type', code: 'BROWSER_LOCAL', name: fakeRoomTypeName,
+      }]))
+      window.localStorage.setItem('room-types-config', JSON.stringify([{
+        id: 'browser-fake-rooms-type', code: 'BROWSER_LOCAL', name: fakeRoomTypeName,
+      }]))
+      return
+    }
+    if (isGuestsFixture) {
+      const guest = {
+        id: 'browser-fake-guest-directory-profile',
+        firstName: 'Browser Guest Directory',
+        lastName: 'Shadow',
+        fullName: fakeGuestDirectoryName,
+        email: 'browser-guest-directory-shadow@example.test',
+      }
+      window.localStorage.setItem('guests', JSON.stringify([guest]))
+      window.localStorage.setItem('guests-data', JSON.stringify([guest]))
+      return
+    }
+    if (isCashierFixture) {
+      const folio = {
+        id: 'browser-fake-cashier-folio',
+        folioNumber: fakeCashierFolio,
+        guestName: fakeCashierGuestName,
+        roomNumber: 'LOCAL-CASHIER-ROOM',
+        status: 'OPEN',
+        currency: 'THB',
+        subtotal: 999,
+        tax: 0,
+        total: 999,
+        paid: 0,
+        balance: 999,
+        charges: [],
+        payments: [],
+      }
+      window.localStorage.setItem('cashier-folios', JSON.stringify([folio]))
+      window.localStorage.setItem('folios', JSON.stringify([folio]))
+      window.localStorage.setItem('accounting-entries', JSON.stringify([{
+        id: 'browser-fake-cashier-entry', folioId: folio.id, amount: 999, description: fakeCashierGuestName,
+      }]))
+      return
+    }
+    if (window.location.pathname === '/channels') {
+      window.localStorage.setItem('channels', JSON.stringify([{
+        id: 'browser-fake-channel',
+        name: fakeChannel,
+        provider: 'BOOKING_COM',
+        connected: true,
+        enabled: true,
+        status: 'ACTIVE',
+      }]))
+      window.localStorage.setItem('channel-reservations', JSON.stringify([{
+        id: 'browser-fake-channel-reservation',
+        channelId: 'browser-fake-channel',
+        guestName: fakeGuestName,
+        status: 'PENDING',
+      }]))
+      window.localStorage.setItem('channel-sync-logs', JSON.stringify([{
+        id: 'browser-fake-channel-log',
+        channelId: 'browser-fake-channel',
+        message: fakeChannel,
+        status: 'SUCCESS',
+      }]))
+      window.localStorage.setItem('channel-room-mappings', JSON.stringify([{
+        id: 'browser-fake-mapping',
+        channelId: 'browser-fake-channel',
+        externalRoomTypeName: fakeChannel,
+      }]))
+      window.localStorage.setItem('room-types-config', JSON.stringify([{
+        id: 'browser-fake-room-type',
+        name: fakeChannel,
+      }]))
+      return
+    }
+    if (isBoardFixture && window.sessionStorage.getItem('board-local-fixture-injected') === 'true') return
+    if (isBoardFixture) window.sessionStorage.setItem('board-local-fixture-injected', 'true')
+    window.localStorage.setItem('pms-rooms', JSON.stringify([{
+      id: 'browser-shadow-room',
+      number: fakeRoomNumber,
+      floor: 88,
+      type: 'DOUBLE',
+      roomTypeCode: 'DOUBLE',
+      status: 'OCCUPIED_CLEAN',
+      cleanStatus: 'CLEAN',
+    }]))
+    window.localStorage.setItem('reservations', JSON.stringify([{
+      id: 'browser-shadow-reservation',
+      confirmationCode: 'LOCAL-SHADOW',
+      guestName: fakeGuestName,
+      roomId: 'browser-shadow-room',
+      roomNumber: fakeRoomNumber,
+      checkIn: '2020-01-01',
+      checkOut: '2099-12-31',
+      status: 'CONFIRMED',
+    }]))
+    window.localStorage.setItem('reservations-data', JSON.stringify([{
+      id: 'browser-shadow-reservation',
+      guestName: fakeGuestName,
+      roomNumber: fakeRoomNumber,
+    }]))
+    window.localStorage.setItem('unassigned-reservations', JSON.stringify([{
+      id: 'browser-shadow-unassigned',
+      guestName: fakeGuestName,
+    }]))
+    window.localStorage.setItem('guests', JSON.stringify([{
+      id: 'browser-shadow-guest',
+      firstName: 'Browser',
+      lastName: 'Shadow',
+      fullName: fakeGuestName,
+    }]))
+  }, {
+    fakeRoomNumber: fakeBoardRoomNumber,
+    fakeGuestName: fakeBoardGuest,
+    fakeGuestDirectoryName,
+    fakeChannel: fakeChannelName,
+    fakePropertyName: fakeRoomsPropertyName,
+    fakeRoomTypeName: fakeRoomsTypeName,
+    fakeRoomsNumber: fakeRoomsRoomNumber,
+    fakeCashierGuestName: fakeCashierGuest,
+    fakeCashierFolio: fakeCashierFolioNumber,
+  })
   const login = await context.request.post('/api/auth/login', { data: { identity: username, password } })
   assert.equal(login.status(), 200, `server login failed: ${await login.text()}`)
+
+  const credentialContext = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 800 } })
+  await credentialContext.addInitScript(() => {
+    const credentialFixture = {
+      completed: false,
+      currentStep: 5,
+      data: {
+        adminUser: {
+          name: 'Legacy Admin',
+          email: 'legacy-admin@example.test',
+          password: 'BrowserStorageMustBeRemoved!',
+          confirmPassword: 'BrowserStorageMustBeRemoved!',
+        },
+      },
+    }
+    window.localStorage.setItem('onboarding:state', JSON.stringify(credentialFixture))
+    window.localStorage.setItem('onboarding:server-state', JSON.stringify(credentialFixture))
+    window.localStorage.setItem('onboarding:admin-user', JSON.stringify(credentialFixture.data.adminUser))
+    window.localStorage.setItem('onboarding-admin-user', JSON.stringify(credentialFixture.data.adminUser))
+    window.localStorage.setItem('auth:current-user', JSON.stringify({
+      id: 'browser-stored-user',
+      email: 'browser-user@example.test',
+      role: 'admin',
+    }))
+  })
+  const credentialLogin = await credentialContext.request.post('/api/auth/login', { data: { identity: username, password } })
+  assert.equal(credentialLogin.status(), 200, `credential-cleanup login failed: ${await credentialLogin.text()}`)
+  const credentialPage = await credentialContext.newPage()
+  await credentialPage.goto('/board', { waitUntil: 'domcontentloaded' })
+  await credentialPage.getByText('Loading PMS workspace...', { exact: true }).waitFor({ state: 'hidden' })
+  const removedCredentialKeys = await credentialPage.evaluate(() => Object.fromEntries(
+    ['onboarding:state', 'onboarding:admin-user', 'onboarding-admin-user', 'auth:current-user']
+      .map((key) => [key, window.localStorage.getItem(key)]),
+  ))
+  assert.deepEqual(removedCredentialKeys, {
+    'onboarding:state': null,
+    'onboarding:admin-user': null,
+    'onboarding-admin-user': null,
+    'auth:current-user': null,
+  }, 'server mode removes legacy onboarding credentials and browser-stored auth identity')
+  const sanitizedServerDraft = await credentialPage.evaluate(() => {
+    const raw = window.localStorage.getItem('onboarding:server-state')
+    return raw ? JSON.parse(raw) : null
+  })
+  assert.equal(sanitizedServerDraft?.data?.adminUser?.password, '', 'server onboarding draft removes the password field value')
+  assert.equal(sanitizedServerDraft?.data?.adminUser?.confirmPassword, '', 'server onboarding draft removes the confirmation field value')
+  await credentialContext.close()
+
+  const missingReservationCreateKey = await context.request.post('/api/reservations', { data: {} })
+  assert.equal(missingReservationCreateKey.status(), 400, 'staff reservation create rejects a missing idempotency key before applying input')
+  const missingGuestCreateKey = await context.request.post('/api/guests', { data: {} })
+  assert.equal(missingGuestCreateKey.status(), 400, 'staff guest create rejects a missing idempotency key before applying input')
+
+  const browserGuestCreateKey = `browser-guest-create:${randomUUID()}`
+  const browserGuestCreateInput = {
+    firstName: 'Browser Guest',
+    lastName: runId,
+    email: `browser-guest-create-${runId}@example.test`,
+  }
+  const firstBrowserGuestCreate = await context.request.post('/api/guests', {
+    data: browserGuestCreateInput,
+    headers: { 'x-idempotency-key': browserGuestCreateKey },
+  })
+  assert.equal(firstBrowserGuestCreate.status(), 201, 'the guest API reports first-create success')
+  const firstBrowserGuestPayload = await firstBrowserGuestCreate.json()
+  const replayedBrowserGuestCreate = await context.request.post('/api/guests', {
+    data: browserGuestCreateInput,
+    headers: { 'x-idempotency-key': browserGuestCreateKey },
+  })
+  assert.equal(replayedBrowserGuestCreate.status(), 200, 'the guest API reports same-intent replay success')
+  const replayedBrowserGuestPayload = await replayedBrowserGuestCreate.json()
+  assert.equal(replayedBrowserGuestPayload.data.id, firstBrowserGuestPayload.data.id, 'the guest API replay returns the original profile')
+  assert.equal(replayedBrowserGuestPayload.data.idempotentReplay, true, 'the guest API marks the replay explicitly')
+  const conflictingBrowserGuestCreate = await context.request.post('/api/guests', {
+    data: { ...browserGuestCreateInput, lastName: `${runId}-changed` },
+    headers: { 'x-idempotency-key': browserGuestCreateKey },
+  })
+  assert.equal(conflictingBrowserGuestCreate.status(), 409, 'the guest API rejects reuse of a create key for changed input')
+
+  const boardReservationOne = await apiJson(context.request, 'POST', '/api/reservations', {
+    confirmationCode: `BOARD-A-${runId}`,
+    guest: {
+      firstName: 'Board Alpha',
+      lastName: runId,
+      email: `board-alpha-${runId}@example.test`,
+    },
+    roomTypeCode: roomType.code,
+    assignedRoomId: boardRoom.id,
+    checkIn: dateKeyWithOffset(1),
+    checkOut: dateKeyWithOffset(3),
+    adults: 1,
+    children: 0,
+    childAges: [],
+    ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
+    source: 'DIRECT',
+  }, { 'x-idempotency-key': `browser-board-a:${randomUUID()}` })
+  const boardReservationTwo = await apiJson(context.request, 'POST', '/api/reservations', {
+    confirmationCode: `BOARD-B-${runId}`,
+    guest: {
+      firstName: 'Board Bravo',
+      lastName: runId,
+      email: `board-bravo-${runId}@example.test`,
+    },
+    roomTypeCode: roomType.code,
+    assignedRoomId: boardRoom.id,
+    checkIn: dateKeyWithOffset(4),
+    checkOut: dateKeyWithOffset(6),
+    adults: 2,
+    children: 0,
+    childAges: [],
+    ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
+    source: 'DIRECT',
+  }, { 'x-idempotency-key': `browser-board-b:${randomUUID()}` })
+  assert.notEqual(boardReservationOne.data.id, boardReservationTwo.data.id, 'same-room board stays persist as distinct reservations')
+  assert.equal(boardReservationOne.data.assignedRoomId, boardRoom.id, 'first board stay is assigned to the dedicated server room')
+  assert.equal(boardReservationTwo.data.assignedRoomId, boardRoom.id, 'second board stay is assigned to the dedicated server room')
+  const limitedContext = await browser.newContext({ baseURL: baseUrl })
+  const limitedLogin = await limitedContext.request.post('/api/auth/login', {
+    data: { identity: limitedUsername, password: limitedPassword },
+  })
+  assert.equal(limitedLogin.status(), 200, 'membership-limited user authenticates')
+  const deniedGuestUpdate = await limitedContext.request.patch(`/api/reservations/${boardReservationOne.data.id}/guest`, {
+    data: { firstName: 'Forbidden membership edit' },
+    headers: { 'x-idempotency-key': `membership-denied-guest-${runId}` },
+  })
+  assert.equal(deniedGuestUpdate.status(), 403, 'property membership role denies reservation guest editing despite a broader legacy user role')
+  const deniedCancellation = await limitedContext.request.post(`/api/reservations/${boardReservationOne.data.id}/cancel`, {
+    data: { reason: 'Forbidden membership cancellation.' },
+    headers: { 'x-idempotency-key': `membership-denied-cancel-${runId}` },
+  })
+  assert.equal(deniedCancellation.status(), 403, 'property membership role denies reservation cancellation despite a broader legacy user role')
+  const deniedNoShow = await limitedContext.request.post(`/api/reservations/${boardReservationOne.data.id}/no-show`, {
+    data: { reason: 'Forbidden membership no-show.' },
+    headers: { 'x-idempotency-key': `membership-denied-no-show-${runId}` },
+  })
+  assert.equal(deniedNoShow.status(), 403, 'property membership role denies reservation no-show despite a broader legacy user role')
+  const limitedPage = await limitedContext.newPage()
+  await limitedPage.goto('/board', { waitUntil: 'domcontentloaded' })
+  await limitedPage.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+  await limitedPage.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await limitedPage.getByRole('button', { name: 'New reservation', exact: false }).isDisabled(), true, 'a membership-limited browser sees no create-reservation affordance')
+  assert.equal(await limitedPage.locator('[data-board-command-drawer]').count(), 0, 'a membership-limited browser cannot render the Board command drawer')
+  assert.equal(await limitedPage.getByRole('button', { name: 'Guided check-in', exact: true }).count(), 0, 'a membership-limited browser sees no check-in command')
+  await limitedPage.goto('/rooms', { waitUntil: 'domcontentloaded' })
+  await limitedPage.getByTestId('server-rooms-view').waitFor({ state: 'visible' })
+  await limitedPage.getByText(property.name, { exact: true }).waitFor({ state: 'visible' })
+  const limitedInspectedTile = limitedPage.getByRole('button').filter({ hasText: inspectedRoomNumber })
+  await limitedInspectedTile.getByText(inspectedRoomTypeName, { exact: true }).waitFor({ state: 'visible' })
+  await limitedInspectedTile.getByText('Ready', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await limitedPage.getByText(`board-alpha-${runId}@example.test`, { exact: false }).count(), 0, 'a housekeeping Rooms projection does not render guest contact data')
+  assert.equal(await limitedPage.getByText(/฿|THB/).count(), 0, 'a housekeeping Rooms projection does not render financial values')
+  await prisma.userPropertyMembership.updateMany({
+    where: { userId: limitedUser.id, propertyId: property.id },
+    data: { active: false },
+  })
+  const deniedAfterMembershipDrift = await limitedContext.request.get('/api/front-desk/board')
+  assert.equal(deniedAfterMembershipDrift.status(), 403, 'an existing session is denied immediately after its property membership is deactivated')
+  await limitedContext.close()
+  const afterDeniedCommands = await prisma.reservation.findUnique({
+    where: { id: boardReservationOne.data.id },
+    include: { guest: true },
+  })
+  assert.equal(afterDeniedCommands.status, 'CONFIRMED', 'denied lifecycle commands leave reservation status unchanged')
+  assert.notEqual(afterDeniedCommands.guest.firstName, 'Forbidden membership edit', 'denied guest command leaves profile unchanged')
+
+  const boardReservationThree = await apiJson(context.request, 'POST', '/api/reservations', {
+    confirmationCode: `BOARD-C-${runId}`,
+    guest: {
+      firstName: 'Board Charlie',
+      lastName: runId,
+      email: `board-charlie-${runId}@example.test`,
+    },
+    roomTypeCode: roomType.code,
+    checkIn: dateKeyWithOffset(7),
+    checkOut: dateKeyWithOffset(9),
+    adults: 1,
+    children: 0,
+    childAges: [],
+    ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
+    source: 'DIRECT',
+  }, { 'x-idempotency-key': `browser-board-c:${randomUUID()}` })
+  assert.equal(boardReservationThree.data.assignedRoomId, null, 'third board stay begins in the authoritative unassigned queue')
+
+  const cashierMutationReservation = await apiJson(context.request, 'POST', '/api/reservations', {
+    confirmationCode: `CASHIER-MUTATION-${runId}`,
+    guest: {
+      firstName: 'Cashier Mutation',
+      lastName: runId,
+      email: `cashier-mutation-${runId}@example.test`,
+    },
+    roomTypeCode: roomType.code,
+    checkIn: dateKeyWithOffset(10),
+    checkOut: dateKeyWithOffset(12),
+    adults: 1,
+    children: 0,
+    childAges: [],
+    ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
+    source: 'DIRECT',
+  }, { 'x-idempotency-key': `browser-cashier-mutation:${randomUUID()}` })
+  assert.ok(cashierMutationReservation.data.folio.id, 'Cashier mutation fixture has an authoritative folio')
 
   const housekeeping = await apiJson(context.request, 'POST', '/api/housekeeping/tasks', {
     roomId: room.id,
@@ -210,6 +811,38 @@ try {
     reason: 'Prove server-mode rate persistence.',
   })
 
+  const configuredChannel = await apiJson(
+    context.request,
+    'POST',
+    '/api/channels/ical/booking-com',
+    {
+      exportFileName: `browser-gate-${runId}.ics`,
+      reason: 'Create the server-mode browser channel fixture.',
+    },
+    { 'x-idempotency-key': `browser-ical:${randomUUID()}` },
+  )
+  assert.equal(configuredChannel.data.importUrl, undefined, 'normal API configuration response has no private provider URL field')
+  const existingChannelMappings = await apiJson(context.request, 'GET', '/api/channels/mappings')
+  const existingChannelMapping = existingChannelMappings.data.find((mapping) =>
+    mapping.channelId === configuredChannel.data.id && mapping.roomTypeId === roomType.id,
+  )
+  const persistedChannelMapping = await apiJson(
+    context.request,
+    existingChannelMapping ? 'PATCH' : 'POST',
+    existingChannelMapping ? `/api/channels/mappings/${encodeURIComponent(existingChannelMapping.id)}` : '/api/channels/mappings',
+    {
+      channelId: configuredChannel.data.id,
+      externalRoomTypeId: `BROWSER-${runId}`,
+      externalRoomTypeName: persistedChannelMappingName,
+      roomTypeId: roomType.id,
+      roomIds: [room.id],
+      active: true,
+      reason: 'Create or refresh the server-mode browser mapping fixture.',
+    },
+    { 'x-idempotency-key': `browser-mapping:${randomUUID()}` },
+  )
+  assert.ok(persistedChannelMapping.data.id)
+
   const page = await context.newPage()
   page.setDefaultTimeout(30_000)
   page.setDefaultNavigationTimeout(60_000)
@@ -222,11 +855,1010 @@ try {
         'internal-messages', 'guest-messages', 'messages', 'message-templates',
         'channels', 'channel-reservations', 'channel-sync-logs', 'channel-room-mappings',
         'onboarding-property', 'onboarding-room-types', 'onboarding-rooms',
+        'onboarding:state', 'onboarding:admin-user', 'onboarding-admin-user',
+        'auth:current-user', 'accounting-entries', 'cash-reconciliations',
       ])
       return Object.keys(window.localStorage).filter((key) => forbidden.has(key))
     })
     assert.deepEqual(operationalStorageKeys, [], `${label} does not write operational workflow state to browser storage`)
   }
+
+  await page.route('**/api/front-desk/board?*', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected authoritative booking board failure.' }),
+    })
+  })
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('heading', { name: 'Booking board unavailable' }).waitFor({ state: 'visible' })
+  await page.getByText('Injected authoritative booking board failure.', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByTestId('server-booking-board').count(), 0, 'an initial board failure renders no operational board rows')
+  assert.equal(await page.getByText(`Room ${boardRoomNumber}`, { exact: true }).count(), 0, 'an initial board failure does not retain server room rows')
+  assert.equal(await page.getByText(fakeBoardRoomNumber, { exact: false }).count(), 0, 'the server board ignores fake browser room state')
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'the server board ignores fake browser reservation state')
+  const injectedBoardStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations', 'guests'])
+  assert.match(injectedBoardStorage['pms-rooms'] || '', new RegExp(fakeBoardRoomNumber), 'the fake room fixture existed while the board ignored it')
+  assert.match(injectedBoardStorage.reservations || '', new RegExp(fakeBoardGuest), 'the fake reservation fixture existed while the board ignored it')
+
+  // The same failed Board authority must also fail the Reservations workspace closed. Its
+  // server path owns both the reservation list and room/readiness projection, so it must not
+  // offer creation or render either persisted server rows or the browser fixture.
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/reservations'))
+  await page.goto('/reservations', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-reservations-error').waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: 'Reservations unavailable', exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(boardGuestOne, { exact: false }).count(), 0, 'a failed Board snapshot leaves Reservations without persisted server rows')
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'a failed Board snapshot leaves Reservations without fake browser reservation or guest data')
+  assert.equal(await page.getByRole('button', { name: 'New Reservation', exact: true }).count(), 0, 'a failed Board snapshot exposes no reservation create affordance')
+  const injectedBoardFailureReservationsStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations', 'guests', 'guests-data'])
+  assert.match(injectedBoardFailureReservationsStorage.reservations || '', new RegExp(fakeBoardGuest), 'the fake reservation fixture existed while failed server Reservations ignored it')
+  assert.match(injectedBoardFailureReservationsStorage.guests || '', new RegExp(fakeBoardGuest), 'the fake guest fixture existed while failed server Reservations ignored it')
+  await page.unroute('**/api/front-desk/board?*')
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByTestId('server-reservations-view').waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'Reservations retry restores only authoritative reservation and room/readiness snapshots')
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+  await page.getByText(`Room ${boardRoomNumber}`, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+  }, [...new Set([...Object.keys(injectedBoardStorage), ...Object.keys(injectedBoardFailureReservationsStorage)])])
+  await assertNoOperationalBrowserStorage('server-mode booking board before retry')
+  await page.getByText(boardGuestTwo, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(boardGuestThree, { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(boardGuestOne, { exact: true }).count(), 1, 'the first same-room stay renders as one distinct segment')
+  assert.equal(await page.getByText(boardGuestTwo, { exact: true }).count(), 1, 'the second same-room stay renders as one distinct segment')
+  assert.equal(await page.getByRole('alert').count(), 0, 'restored authority replaces the truthful error with authoritative Board data')
+  await assertNoOperationalBrowserStorage('server-mode booking board after retry')
+
+  // Server-mode Rooms must not display browser-owned property, type, or room data when its
+  // authoritative Board snapshot is unavailable. A successful retry and reload must show
+  // the persisted server snapshot instead.
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/rooms'))
+  await page.route('**/api/front-desk/board*', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Rooms authoritative snapshot failure.' }),
+    })
+  })
+  await page.goto('/rooms', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-rooms-error').waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: 'Rooms unavailable', exact: true }).waitFor({ state: 'visible' })
+  await page.getByText('Injected Rooms authoritative snapshot failure.', { exact: false }).waitFor({ state: 'visible' })
+  for (const fakeValue of [fakeRoomsPropertyName, fakeRoomsTypeName, fakeRoomsRoomNumber]) {
+    assert.equal(await page.getByText(fakeValue, { exact: false }).count(), 0, `Rooms failure does not display fake browser-owned value: ${fakeValue}`)
+  }
+  const injectedRoomsStorage = await page.evaluate((keys) => Object.fromEntries(keys.map((key) => [key, window.localStorage.getItem(key)])), [
+    'pms-rooms', 'onboarding-property', 'onboarding-room-types', 'room-types-config',
+  ])
+  assert.match(injectedRoomsStorage['pms-rooms'] || '', new RegExp(fakeRoomsRoomNumber), 'the fake room fixture existed while server Rooms ignored it')
+  assert.match(injectedRoomsStorage['onboarding-property'] || '', new RegExp(fakeRoomsPropertyName), 'the fake property fixture existed while server Rooms ignored it')
+  await page.unroute('**/api/front-desk/board*')
+  await page.getByRole('button', { name: /retry/i }).click()
+  await page.getByTestId('server-rooms-view').waitFor({ state: 'visible' })
+  await page.getByText(property.name, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: roomType.name, exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(boardRoomNumber, { exact: true }).waitFor({ state: 'visible' })
+  const inspectedTile = page.getByRole('button').filter({ hasText: inspectedRoomNumber })
+  await inspectedTile.getByText(inspectedRoomTypeName, { exact: true }).waitFor({ state: 'visible' })
+  await inspectedTile.getByText('Ready', { exact: true }).waitFor({ state: 'visible' })
+  for (const fakeValue of [fakeRoomsPropertyName, fakeRoomsTypeName, fakeRoomsRoomNumber]) {
+    assert.equal(await page.getByText(fakeValue, { exact: false }).count(), 0, `Rooms retry remains free of fake browser-owned value: ${fakeValue}`)
+  }
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-rooms-view').waitFor({ state: 'visible' })
+  await page.getByText(property.name, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: roomType.name, exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(boardRoomNumber, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('button').filter({ hasText: inspectedRoomNumber }).getByText(inspectedRoomTypeName, { exact: true }).waitFor({ state: 'visible' })
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+  }, Object.keys(injectedRoomsStorage))
+  await assertNoOperationalBrowserStorage('server-mode Rooms authority and reload')
+
+  // Server-mode Reservations must not display browser-owned reservation or guest data when
+  // the authenticated reservation list is unavailable. A successful retry and reload must
+  // show the persisted API list instead, with no create affordance before that authority exists.
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/reservations'))
+  await page.route('**/api/reservations', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Reservations authoritative snapshot failure.' }),
+    })
+  })
+  await page.goto('/reservations', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-reservations-error').waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: 'Reservations unavailable', exact: true }).waitFor({ state: 'visible' })
+  await page.getByText('The PMS reservation snapshot is unavailable. Retry before making reservation changes.', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(boardGuestOne, { exact: false }).count(), 0, 'an initial Reservations failure does not retain server rows')
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'Reservations ignores fake browser reservation and guest data during an authority failure')
+  assert.equal(await page.getByRole('button', { name: 'New Reservation', exact: true }).count(), 0, 'Reservations exposes no create affordance without an authoritative snapshot')
+  const injectedReservationsStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations', 'guests', 'guests-data'])
+  assert.match(injectedReservationsStorage['pms-rooms'] || '', new RegExp(fakeBoardRoomNumber), 'the fake room fixture existed while Reservations ignored it')
+  assert.match(injectedReservationsStorage.reservations || '', new RegExp(fakeBoardGuest), 'the fake reservation fixture existed while Reservations ignored it')
+  assert.match(injectedReservationsStorage.guests || '', new RegExp(fakeBoardGuest), 'the fake guest fixture existed while Reservations ignored it')
+  await page.unroute('**/api/reservations')
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByTestId('server-reservations-view').waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'Reservations retry remains free of fake browser reservation and guest data')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-reservations-view').waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'Reservations reload remains free of fake browser reservation and guest data')
+
+  // Guest Directory must fail closed when its authenticated snapshot is unavailable,
+  // recover through Retry, persist an authorized create across reload, and invalidate
+  // from the real named reservation event bridge without mounting guest KV state.
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/guests'))
+  await page.route('**/api/guests', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Guest Directory authoritative snapshot failure.' }),
+    })
+  })
+  await page.goto('/guests', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-guests-error').waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: 'Guest Directory unavailable', exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText('Total Guests', { exact: true }).count(), 0, 'Guest Directory failure renders no zero-value operational statistics')
+  assert.equal(await page.getByRole('button', { name: 'New Guest', exact: true }).count(), 0, 'Guest Directory failure exposes no create affordance')
+  assert.equal(await page.getByText(fakeGuestDirectoryName, { exact: false }).count(), 0, 'Guest Directory failure ignores browser-owned guest data')
+  const injectedGuestStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['guests', 'guests-data'])
+  assert.match(injectedGuestStorage.guests || '', new RegExp(fakeGuestDirectoryName), 'the canonical fake guest fixture existed while Guest Directory ignored it')
+  assert.match(injectedGuestStorage['guests-data'] || '', new RegExp(fakeGuestDirectoryName), 'the compatibility fake guest fixture existed while Guest Directory ignored it')
+  await page.unroute('**/api/guests')
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByTestId('server-guests-view').waitFor({ state: 'visible' })
+  await page.getByText(`${browserGuestCreateInput.firstName} ${browserGuestCreateInput.lastName}`, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeGuestDirectoryName, { exact: false }).count(), 0, 'Guest Directory retry restores only authoritative profiles')
+
+  const createdGuestFirstName = `Reload Guest ${runId}`
+  const createdGuestLastName = 'Proof'
+  await page.getByRole('button', { name: 'New Guest', exact: true }).click()
+  await page.getByRole('heading', { name: 'New guest profile', exact: true }).waitFor({ state: 'visible' })
+  await page.getByLabel('First name', { exact: true }).fill(createdGuestFirstName)
+  await page.getByLabel('Last name', { exact: true }).fill(createdGuestLastName)
+  const createdGuestResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/guests') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Create guest', exact: true }).click()
+  const createdGuestResult = await createdGuestResponse
+  assert.equal(createdGuestResult.status(), 201, 'authorized Guest Directory create persists through the server')
+  const createdGuestAttemptKey = createdGuestResult.request().headers()['x-idempotency-key']
+  await page.getByRole('dialog').getByText(`${createdGuestFirstName} ${createdGuestLastName}`, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(
+    await page.evaluate((attemptKey) => Object.values(window.sessionStorage).some((value) => value.includes(attemptKey)), createdGuestAttemptKey),
+    false,
+    'confirmed Guest Directory creation clears its opaque reload-safe attempt record',
+  )
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-guests-view').waitFor({ state: 'visible' })
+  await page.getByTestId('server-guests-view').getByText(`${createdGuestFirstName} ${createdGuestLastName}`, { exact: true }).first().waitFor({ state: 'visible' })
+
+  let guestDirectoryReads = 0
+  await page.route('**/api/guests', async (route) => {
+    if (route.request().method() === 'GET') guestDirectoryReads += 1
+    await route.continue()
+  })
+  await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    eventType: 'RESERVATION_GUEST_UPDATED',
+    aggregateType: 'reservation',
+    aggregateId: boardReservationOne.data.id,
+  })
+  for (let attempt = 0; attempt < 20 && guestDirectoryReads === 0; attempt += 1) {
+    await page.waitForTimeout(250)
+  }
+  assert.ok(guestDirectoryReads > 0, 'Guest Directory refetches after the real named reservation guest-update event')
+  await page.unroute('**/api/guests')
+
+  let releaseStaleGuestRefresh
+  let resolveStaleGuestRefreshStarted
+  const staleGuestRefreshRelease = new Promise((resolveRelease) => {
+    releaseStaleGuestRefresh = resolveRelease
+  })
+  const staleGuestRefreshStarted = new Promise((resolveStarted) => {
+    resolveStaleGuestRefreshStarted = resolveStarted
+  })
+  let guestRefreshSequence = 0
+  await page.route('**/api/guests', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    guestRefreshSequence += 1
+    if (guestRefreshSequence === 1) {
+      resolveStaleGuestRefreshStarted()
+      await staleGuestRefreshRelease
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Injected superseded Guest Directory failure.' }),
+      })
+      return
+    }
+    await route.continue()
+  })
+  await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    eventType: 'RESERVATION_GUEST_UPDATED',
+    aggregateType: 'reservation',
+    aggregateId: boardReservationOne.data.id,
+  })
+  await boundedSignal(staleGuestRefreshStarted, 'Delayed Guest Directory refresh interception')
+  const newerGuestRefresh = page.waitForResponse((response) =>
+    response.url().endsWith('/api/guests') && response.request().method() === 'GET' && response.status() === 200,
+  )
+  await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    eventType: 'RESERVATION_GUEST_UPDATED',
+    aggregateType: 'reservation',
+    aggregateId: boardReservationTwo.data.id,
+  })
+  await boundedSignal(newerGuestRefresh, 'Newer Guest Directory refresh')
+  releaseStaleGuestRefresh()
+  await page.waitForTimeout(250)
+  await page.getByTestId('server-guests-view').waitFor({ state: 'visible' })
+  assert.equal(await page.getByTestId('server-guests-error').count(), 0, 'a superseded Guest Directory failure cannot overwrite a newer successful snapshot')
+  await page.unroute('**/api/guests')
+
+  assert.equal(await page.getByText(fakeGuestDirectoryName, { exact: false }).count(), 0, 'Guest Directory reload and SSE refetch remain free of both browser guest stores')
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+  }, [...new Set([...Object.keys(injectedReservationsStorage), ...Object.keys(injectedGuestStorage)])])
+  await assertNoOperationalBrowserStorage('server-mode Reservations and Guest Directory authority and reload')
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+
+  // Cashier is a financial authority surface. A failed folio snapshot must close the
+  // entire workspace rather than render cached browser folios, zero-value operational
+  // statistics, or payment/charge controls. Retry and reload then prove the same
+  // persisted server folio is used.
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/cashier'))
+  await page.route('**/api/cashier/folios', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Cashier authoritative folio snapshot failure.' }),
+    })
+  })
+  await page.goto('/cashier', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-error').waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: 'Cashier unavailable', exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(boardGuestOne, { exact: false }).count(), 0, 'a failed Cashier snapshot does not retain server folios')
+  assert.equal(await page.getByText(fakeCashierGuest, { exact: false }).count(), 0, 'Cashier ignores fake browser folios during an authority failure')
+  assert.equal(await page.getByText(fakeCashierFolioNumber, { exact: false }).count(), 0, 'Cashier does not render a fake browser folio number during an authority failure')
+  for (const control of ['Post Charge', 'Add Payment', 'Record Payment']) {
+    assert.equal(await page.getByRole('button', { name: control, exact: true }).count(), 0, `Cashier exposes no ${control} control without an authoritative folio snapshot`)
+  }
+  for (const statistic of ['Open Folios', 'Outstanding', 'Revenue', 'Collected']) {
+    assert.equal(await page.getByText(statistic, { exact: true }).count(), 0, `Cashier does not render a zero-value ${statistic} dashboard during an authority failure`)
+  }
+  const injectedCashierStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['cashier-folios', 'folios', 'accounting-entries'])
+  assert.match(injectedCashierStorage['cashier-folios'] || '', new RegExp(fakeCashierGuest), 'the fake Cashier fixture existed while the server workspace ignored it')
+  assert.match(injectedCashierStorage.folios || '', new RegExp(fakeCashierFolioNumber), 'the fake browser folio existed while the server workspace ignored it')
+  await page.unroute('**/api/cashier/folios')
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeCashierGuest, { exact: false }).count(), 0, 'Cashier retry remains free of fake browser folio data')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeCashierGuest, { exact: false }).count(), 0, 'Cashier reload remains free of fake browser folio data')
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+  }, Object.keys(injectedCashierStorage))
+  await assertNoOperationalBrowserStorage('server-mode Cashier authority and reload')
+
+  // Cashier writes must retain one logical idempotency key across an ambiguous
+  // response, refetch authoritative state after success, and never turn a rejected
+  // or stale folio write into a UI-only success.
+  await page.getByText(cashierMutationGuest, { exact: true }).first().click()
+  await page.getByRole('button', { name: 'Add Charge', exact: true }).click()
+  const ambiguousCashierChargeDescription = `Cashier ambiguous charge ${runId}`
+  const cashierChargeDialog = page.getByRole('dialog', { name: 'Post charge' })
+  await cashierChargeDialog.getByLabel('Description').fill(ambiguousCashierChargeDescription)
+  await cashierChargeDialog.getByLabel('Unit amount').fill('12.34')
+  await cashierChargeDialog.getByLabel('Quantity').fill('2')
+  let cashierChargeAttempt = 0
+  let cashierChargeKey = null
+  let cashierChargeRetryKey = null
+  await page.route('**/api/charges', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue()
+      return
+    }
+    cashierChargeAttempt += 1
+    const requestKey = route.request().headers()['x-idempotency-key'] || null
+    const upstream = await route.fetch()
+    if (cashierChargeAttempt === 1) {
+      cashierChargeKey = requestKey
+      assert.ok(cashierChargeKey, 'Cashier charge sends an idempotency key')
+      assert.equal(upstream.status(), 201, 'Cashier charge reaches the authoritative PMS before its response is lost')
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Injected ambiguous Cashier charge response.' }),
+      })
+      return
+    }
+    cashierChargeRetryKey = requestKey
+    assert.equal(cashierChargeRetryKey, cashierChargeKey, 'Cashier charge retry reuses the exact logical idempotency key')
+    assert.equal(upstream.status(), 200, 'Cashier charge retry receives the authoritative replay')
+    await route.fulfill({ response: upstream })
+  })
+  await cashierChargeDialog.getByRole('button', { name: 'Post charge', exact: true }).click()
+  await cashierChargeDialog.getByText('Injected ambiguous Cashier charge response.', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await cashierChargeDialog.getByLabel('Description').inputValue(), ambiguousCashierChargeDescription, 'ambiguous Cashier charge keeps its description for retry')
+  assert.equal(await cashierChargeDialog.getByLabel('Unit amount').inputValue(), '12.34', 'ambiguous Cashier charge keeps its exact amount for retry')
+  await cashierChargeDialog.getByRole('button', { name: 'Post charge', exact: true }).click()
+  await cashierChargeDialog.waitFor({ state: 'hidden' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  assert.equal(cashierChargeAttempt, 2, 'Cashier charge uses one original attempt and one replay')
+  assert.equal(await prisma.charge.count({
+    where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, description: ambiguousCashierChargeDescription },
+  }), 1, 'ambiguous Cashier charge persists exactly one append-only row')
+  const exactCashierCharge = await prisma.charge.findFirst({
+    where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, description: ambiguousCashierChargeDescription },
+  })
+  assert.ok(exactCashierCharge, 'the exact Cashier charge can be read back')
+  assert.equal(exactCashierCharge.amountSatang, 1234n, 'Cashier charge persists its exact satang unit amount')
+  assert.equal(exactCashierCharge.totalSatang, 2468n, 'Cashier charge persists its exact satang total')
+  assert.equal(
+    await page.evaluate((attemptKey) => Object.values(window.sessionStorage).some((value) => value.includes(attemptKey)), cashierChargeKey),
+    false,
+    'confirmed Cashier charge replay clears its opaque reload-safe attempt record',
+  )
+  await page.unroute('**/api/charges')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByText(cashierMutationGuest, { exact: true }).first().click()
+  await page.getByText(ambiguousCashierChargeDescription, { exact: true }).waitFor({ state: 'visible' })
+
+  let cashierRefreshFailureActive = false
+  await page.route('**/api/cashier/folios', async (route) => {
+    if (route.request().method() === 'GET' && cashierRefreshFailureActive) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Injected post-payment Cashier refresh failure.' }),
+      })
+      return
+    }
+    await route.continue()
+  })
+  let cashierPaymentAttempt = 0
+  let cashierPaymentKey = null
+  let cashierPaymentRetryKey = null
+  await page.route('**/api/payments', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue()
+      return
+    }
+    cashierPaymentAttempt += 1
+    const requestKey = route.request().headers()['x-idempotency-key'] || null
+    const upstream = await route.fetch()
+    if (cashierPaymentAttempt === 1) {
+      cashierPaymentKey = requestKey
+      assert.ok(cashierPaymentKey, 'Cashier payment sends an idempotency key')
+      assert.equal(upstream.status(), 201, 'Cashier payment is committed before the authoritative refetch fails')
+      cashierRefreshFailureActive = true
+    } else {
+      cashierPaymentRetryKey = requestKey
+      assert.equal(cashierPaymentRetryKey, cashierPaymentKey, 'Cashier payment retry after refetch failure reuses the exact logical idempotency key')
+      assert.equal(upstream.status(), 200, 'Cashier payment retry receives the authoritative replay')
+    }
+    await route.fulfill({ response: upstream })
+  })
+  await page.getByRole('button', { name: 'Collect Payment', exact: true }).click()
+  const cashierPaymentDialog = page.getByRole('dialog', { name: 'Collect payment' })
+  await cashierPaymentDialog.getByLabel('Payment amount').fill('10.01')
+  await cashierPaymentDialog.getByRole('button', { name: 'Record payment', exact: true }).click()
+  await page.getByTestId('server-cashier-error').waitFor({ state: 'visible' })
+  assert.equal(await page.getByText('Payment recorded for', { exact: false }).count(), 0, 'a committed payment with a failed read-back does not claim UI success')
+  assert.equal(await prisma.payment.count({
+    where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, amountSatang: 1001n },
+  }), 1, 'the payment committed before its failed read-back exists exactly once')
+  const persistedCashierAttemptEvidence = await page.evaluate(() => Object.entries(window.sessionStorage)
+    .filter(([key]) => key.startsWith('pms:attempt:v1:')))
+  const serializedCashierAttemptEvidence = JSON.stringify(persistedCashierAttemptEvidence)
+  assert.equal(
+    persistedCashierAttemptEvidence.filter(([, value]) => value.includes(cashierPaymentKey)).length,
+    1,
+    'the ambiguous payment retains exactly one reload-safe opaque attempt record for its key',
+  )
+  for (const forbiddenValue of [cashierMutationGuest, cashierMutationReservation.data.folio.id, '10.01']) {
+    assert.equal(serializedCashierAttemptEvidence.includes(forbiddenValue), false, 'reload-safe attempt evidence contains no guest, folio, or amount material')
+  }
+  cashierRefreshFailureActive = false
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByText(cashierMutationGuest, { exact: true }).first().click()
+  await page.getByRole('button', { name: 'Collect Payment', exact: true }).click()
+  const cashierPaymentRetryDialog = page.getByRole('dialog', { name: 'Collect payment' })
+  await cashierPaymentRetryDialog.waitFor({ state: 'visible' })
+  await cashierPaymentRetryDialog.getByLabel('Payment amount').fill('10.01')
+  await cashierPaymentRetryDialog.getByRole('button', { name: 'Record payment', exact: true }).click()
+  await cashierPaymentRetryDialog.waitFor({ state: 'hidden' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  assert.equal(cashierPaymentAttempt, 2, 'Cashier payment uses one committed attempt and one replay after read-back recovery')
+  assert.equal(await prisma.payment.count({
+    where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, amountSatang: 1001n },
+  }), 1, 'Cashier payment replay never creates a duplicate payment')
+  const remainingCashierAttemptEvidence = await page.evaluate(() => Object.entries(window.sessionStorage)
+    .filter(([key]) => key.startsWith('pms:attempt:v1:')))
+  assert.equal(
+    JSON.stringify(remainingCashierAttemptEvidence).includes(cashierPaymentKey),
+    false,
+    'confirmed payment replay clears its opaque reload-safe attempt record',
+  )
+  await page.unroute('**/api/payments')
+  await page.unroute('**/api/cashier/folios')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByText(cashierMutationGuest, { exact: true }).first().click()
+  await page.getByText('CASH', { exact: true }).last().waitFor({ state: 'visible' })
+
+  // Model a stale open-folio screen after another actor closes the folio. The
+  // backend must reject the charge and the dialog must display that rejection.
+  await prisma.folio.update({
+    where: { id: cashierMutationReservation.data.folio.id },
+    data: { status: 'CLOSED' },
+  })
+  await page.getByRole('button', { name: 'Add Charge', exact: true }).click()
+  const closedFolioChargeDialog = page.getByRole('dialog', { name: 'Post charge' })
+  const rejectedClosedCharge = `Rejected closed folio ${runId}`
+  await closedFolioChargeDialog.getByLabel('Description').fill(rejectedClosedCharge)
+  await closedFolioChargeDialog.getByLabel('Unit amount').fill('1.23')
+  const closedChargeResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/charges') && response.request().method() === 'POST',
+  )
+  await closedFolioChargeDialog.getByRole('button', { name: 'Post charge', exact: true }).click()
+  assert.equal((await closedChargeResponse).status(), 400, 'stale Cashier charge against a closed folio is rejected')
+  await closedFolioChargeDialog.getByText('Charges can only be posted to an open folio.', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await prisma.charge.count({
+    where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, description: rejectedClosedCharge },
+  }), 0, 'rejected closed-folio charge creates no financial row')
+  await closedFolioChargeDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByRole('tab', { name: 'Closed', exact: true }).click()
+  await page.getByText(cashierMutationGuest, { exact: true }).first().click()
+  assert.equal(await page.getByRole('button', { name: 'Add Charge', exact: true }).count(), 0, 'reloaded closed folio exposes no charge control')
+  assert.equal(await page.getByRole('button', { name: 'Collect Payment', exact: true }).count(), 0, 'reloaded closed folio exposes no payment control')
+  await page.keyboard.press('Escape')
+  await assertNoOperationalBrowserStorage('Cashier idempotency, read-back, rejection, and reload proof')
+
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+
+  // Simulate the visible Booking Board form losing an otherwise successful create response.
+  // The form must keep its input and logical key, replay the original server result on the
+  // operator's retry, and still show the persisted stay after a full reload.
+  const ambiguousCreateFirstName = 'Browser Create'
+  const ambiguousCreateLastName = runId
+  const ambiguousCreateEmail = `browser-create-${runId}@example.test`
+  let ambiguousCreateKey = null
+  let ambiguousCreateRetryKey = null
+  let lostCreateUpstream = null
+  let replayedCreateUpstream = null
+  let interceptedCreateCount = 0
+  await page.route('**/api/reservations', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue()
+      return
+    }
+    interceptedCreateCount += 1
+    const requestKey = route.request().headers()['x-idempotency-key'] || null
+    const upstream = await route.fetch()
+    if (interceptedCreateCount === 1) {
+      ambiguousCreateKey = requestKey
+      assert.ok(ambiguousCreateKey, 'the visible Booking Board form sends a create idempotency key')
+      lostCreateUpstream = await upstream.json()
+      assert.equal(
+        upstream.status(),
+        201,
+        `the visible reservation create reaches the authoritative PMS before its response is lost: ${JSON.stringify(lostCreateUpstream)}`,
+      )
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Injected ambiguous reservation create response.' }),
+      })
+      return
+    }
+    ambiguousCreateRetryKey = requestKey
+    assert.equal(ambiguousCreateRetryKey, ambiguousCreateKey, 'the visible form retry reuses the exact logical create key')
+    assert.equal(upstream.status(), 200, 'the visible form retry receives the authoritative replay response')
+    replayedCreateUpstream = await upstream.json()
+    await route.fulfill({ response: upstream })
+  })
+  await page.getByRole('button', { name: 'New reservation', exact: false }).click()
+  const createDialog = page.getByRole('dialog', { name: 'New Reservation' })
+  await createDialog.getByLabel('First Name *').fill(ambiguousCreateFirstName)
+  await createDialog.getByLabel('Last Name *').fill(ambiguousCreateLastName)
+  await createDialog.getByLabel('Email').fill(ambiguousCreateEmail)
+  await createDialog.getByLabel('Room Type').click()
+  await page.getByRole('option', { name: roomType.name, exact: true }).click()
+  await createDialog.getByRole('button', { name: 'Create Reservation', exact: true }).click()
+  await createDialog.getByRole('button', { name: 'Create Reservation', exact: true }).waitFor({ state: 'visible' })
+  assert.ok(lostCreateUpstream?.data?.id, 'the lost create response contains the authoritative reservation identifier')
+  assert.equal(await createDialog.getByLabel('First Name *').inputValue(), ambiguousCreateFirstName, 'an ambiguous create keeps the first name for a truthful retry')
+  assert.equal(await createDialog.getByLabel('Last Name *').inputValue(), ambiguousCreateLastName, 'an ambiguous create keeps the last name for a truthful retry')
+  assert.equal(await createDialog.getByLabel('Email').inputValue(), ambiguousCreateEmail, 'an ambiguous create keeps the contact field for a truthful retry')
+  await createDialog.getByRole('button', { name: 'Create Reservation', exact: true }).click()
+  await createDialog.waitFor({ state: 'hidden' })
+  assert.equal(replayedCreateUpstream?.data?.id, lostCreateUpstream.data.id, 'the visible retry returns the same reservation')
+  assert.equal(replayedCreateUpstream?.data?.idempotentReplay, true, 'the visible retry is explicitly identified as a replay')
+  assert.equal(await prisma.reservation.count({ where: { id: lostCreateUpstream.data.id, propertyId: property.id } }), 1, 'ambiguous browser create persists one reservation')
+  assert.equal(await prisma.guest.count({ where: { propertyId: property.id, email: ambiguousCreateEmail } }), 1, 'ambiguous browser create persists one guest')
+  assert.equal(await prisma.folio.count({ where: { reservationId: lostCreateUpstream.data.id } }), 1, 'ambiguous browser create persists one folio')
+  assert.equal(await prisma.charge.count({ where: { folioId: lostCreateUpstream.data.folio.id } }), 1, 'ambiguous browser create persists one initial charge')
+  await page.unroute('**/api/reservations')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+  await page.getByText(`${ambiguousCreateFirstName} ${ambiguousCreateLastName}`, { exact: false }).waitFor({ state: 'visible' })
+  await assertNoOperationalBrowserStorage('ambiguous server-mode create retry and reload')
+
+  // Board handoffs must open authoritative staff workspaces without applying a mutation.
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: 'Guided check-in', exact: true }).click()
+  await page.waitForURL((url) => url.pathname === '/front-desk' && !url.searchParams.has('workflow'))
+  await page.getByRole('heading', { name: new RegExp(`Check In: ${boardGuestOne}`) }).waitFor({ state: 'visible' })
+  assert.equal(
+    (await prisma.reservation.findUnique({ where: { id: boardReservationOne.data.id } })).status,
+    'CONFIRMED',
+    'opening the guided check-in workflow does not mutate the reservation',
+  )
+  await page.keyboard.press('Escape')
+  await page.evaluate((reservationId) => {
+    const url = new URL(window.location.href)
+    url.search = new URLSearchParams({ reservationId, workflow: 'check-in' }).toString()
+    window.history.pushState({}, '', url)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, boardReservationOne.data.id)
+  await page.waitForURL((url) => url.pathname === '/front-desk' && !url.searchParams.has('workflow'))
+  await page.getByRole('heading', { name: new RegExp(`Check In: ${boardGuestOne}`) }).waitFor({ state: 'visible' })
+  assert.equal(
+    (await prisma.reservation.findUnique({ where: { id: boardReservationOne.data.id } })).status,
+    'CONFIRMED',
+    'same-route Front Desk handoff is consumed without applying a mutation',
+  )
+  await page.keyboard.press('Escape')
+
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: 'Open cashier', exact: true }).click()
+  await page.waitForURL((url) => url.pathname === '/cashier' && !url.searchParams.has('workflow'))
+  await page.getByText(`Folio #${boardReservationOne.data.folio.id}`, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(
+    (await prisma.reservation.findUnique({ where: { id: boardReservationOne.data.id } })).status,
+    'CONFIRMED',
+    'opening the cashier workflow does not mutate the reservation',
+  )
+  await page.keyboard.press('Escape')
+  await page.evaluate(({ reservationId, folioId }) => {
+    const url = new URL(window.location.href)
+    url.search = new URLSearchParams({ reservationId, workflow: 'cashier', folioId }).toString()
+    window.history.pushState({}, '', url)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, {
+    reservationId: boardReservationOne.data.id,
+    folioId: boardReservationOne.data.folio.id,
+  })
+  await page.waitForURL((url) => url.pathname === '/cashier' && !url.searchParams.has('workflow'))
+  await page.getByText(`Folio #${boardReservationOne.data.folio.id}`, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(
+    (await prisma.reservation.findUnique({ where: { id: boardReservationOne.data.id } })).status,
+    'CONFIRMED',
+    'same-route Cashier handoff is consumed without applying a mutation',
+  )
+  await page.keyboard.press('Escape')
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+  await assertNoOperationalBrowserStorage('Board workflow handoffs')
+
+  // The command drawer must commit through the PMS, then show the same truth after a reload.
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+  await page.getByLabel('Guest first name', { exact: true }).fill('Board Updated')
+  await page.getByLabel('VIP guest', { exact: true }).check()
+  const guestSaveResponse = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/reservations/${boardReservationOne.data.id}/guest`)
+      && response.request().method() === 'PATCH',
+  )
+  await page.getByRole('button', { name: 'Save guest', exact: true }).click()
+  assert.equal((await guestSaveResponse).status(), 200, 'command drawer saves guest and VIP state through the server')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+  assert.equal(await page.getByLabel('Guest first name', { exact: true }).inputValue(), 'Board Updated', 'command drawer guest edit survives reload')
+  assert.equal(await page.getByLabel('VIP guest', { exact: true }).isChecked(), true, 'command drawer VIP edit survives reload')
+  const persistedDrawerReservation = await prisma.reservation.findUnique({
+    where: { id: boardReservationOne.data.id },
+    select: { guestId: true },
+  })
+  assert.ok(persistedDrawerReservation, 'the drawer reservation remains available for guest verification')
+  const persistedDrawerGuest = await prisma.guest.findUnique({ where: { id: persistedDrawerReservation.guestId } })
+  assert.ok(persistedDrawerGuest, 'the drawer guest remains available for verification')
+  assert.equal(persistedDrawerGuest.firstName, 'Board Updated', 'guest edit is stored by the authoritative PMS')
+  assert.equal(persistedDrawerGuest.vipStatus, true, 'VIP state is stored by the authoritative PMS')
+
+  await page.getByLabel('Extra description', { exact: true }).fill(`Laundry ${runId}`)
+  await page.getByLabel('Extra amount in baht', { exact: true }).fill('12.34')
+  await page.getByLabel('Extra quantity', { exact: true }).fill('2')
+  await page.getByLabel('Extra quantity', { exact: true }).press('Tab')
+  const postExtraButton = page.getByRole('button', { name: 'Post to folio', exact: true })
+  await page.waitForFunction(() => {
+    const description = document.querySelector('[aria-label="Extra description"]')
+    const amount = document.querySelector('[aria-label="Extra amount in baht"]')
+    const quantity = document.querySelector('[aria-label="Extra quantity"]')
+    const button = [...document.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes('Post to folio'))
+    return description?.value && amount?.value === '12.34' && quantity?.value === '2' && button && !button.disabled
+  })
+  const [postExtraResult] = await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith('/api/charges') && response.request().method() === 'POST'),
+    postExtraButton.click(),
+  ])
+  assert.equal(postExtraResult.status(), 201, 'command drawer posts a new extra through the server')
+  await page.waitForFunction(() => {
+    const description = document.querySelector('[aria-label="Extra description"]')
+    const amount = document.querySelector('[aria-label="Extra amount in baht"]')
+    const quantity = document.querySelector('[aria-label="Extra quantity"]')
+    return description?.value === '' && amount?.value === '' && quantity?.value === '1'
+  })
+  assert.equal(await page.getByLabel('Extra description', { exact: true }).inputValue(), '', 'confirmed charge clears the description to prevent an accidental duplicate post')
+  assert.equal(await page.getByLabel('Extra amount in baht', { exact: true }).inputValue(), '', 'confirmed charge clears the amount to prevent an accidental duplicate post')
+  assert.equal(await page.getByLabel('Extra quantity', { exact: true }).inputValue(), '1', 'confirmed charge resets quantity after success')
+  const persistedExtra = await prisma.charge.findFirst({
+    where: { propertyId: property.id, description: `Laundry ${runId}` },
+    orderBy: { createdAt: 'desc' },
+  })
+  assert.ok(persistedExtra, 'posted extra is persisted')
+  assert.equal(persistedExtra.amountSatang, 1234n, 'posted extra retains the exact satang unit amount')
+  assert.equal(persistedExtra.totalSatang, 2468n, 'posted extra retains the exact satang total')
+
+  let lostChargeKey = null
+  await page.getByLabel('Extra description', { exact: true }).fill(`Lost response laundry ${runId}`)
+  await page.getByLabel('Extra amount in baht', { exact: true }).fill('1.11')
+  await page.getByLabel('Extra quantity', { exact: true }).fill('1')
+  await page.getByLabel('Extra quantity', { exact: true }).press('Tab')
+  await page.route('**/api/charges', async (route) => {
+    lostChargeKey = route.request().headers()['x-idempotency-key'] || null
+    const upstream = await route.fetch()
+    assert.equal(upstream.status(), 201, 'the ambiguous charge reaches the authoritative PMS before its response is lost')
+    await route.abort('failed').catch((error) => {
+      if (!/already handled/i.test(error instanceof Error ? error.message : String(error))) throw error
+    })
+  })
+  await page.getByRole('button', { name: 'Post to folio', exact: true }).click()
+  await page.waitForTimeout(100)
+  assert.ok(lostChargeKey, 'the ambiguous charge captured an idempotency key')
+  await page.unroute('**/api/charges')
+  const chargeRetryResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/charges') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Post to folio', exact: true }).click()
+  const chargeRetry = await chargeRetryResponse
+  assert.equal(chargeRetry.status(), 200, 'command drawer safely replays a charge whose first response was lost')
+  assert.equal(chargeRetry.request().headers()['x-idempotency-key'], lostChargeKey, 'ambiguous charge retry reuses the exact logical attempt key')
+  assert.equal(await prisma.charge.count({ where: { propertyId: property.id, description: `Lost response laundry ${runId}` } }), 1, 'ambiguous charge retry persists one append-only charge')
+
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+
+  // A stale-write response cannot claim success or retain an unpersisted guest draft.
+  await page.route(`**/api/reservations/${boardReservationOne.data.id}/guest`, async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected authoritative stale guest conflict.' }),
+    })
+  })
+  await page.getByLabel('Guest first name', { exact: true }).fill('Rejected Browser Draft')
+  await page.getByRole('button', { name: 'Save guest', exact: true }).click()
+  await page.getByText('Injected authoritative stale guest conflict.', { exact: false }).waitFor({ state: 'visible' })
+  await page.unroute(`**/api/reservations/${boardReservationOne.data.id}/guest`)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+  assert.equal(await page.getByLabel('Guest first name', { exact: true }).inputValue(), 'Board Updated', 'failed drawer mutation refetches and retains authoritative guest state')
+
+  // Cancellation is reason-gated in the UI and is persisted only after the authoritative server accepts it.
+  await page.locator(`[data-board-reservation-id="${boardReservationTwo.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationTwo.data.id}"]`).waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  const confirmCancellation = page.getByRole('button', { name: 'Confirm cancellation', exact: true })
+  assert.equal(await confirmCancellation.isDisabled(), true, 'command drawer requires a cancellation reason')
+  await page.getByLabel('Reason required', { exact: true }).fill('Guest requested cancellation in browser proof.')
+  const cancellationResponse = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/reservations/${boardReservationTwo.data.id}/cancel`)
+      && response.request().method() === 'POST',
+  )
+  await confirmCancellation.click()
+  assert.equal((await cancellationResponse).status(), 200, 'reasoned command drawer cancellation succeeds')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  const persistedCancelledReservation = await prisma.reservation.findUnique({ where: { id: boardReservationTwo.data.id } })
+  assert.equal(persistedCancelledReservation.status, 'CANCELLED', 'reasoned cancellation survives reload')
+  assert.match(persistedCancelledReservation.notes || '', /Guest requested cancellation in browser proof\./, 'cancellation reason is retained by the PMS')
+  await assertNoOperationalBrowserStorage('server-mode booking board command drawer mutations')
+
+  const ambiguousAssignmentAuditBefore = await prisma.auditLog.count({ where: { entityId: boardReservationThree.data.id, action: 'ASSIGNED_ROOM' } })
+  const ambiguousAssignmentHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: boardReservationThree.data.id, action: 'ASSIGNED_ROOM' } })
+  const ambiguousAssignmentEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: boardReservationThree.data.id, eventType: 'RESERVATION_ROOM_ASSIGNED' } })
+  let lostAssignmentKey = null
+  await page.route(`**/api/reservations/${boardReservationThree.data.id}/assign-room`, async (route) => {
+    lostAssignmentKey = route.request().headers()['x-idempotency-key'] || null
+    const upstream = await context.request.fetch(route.request().url(), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': lostAssignmentKey,
+      },
+      data: JSON.parse(route.request().postData() || '{}'),
+    })
+    assert.equal(upstream.status(), 200, 'the first assignment reaches the authoritative PMS before its response is lost')
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected ambiguous assignment response.' }),
+    })
+  })
+  await page.locator(`[data-board-reservation-select="${boardReservationThree.data.id}"]`).click()
+  await page.locator(`[data-board-room-action="${boardMoveRoom.id}"]`).click()
+  await page.getByText('Injected ambiguous assignment response.', { exact: false }).waitFor({ state: 'visible' })
+  assert.ok(lostAssignmentKey, 'the ambiguous 500 assignment captured an idempotency key')
+  await page.unroute(`**/api/reservations/${boardReservationThree.data.id}/assign-room`)
+  const assignmentRetryButton = page.locator(`[data-board-room-action="${boardMoveRoom.id}"]`)
+  assert.equal(await assignmentRetryButton.isEnabled(), true, 'an ambiguous server response keeps the same Board command available for a protected retry')
+  const assignmentResponse = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/reservations/${boardReservationThree.data.id}/assign-room`)
+      && response.request().method() === 'POST',
+  )
+  await assignmentRetryButton.click()
+  const assignmentRetry = await assignmentResponse
+  assert.equal(assignmentRetry.status(), 200, 'server Booking Board replays the ambiguous assignment safely')
+  assert.equal(assignmentRetry.request().headers()['x-idempotency-key'], lostAssignmentKey, 'retry after an ambiguous 500 reuses the exact logical assignment key')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: boardReservationThree.data.id, action: 'ASSIGNED_ROOM' } }), ambiguousAssignmentAuditBefore + 1, 'ambiguous assignment retry creates one audit record')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: boardReservationThree.data.id, action: 'ASSIGNED_ROOM' } }), ambiguousAssignmentHistoryBefore + 1, 'ambiguous assignment retry creates one reservation history record')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: boardReservationThree.data.id, eventType: 'RESERVATION_ROOM_ASSIGNED' } }), ambiguousAssignmentEventsBefore + 1, 'ambiguous assignment retry creates one domain event')
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })
+  let persistedBoardReservation = await prisma.reservation.findUnique({ where: { id: boardReservationThree.data.id } })
+  assert.equal(persistedBoardReservation.assignedRoomId, boardMoveRoom.id, 'Board assignment survives a full browser reload')
+
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).click()
+  await page.getByLabel('Check-in', { exact: true }).fill(dateKeyWithOffset(8))
+  await page.getByLabel('Check-out', { exact: true }).fill(dateKeyWithOffset(11))
+  const resizeResponse = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/reservations/${boardReservationThree.data.id}`)
+      && response.request().method() === 'PATCH',
+  )
+  await page.getByRole('button', { name: 'Update stay dates', exact: true }).click()
+  assert.equal((await resizeResponse).status(), 200, 'server Booking Board stay resize succeeds')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })
+  persistedBoardReservation = await prisma.reservation.findUnique({ where: { id: boardReservationThree.data.id } })
+  assert.equal(persistedBoardReservation.checkIn.toISOString().slice(0, 10), dateKeyWithOffset(8), 'Board check-in resize survives reload')
+  assert.equal(persistedBoardReservation.checkOut.toISOString().slice(0, 10), dateKeyWithOffset(11), 'Board check-out resize survives reload')
+
+  const staleExpectedUpdatedAt = persistedBoardReservation.updatedAt.toISOString()
+  const secondClient = await browser.newContext({ baseURL: baseUrl })
+  const secondLogin = await secondClient.request.post('/api/auth/login', { data: { identity: username, password } })
+  assert.equal(secondLogin.status(), 200, 'second booking-board client authenticates independently')
+  const secondClientUpdate = await secondClient.request.fetch(`/api/reservations/${boardReservationThree.data.id}`, {
+    method: 'PATCH',
+    data: { checkIn: dateKeyWithOffset(12), checkOut: dateKeyWithOffset(15) },
+    headers: {
+      'content-type': 'application/json',
+      'x-idempotency-key': `browser-second-client-resize-${runId}`,
+    },
+  })
+  assert.equal(secondClientUpdate.status(), 200, 'second client updates the reservation before the stale board submit')
+  await secondClient.close()
+
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).click()
+  let staleResizeHeaders = null
+  await page.route(`**/api/reservations/${boardReservationThree.data.id}`, async (route) => {
+    staleResizeHeaders = route.request().headers()
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected stale two-client booking-board conflict.' }),
+    })
+  })
+  await page.getByLabel('Check-in', { exact: true }).fill(dateKeyWithOffset(13))
+  await page.getByLabel('Check-out', { exact: true }).fill(dateKeyWithOffset(16))
+  await page.getByRole('button', { name: 'Update stay dates', exact: true }).click()
+  await page.getByText('Injected stale two-client booking-board conflict.', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(staleResizeHeaders['x-reservation-expected-updated-at'], staleExpectedUpdatedAt, 'stale board editor sends its original authoritative update token')
+  assert.ok(staleResizeHeaders['x-reservation-expected-version'], 'stale board editor sends an authoritative version token')
+  await page.unroute(`**/api/reservations/${boardReservationThree.data.id}`)
+  await page.getByLabel('Check-in', { exact: true }).waitFor({ state: 'visible' })
+  await page.waitForFunction((value) => document.querySelector('input[type="date"]')?.value === value, dateKeyWithOffset(12))
+  assert.equal(await page.getByLabel('Check-in', { exact: true }).inputValue(), dateKeyWithOffset(12), '409 refetch resets the stale check-in draft to the second client truth')
+  assert.equal(await page.getByLabel('Check-out', { exact: true }).inputValue(), dateKeyWithOffset(15), '409 refetch resets the stale check-out draft to the second client truth')
+
+  await page.route(`**/api/reservations/${boardReservationThree.data.id}/assign-room`, async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected authoritative room-move conflict.' }),
+    })
+  })
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).click()
+  await page.locator(`[data-board-room-action="${boardRoom.id}"]`).click()
+  await page.getByText('Injected authoritative room-move conflict.', { exact: false }).waitFor({ state: 'visible' })
+  await page.unroute(`**/api/reservations/${boardReservationThree.data.id}/assign-room`)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })
+  persistedBoardReservation = await prisma.reservation.findUnique({ where: { id: boardReservationThree.data.id } })
+  assert.equal(persistedBoardReservation.assignedRoomId, boardMoveRoom.id, 'rejected Board move preserves authoritative room assignment')
+  await assertNoOperationalBrowserStorage('server-mode booking board mutations')
+
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/front-desk'))
+  await page.route('**/api/front-desk/board*', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected front desk authority failure.' }),
+    })
+  })
+  await page.goto('/front-desk', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-front-desk-unavailable').waitFor({ state: 'visible' })
+  await page.getByText('Live PMS board unavailable:', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'front desk failure does not display browser reservation data')
+  assert.equal(await page.getByText(fakeBoardRoomNumber, { exact: false }).count(), 0, 'front desk failure does not display browser room data')
+  assert.equal(await page.getByText('Arrivals Today', { exact: true }).count(), 0, 'front desk failure renders no false zero-arrival section')
+  assert.equal(await page.getByText('Departures Today', { exact: true }).count(), 0, 'front desk failure renders no false zero-departure section')
+  assert.equal(await page.getByRole('button', { name: 'New Reservation', exact: true }).count(), 0, 'front desk failure exposes no reservation mutation')
+  assert.equal(await page.getByRole('button', { name: 'Ask about today', exact: true }).count(), 0, 'front desk failure exposes no assistant context from an unavailable snapshot')
+  await page.unroute('**/api/front-desk/board*')
+  await page.getByRole('button', { name: 'Retry live board', exact: true }).click()
+  await page.getByTestId('server-front-desk-unavailable').waitFor({ state: 'hidden' })
+  await page.getByRole('heading', { name: 'Front Desk Board', exact: true }).waitFor({ state: 'visible' })
+  await page.evaluate(() => {
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+    window.localStorage.clear()
+  })
+
+  await page.route('**/api/front-desk/board*', async (route) => {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 500))
+    await route.continue()
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: 'Ask about today' }).click()
+  await page.getByText('Live PMS', { exact: true }).waitFor({ state: 'visible' })
+  await page.locator('div.ml-8').filter({ hasText: /^Show today's risks$/ }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText('Live PMS records are still loading.', { exact: false }).count(), 0, 'a healthy prefilled assistant request waits for authoritative data')
+  await page.keyboard.press('Escape')
+  await page.unroute('**/api/front-desk/board*')
+
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/reports'))
+  for (const pattern of ['**/api/front-desk/board*', '**/api/reservations*', '**/api/guests*']) {
+    await page.route(pattern, async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Injected reports authority failure.' }),
+      })
+    })
+  }
+  await page.goto('/reports', { waitUntil: 'domcontentloaded' })
+  await page.getByText('Reports unavailable', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'reports failure does not display browser reservation data')
+  await page.getByRole('button', { name: /Export/ }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByRole('button', { name: /Export/ }).isDisabled(), true, 'report export is disabled without authoritative server data')
+  for (const pattern of ['**/api/front-desk/board*', '**/api/reservations*', '**/api/guests*']) {
+    await page.unroute(pattern)
+  }
+  await page.getByRole('button', { name: 'Retry authoritative reports' }).click()
+  await page.getByText('Reports unavailable', { exact: true }).waitFor({ state: 'hidden' })
+  await page.getByRole('button', { name: /Export/ }).click({ trial: true })
+  assert.equal(await page.getByRole('button', { name: /Export/ }).isDisabled(), false, 'report retry restores export after authoritative data loads')
+  await page.evaluate(() => {
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+    window.localStorage.clear()
+  })
+
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/channels'))
+  await page.route('**/api/channels/ical*', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected authoritative Channels failure.' }),
+    })
+  })
+  await page.goto('/channels', { waitUntil: 'domcontentloaded' })
+  await page.getByText('Channel Manager unavailable', { exact: true }).waitFor({ state: 'visible' }).catch(async (error) => {
+    throw new Error(`Channels fail-closed screen did not render.\n${await page.locator('body').innerText()}\n${error.message}`)
+  })
+  await page.getByText('Injected authoritative Channels failure.', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeChannelName, { exact: false }).count(), 0, 'Channels failure does not display browser channel fixtures')
+  assert.equal(await page.getByRole('tab', { name: /Rate Push|Real-Time Sync|Performance/ }).count(), 0, 'server Channels exposes no simulated provider tabs')
+  const injectedChannelStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['channels', 'channel-reservations', 'channel-sync-logs', 'channel-room-mappings', 'room-types-config'])
+  assert.match(injectedChannelStorage.channels || '', new RegExp(fakeChannelName), 'the fake channel fixture existed while server Channels ignored it')
+  await page.unroute('**/api/channels/ical*')
+  await page.getByRole('button', { name: 'Retry authoritative load', exact: true }).click()
+  await page.getByRole('heading', { name: 'Channel Manager', exact: true }).waitFor({ state: 'visible' })
+  await page.getByText('Booking Inbox / adapter only', { exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('tab', { name: 'Room mapping', exact: true }).click()
+  await page.getByText(persistedChannelMappingName, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeChannelName, { exact: false }).count(), 0, 'authoritative retry still ignores browser channel fixtures')
+  assert.equal(await page.getByText('Rate push, real-time inventory sync, provider performance, sync logs, and browser reservation imports are unavailable', { exact: false }).count(), 1)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('tab', { name: 'Room mapping', exact: true }).click()
+  await page.getByText(persistedChannelMappingName, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeChannelName, { exact: false }).count(), 0, 'persisted server mapping survives reload without browser fallback')
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+  }, Object.keys(injectedChannelStorage))
+  await assertNoOperationalBrowserStorage('server-mode Channels authority and reload')
+
+  const channelViewerContext = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 800 } })
+  const channelViewerLogin = await channelViewerContext.request.post('/api/auth/login', {
+    data: { identity: channelViewerUsername, password: channelViewerPassword },
+  })
+  assert.equal(channelViewerLogin.status(), 200, 'view-only channel manager authenticates')
+  const deniedChannelWrite = await channelViewerContext.request.post('/api/channels/ical/agoda', {
+    data: {
+      exportFileName: `denied-${runId}.ics`,
+      reason: 'Prove server channel mutation permission denial.',
+    },
+  })
+  assert.equal(deniedChannelWrite.status(), 403, 'view-only channel manager cannot configure iCal through the API')
+  const deniedMappingWrite = await channelViewerContext.request.patch(`/api/channels/mappings/${persistedChannelMapping.data.id}`, {
+    data: {
+      active: false,
+      reason: 'Prove channel mapping permission denial.',
+    },
+  })
+  assert.equal(deniedMappingWrite.status(), 403, 'view-only channel manager cannot mutate channel mappings through the API')
+  const channelViewerPage = await channelViewerContext.newPage()
+  await channelViewerPage.goto('/channels', { waitUntil: 'domcontentloaded' })
+  await channelViewerPage.getByText('Your role has read-only channel access', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await channelViewerPage.getByRole('button', { name: 'Configure iCal', exact: true }).first().isDisabled(), true, 'view-only channel manager sees disabled configuration controls')
+  await channelViewerContext.close()
 
   await page.goto('/housekeeping', { waitUntil: 'domcontentloaded' })
   await page.getByText(taskTitle, { exact: false }).waitFor({ state: 'visible' })
@@ -254,12 +1886,155 @@ try {
   await page.getByRole('tab', { name: /Rules/ }).click()
   await page.getByText(ruleName, { exact: false }).waitFor({ state: 'visible' })
 
-  for (const path of ['/settings', '/night-audit', '/system-status', '/internal-comms', '/guest-communications']) {
+  const missingMessageIdempotency = await context.request.post('/api/messages', {
+    data: {
+      channel: 'LINE',
+      type: 'CUSTOM',
+      recipientType: 'GUEST',
+      recipientName: `Missing Key ${runId}`,
+      recipientContact: `line-missing-${runId}`,
+      body: 'A message draft without an idempotency key must fail.',
+    },
+  })
+  assert.equal(missingMessageIdempotency.status(), 400, 'Messaging rejects a missing x-idempotency-key')
+  const mismatchedMessageIdempotency = await context.request.post('/api/messages', {
+    data: {
+      channel: 'LINE',
+      type: 'CUSTOM',
+      recipientType: 'GUEST',
+      recipientName: `Mismatched Key ${runId}`,
+      recipientContact: `line-mismatch-${runId}`,
+      body: 'Conflicting Messaging keys must fail.',
+      idempotencyKey: `message-body:${randomUUID()}`,
+    },
+    headers: { 'x-idempotency-key': `message-header:${randomUUID()}` },
+  })
+  assert.equal(mismatchedMessageIdempotency.status(), 409, 'Messaging rejects conflicting header and body idempotency keys')
+
+  await page.route('**/api/messages', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Messaging authoritative snapshot failure.' }),
+    })
+  })
+  await page.goto('/messaging', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-messaging-unavailable').waitFor({ state: 'visible' })
+  await page.getByText('Injected Messaging authoritative snapshot failure.', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByRole('button', { name: 'New Message', exact: true }).count(), 0, 'Messaging failure exposes no draft control')
+  assert.equal(await page.getByText('Total Sent', { exact: true }).count(), 0, 'Messaging failure renders no zero-value operational metrics')
+  await page.unroute('**/api/messages')
+  await page.getByRole('button', { name: 'Retry messaging', exact: true }).click()
+  await page.getByRole('button', { name: 'New Message', exact: true }).waitFor({ state: 'visible' })
+
+  await page.route('**/api/message-templates', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Messaging template snapshot failure.' }),
+    })
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-messaging-unavailable').waitFor({ state: 'visible' })
+  await page.getByText('Injected Messaging template snapshot failure.', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByRole('button', { name: 'New Message', exact: true }).count(), 0, 'Messaging template failure exposes no draft control')
+  await page.unroute('**/api/message-templates')
+  await page.getByRole('button', { name: 'Retry messaging', exact: true }).click()
+  await page.getByRole('button', { name: 'New Message', exact: true }).waitFor({ state: 'visible' })
+
+  const persistedDraftRecipient = `Messaging Reload ${runId}`
+  await page.getByRole('button', { name: 'New Message', exact: true }).click()
+  await page.getByRole('heading', { name: 'Record New Message', exact: true }).waitFor({ state: 'visible' })
+  await page.getByPlaceholder('Guest full name').fill(persistedDraftRecipient)
+  await page.getByPlaceholder('Guest LINE ID').fill(`line-${runId}`)
+  await page.getByPlaceholder('Write your message here...').fill(`Authoritative persisted draft ${runId}`)
+  const persistedDraftResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/messages') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Save Draft', exact: true }).click()
+  assert.equal((await persistedDraftResponse).status(), 201, 'Messaging saves an audited PMS draft')
+  await page.getByRole('heading', { name: 'Record New Message', exact: true }).waitFor({ state: 'hidden' })
+  await page.getByText(persistedDraftRecipient, { exact: true }).waitFor({ state: 'visible' })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: 'New Message', exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(persistedDraftRecipient, { exact: true }).waitFor({ state: 'visible' })
+
+  const ambiguousDraftRecipient = `Messaging Ambiguous ${runId}`
+  const ambiguousDraftContact = `line-ambiguous-${runId}`
+  const ambiguousDraftBody = `Lost response replay proof ${runId}`
+  let ambiguousDraftKey = ''
+  let replayedDraftKey = ''
+  let resolveAmbiguousDraftStored
+  const ambiguousDraftStored = new Promise((resolveStored) => {
+    resolveAmbiguousDraftStored = resolveStored
+  })
+  let interceptedAmbiguousDraft = false
+  await page.route('**/api/messages', async (route) => {
+    if (route.request().method() !== 'POST' || interceptedAmbiguousDraft) {
+      if (route.request().method() === 'POST') {
+        replayedDraftKey = route.request().headers()['x-idempotency-key'] || ''
+      }
+      await route.continue()
+      return
+    }
+    interceptedAmbiguousDraft = true
+    ambiguousDraftKey = route.request().headers()['x-idempotency-key'] || ''
+    const upstreamResponse = await route.fetch()
+    assert.equal(upstreamResponse.status(), 201, 'ambiguous Messaging request reached the server before the response was lost')
+    resolveAmbiguousDraftStored()
+    await route.abort('failed')
+  })
+  await page.getByRole('button', { name: 'New Message', exact: true }).click()
+  await page.getByPlaceholder('Guest full name').fill(ambiguousDraftRecipient)
+  await page.getByPlaceholder('Guest LINE ID').fill(ambiguousDraftContact)
+  await page.getByPlaceholder('Write your message here...').fill(ambiguousDraftBody)
+  await page.getByRole('button', { name: 'Save Draft', exact: true }).click()
+  await boundedSignal(ambiguousDraftStored, 'Ambiguous Messaging server write')
+  assert.match(ambiguousDraftKey, /^pms-message-draft:/, 'Messaging sends an opaque durable idempotency key')
+  const ambiguousAttemptStorage = await page.evaluate(() => Object.fromEntries(
+    Object.entries(window.sessionStorage).filter(([key]) => key.startsWith('pms:attempt:v1:')),
+  ))
+  const serializedAmbiguousAttempts = JSON.stringify(ambiguousAttemptStorage)
+  assert.equal(serializedAmbiguousAttempts.includes(ambiguousDraftRecipient), false, 'Messaging retry storage excludes recipient names')
+  assert.equal(serializedAmbiguousAttempts.includes(ambiguousDraftContact), false, 'Messaging retry storage excludes recipient contacts')
+  assert.equal(serializedAmbiguousAttempts.includes(ambiguousDraftBody), false, 'Messaging retry storage excludes message bodies')
+
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: 'New Message', exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: 'New Message', exact: true }).click()
+  await page.getByPlaceholder('Guest full name').fill(ambiguousDraftRecipient)
+  await page.getByPlaceholder('Guest LINE ID').fill(ambiguousDraftContact)
+  await page.getByPlaceholder('Write your message here...').fill(ambiguousDraftBody)
+  const replayedDraftResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/messages') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Save Draft', exact: true }).click()
+  assert.equal((await replayedDraftResponse).status(), 201, 'Messaging replay resolves through the original server draft')
+  assert.equal(replayedDraftKey, ambiguousDraftKey, 'Messaging lost-response retry reuses the exact logical idempotency key after reload')
+  await page.getByText(ambiguousDraftRecipient, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(
+    await prisma.message.count({ where: { propertyId: property.id, idempotencyKey: ambiguousDraftKey } }),
+    1,
+    'Messaging lost-response retry creates exactly one durable draft',
+  )
+  await page.unroute('**/api/messages')
+  await assertNoOperationalBrowserStorage('server-mode Messaging authority and retry')
+
+  for (const path of ['/settings', '/night-audit', '/system-status', '/internal-comms', '/guest-communications', '/daily-summary', '/data-backup']) {
     await page.goto(path, { waitUntil: 'domcontentloaded' })
+    await page.getByText('Loading PMS workspace...', { exact: true }).waitFor({ state: 'hidden' })
     const body = await page.locator('body').innerText()
     assert.equal(body.includes('Access restricted'), false, `${path} remains available in authenticated server mode`)
     assert.equal(body.includes('Something went wrong'), false, `${path} does not render the error boundary`)
-    if (path === '/internal-comms' || path === '/guest-communications') {
+    if (['/internal-comms', '/guest-communications', '/daily-summary', '/data-backup'].includes(path)) {
       assert.match(body, /browser-backed|unavailable/i, `${path} reports its server capability boundary`)
     }
     await assertNoOperationalBrowserStorage(path)
@@ -267,11 +2042,227 @@ try {
 
   for (const path of ['/reservations', '/guests', '/cashier', '/rooms', '/channels', '/messaging', '/reports']) {
     await page.goto(path, { waitUntil: 'domcontentloaded' })
+    await page.getByText('Loading PMS workspace...', { exact: true }).waitFor({ state: 'hidden' })
     const body = await page.locator('body').innerText()
     assert.equal(body.includes('Access restricted'), false, `${path} remains available in authenticated server mode`)
     assert.equal(body.includes('Something went wrong'), false, `${path} does not render the error boundary`)
     await assertNoOperationalBrowserStorage(path)
   }
+
+  // CASHIER membership may view the authoritative Guest Directory but cannot create
+  // guest profiles. Both UI capability and the backend permission remain enforced.
+  const guestViewerContext = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 800 } })
+  const guestViewerLogin = await guestViewerContext.request.post('/api/auth/login', {
+    data: { identity: guestViewerUsername, password: guestViewerPassword },
+  })
+  assert.equal(guestViewerLogin.status(), 200, `Guest viewer login failed: ${await guestViewerLogin.text()}`)
+  const guestViewerPage = await guestViewerContext.newPage()
+  const guestViewerDirectoryReadTimes = []
+  await guestViewerPage.route('**/api/guests', async (route) => {
+    if (route.request().method() === 'GET') {
+      guestViewerDirectoryReadTimes.push(Date.now())
+    }
+    await route.continue()
+  })
+  const guestViewerSseConnected = guestViewerPage.waitForResponse((response) => response.url().endsWith('/api/events'))
+  await guestViewerPage.goto('/guests', { waitUntil: 'domcontentloaded' })
+  await guestViewerSseConnected
+  await guestViewerPage.getByTestId('server-guests-view').waitFor({ state: 'visible' })
+  assert.equal(await guestViewerPage.getByRole('button', { name: 'New Guest', exact: true }).count(), 0, 'view-only Guest Directory membership sees no create control')
+  const deniedGuestCreate = await guestViewerContext.request.post('/api/guests', {
+    data: { firstName: 'Denied', lastName: `Guest ${runId}` },
+    headers: { 'x-idempotency-key': `denied-guest-create:${randomUUID()}` },
+  })
+  assert.equal(deniedGuestCreate.status(), 403, 'view-only Guest Directory membership cannot create a guest through the API')
+  const expectedGuestViewerEvent = {
+    type: 'GUEST_UPDATED',
+    aggregateType: 'guest',
+    aggregateId: firstBrowserGuestPayload.data.id,
+  }
+  await armDomainEventProbe(guestViewerPage, expectedGuestViewerEvent)
+  const guestViewerEvent = await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    eventType: expectedGuestViewerEvent.type,
+    aggregateType: expectedGuestViewerEvent.aggregateType,
+    aggregateId: expectedGuestViewerEvent.aggregateId,
+  })
+  expectedGuestViewerEvent.id = String(guestViewerEvent.id)
+  const guestViewerEventSeenAt = await waitForDomainEventProbe(guestViewerPage, expectedGuestViewerEvent)
+  for (let attempt = 0; attempt < 20 && !guestViewerDirectoryReadTimes.some((readAt) => readAt >= guestViewerEventSeenAt); attempt += 1) {
+    await guestViewerPage.waitForTimeout(250)
+  }
+  assert.ok(
+    guestViewerDirectoryReadTimes.some((readAt) => readAt >= guestViewerEventSeenAt),
+    'view-only Guest Directory membership starts an authoritative profile refetch after the exact permitted guest event is dispatched',
+  )
+
+  await guestViewerPage.goto('/messaging', { waitUntil: 'domcontentloaded' })
+  await guestViewerPage.getByTestId('messaging-compose-restricted').waitFor({ state: 'visible' })
+  assert.equal(await guestViewerPage.getByRole('button', { name: 'New Message', exact: true }).count(), 0, 'view-only Messaging membership sees no draft control')
+  const deniedMessageDraft = await guestViewerContext.request.post('/api/messages', {
+    data: {
+      channel: 'LINE',
+      type: 'CUSTOM',
+      recipientType: 'GUEST',
+      recipientName: 'Denied Messaging Guest',
+      recipientContact: `line-denied-${runId}`,
+      body: 'This read-only draft must not persist.',
+      idempotencyKey: `denied-message-draft:${randomUUID()}`,
+    },
+    headers: { 'x-idempotency-key': `denied-message-draft-header:${randomUUID()}` },
+  })
+  assert.equal(deniedMessageDraft.status(), 403, 'view-only Messaging membership cannot create a draft through the API')
+  await guestViewerContext.close()
+
+  await prisma.userPropertyMembership.updateMany({
+    where: { userId: limitedUser.id, propertyId: property.id },
+    data: { active: true },
+  })
+  const staffMessagingContext = await browser.newContext({ baseURL: baseUrl })
+  const staffMessagingLogin = await staffMessagingContext.request.post('/api/auth/login', {
+    data: { identity: limitedUsername, password: limitedPassword },
+  })
+  assert.equal(staffMessagingLogin.status(), 200, 'HOUSEKEEPING messaging user authenticates after membership restoration')
+  const staffDraftKey = `staff-message:${randomUUID()}`
+  const permittedStaffDraft = await staffMessagingContext.request.post('/api/messages', {
+    data: {
+      channel: 'LINE',
+      type: 'CUSTOM',
+      recipientType: 'STAFF',
+      recipientName: 'Front Desk Team',
+      recipientContact: `staff-group-${runId}`,
+      body: 'A staff-only operational handoff.',
+      idempotencyKey: staffDraftKey,
+    },
+    headers: { 'x-idempotency-key': staffDraftKey },
+  })
+  assert.equal(permittedStaffDraft.status(), 201, 'send:staff-messages authorizes a staff draft without granting guest-message authority')
+  const deniedHousekeepingGuestKey = `housekeeping-guest-message:${randomUUID()}`
+  const deniedHousekeepingGuestDraft = await staffMessagingContext.request.post('/api/messages', {
+    data: {
+      channel: 'LINE',
+      type: 'CUSTOM',
+      recipientType: 'GUEST',
+      recipientName: 'Guest Recipient',
+      recipientContact: `guest-denied-${runId}`,
+      body: 'HOUSEKEEPING must not gain guest messaging authority.',
+      idempotencyKey: deniedHousekeepingGuestKey,
+    },
+    headers: { 'x-idempotency-key': deniedHousekeepingGuestKey },
+  })
+  assert.equal(deniedHousekeepingGuestDraft.status(), 403, 'send:staff-messages does not authorize a guest draft')
+  const staffSseLastEvent = await prisma.domainEvent.findFirst({ orderBy: { id: 'desc' }, select: { id: true } })
+  const staffMessagingCookies = await staffMessagingContext.cookies(baseUrl)
+  const staffMessagingCookieHeader = staffMessagingCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ')
+  await readSseAccessRevoked({
+    url: baseUrl,
+    cookie: staffMessagingCookieHeader,
+    lastEventId: staffSseLastEvent?.id || 0n,
+    trigger: () => prisma.userPropertyMembership.updateMany({
+      where: { userId: limitedUser.id, propertyId: property.id },
+      data: { active: false },
+    }),
+  })
+  await staffMessagingContext.close()
+
+  // CAFE_STAFF may read authoritative folios and post an allowed charge, but it may
+  // never collect or record a payment. Its event subscription must still refetch the
+  // Cashier snapshot after a property-scoped folio event.
+  const cafeCashierContext = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 800 } })
+  const cafeCashierLogin = await cafeCashierContext.request.post('/api/auth/login', {
+    data: { identity: cafeCashierUsername, password: cafeCashierPassword },
+  })
+  assert.equal(cafeCashierLogin.status(), 200, `CAFE_STAFF Cashier login failed: ${await cafeCashierLogin.text()}`)
+  const cafeCashierPage = await cafeCashierContext.newPage()
+  let cafeCashierFolioReads = 0
+  const cafeCashierFolioReadTimes = []
+  await cafeCashierPage.route('**/api/cashier/folios*', async (route) => {
+    if (route.request().method() === 'GET') {
+      cafeCashierFolioReads += 1
+      cafeCashierFolioReadTimes.push(Date.now())
+    }
+    await route.continue()
+  })
+  const cafeSseConnected = cafeCashierPage.waitForResponse((response) => response.url().endsWith('/api/events'))
+  await cafeCashierPage.goto('/cashier', { waitUntil: 'domcontentloaded' })
+  await cafeSseConnected
+  await cafeCashierPage.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await cafeCashierPage.getByText(`Board Updated ${runId}`, { exact: true }).waitFor({ state: 'visible' })
+  await cafeCashierPage.getByRole('button', { name: 'Post Charge', exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await cafeCashierPage.getByRole('button', { name: 'Collect', exact: true }).count(), 0, 'CAFE_STAFF has no payment collection control')
+  assert.equal(await cafeCashierPage.getByRole('button', { name: 'Record payment', exact: true }).count(), 0, 'CAFE_STAFF has no payment recording control')
+  const cafeReadsBeforeFolioEvent = cafeCashierFolioReads
+  const expectedCafeChargeEvent = {
+    type: 'CHARGE_CREATED',
+    aggregateType: 'charge',
+    aggregateId: `cafe-cashier-charge-${runId}`,
+  }
+  await armDomainEventProbe(cafeCashierPage, expectedCafeChargeEvent)
+  const cafeChargeEvent = await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    eventType: expectedCafeChargeEvent.type,
+    aggregateType: expectedCafeChargeEvent.aggregateType,
+    aggregateId: expectedCafeChargeEvent.aggregateId,
+  })
+  expectedCafeChargeEvent.id = String(cafeChargeEvent.id)
+  const cafeChargeEventSeenAt = await waitForDomainEventProbe(cafeCashierPage, expectedCafeChargeEvent)
+  // Playwright route counters live in Node; wait briefly for the asynchronous SSE listener to refetch.
+  for (let attempt = 0; attempt < 20 && !cafeCashierFolioReadTimes.some((readAt) => readAt >= cafeChargeEventSeenAt); attempt += 1) {
+    await cafeCashierPage.waitForTimeout(250)
+  }
+  assert.ok(cafeCashierFolioReads > cafeReadsBeforeFolioEvent, 'CAFE_STAFF Cashier refetches authoritative folios after its permitted SSE event')
+  assert.ok(
+    cafeCashierFolioReadTimes.some((readAt) => readAt >= cafeChargeEventSeenAt),
+    'CAFE_STAFF Cashier refetch starts after the exact permitted charge event is dispatched',
+  )
+  for (const reservationEventType of ['RESERVATION_ROOM_ASSIGNED', 'RESERVATION_GUEST_UPDATED']) {
+    const expectedCafeReservationEvent = {
+      type: reservationEventType,
+      aggregateType: 'reservation',
+      aggregateId: boardReservationOne.data.id,
+    }
+    await armDomainEventProbe(cafeCashierPage, expectedCafeReservationEvent)
+    const cafeReservationEvent = await recordDomainEvent(prisma, {
+      propertyId: property.id,
+      eventType: expectedCafeReservationEvent.type,
+      aggregateType: expectedCafeReservationEvent.aggregateType,
+      aggregateId: expectedCafeReservationEvent.aggregateId,
+    })
+    expectedCafeReservationEvent.id = String(cafeReservationEvent.id)
+    const cafeReservationEventSeenAt = await waitForDomainEventProbe(cafeCashierPage, expectedCafeReservationEvent)
+    for (let attempt = 0; attempt < 20 && !cafeCashierFolioReadTimes.some((readAt) => readAt >= cafeReservationEventSeenAt); attempt += 1) {
+      await cafeCashierPage.waitForTimeout(250)
+    }
+    assert.ok(
+      cafeCashierFolioReadTimes.some((readAt) => readAt >= cafeReservationEventSeenAt),
+      `CAFE_STAFF Cashier refetch starts after the exact ${reservationEventType} invalidation is dispatched`,
+    )
+  }
+  const cafeOperationalStorage = await cafeCashierPage.evaluate(() => {
+    const forbidden = new Set(['folios', 'cashier-folios', 'accounting-entries', 'auth:current-user'])
+    return Object.keys(window.localStorage).filter((key) => forbidden.has(key))
+  })
+  assert.deepEqual(cafeOperationalStorage, [], 'CAFE_STAFF Cashier keeps folio, accounting, and identity state out of browser storage')
+  await cafeCashierContext.close()
+
+  await page.goto('/cashier', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  assert.equal(await page.getByRole('tab', { name: 'Accounting', exact: true }).count(), 0, 'Accounting is capability-gated out of the server Cashier')
+  assert.equal(await page.getByRole('tab', { name: 'Reconciliation', exact: true }).count(), 0, 'Cash reconciliation is capability-gated out of the server Cashier')
+  await assertNoOperationalBrowserStorage('server-mode accounting capability gate')
+
+  await page.keyboard.press('Control+K')
+  await page.getByPlaceholder('Type a command or search...').waitFor({ state: 'visible' })
+  for (const label of [
+    'Staff Communications',
+    'Guest Communications',
+    'Send Email',
+    'Daily Summary Report',
+    'Data Backup & Export',
+  ]) {
+    assert.equal(await page.getByText(label, { exact: true }).count(), 0, `${label} is not presented as an operational server command`)
+  }
+  await page.keyboard.press('Escape')
 
   const lastEvent = await prisma.domainEvent.findFirst({ orderBy: { id: 'desc' }, select: { id: true } })
   const after = lastEvent?.id || 0n

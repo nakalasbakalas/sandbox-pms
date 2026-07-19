@@ -31,6 +31,7 @@ export function getSystemCapabilities(env = process.env) {
       realtime: capability(sseEnabled ? 'available' : 'disabled', sseEnabled ? 'Authenticated PostgreSQL-backed SSE with bounded catch-up' : 'SSE_ENABLED is off', { writeMode: 'read-only' }),
     },
     finance: {
+      legacyFolioCharges: capability('available', 'Property-scoped folio charges persist with exact-satang idempotency and audit evidence', { writeMode: 'controlled' }),
       accountingV2: capability(accountingEnabled ? 'enabled' : 'disabled', accountingEnabled ? 'ACCOUNTING_V2_ENABLED is active' : 'ACCOUNTING_V2_ENABLED is off', { writeMode: accountingEnabled ? 'controlled' : 'disabled' }),
       onlinePayments: capability('disabled', 'No payment gateway is enabled'),
     },

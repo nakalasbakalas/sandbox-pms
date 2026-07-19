@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
+import { pipeline } from 'node:stream/promises'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,6 +13,7 @@ import { createPrismaClient } from './prisma-client.mjs'
 import { databaseHealthFailure } from './health-response.mjs'
 import { createOpenApiDocument } from './openapi.mjs'
 import { listDomainEvents } from './domain-events.mjs'
+import { PmsValidationError } from './pms-domain.mjs'
 import {
   createMessageDraft,
   createMessageTemplate,
@@ -66,6 +68,7 @@ import {
   reverseAccountingPayment,
 } from './accounting-service.mjs'
 import { canViewRoute, requirePermission } from './rbac.mjs'
+import { canReadOperationalEvent, requireOperationalEventPermission } from './event-access.mjs'
 import { clearSessionCookie, createSessionToken, readSessionCookie, sessionCookie, verifySessionToken } from './security.mjs'
 import { envEnabled, requireSetupPermission, setupTokenRequired } from './setup-permission.mjs'
 import {
@@ -154,6 +157,7 @@ import {
   getTodayData,
   listBookingEmailEvents,
   listBookingEmailSources,
+  listCashierFolios,
   listGuests,
   listReservations,
   listRooms,
@@ -166,6 +170,7 @@ import {
   deleteSetupRoom,
   updateBookingEmailSource,
   updateReservation,
+  updateReservationGuest,
   updateGuest,
   updateHousekeepingStatus,
   updateRoomOperationalStatus,
@@ -182,7 +187,7 @@ const port = Number(process.env.PORT || 10000)
 const host = process.env.HOST || '0.0.0.0'
 const MAX_JSON_BODY_BYTES = 1_000_000
 const CORS_ALLOW_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
-const CORS_ALLOW_HEADERS = `content-type, authorization, x-setup-token, x-request-id, x-idempotency-key, ${OPS_WORKER_SIGNATURE_HEADER}, ${OPS_WORKER_TIMESTAMP_HEADER}, ${OPS_WORKER_NONCE_HEADER}`
+const CORS_ALLOW_HEADERS = `content-type, authorization, x-setup-token, x-request-id, x-idempotency-key, x-reservation-expected-updated-at, x-reservation-expected-version, x-guest-expected-updated-at, x-guest-expected-version, ${OPS_WORKER_SIGNATURE_HEADER}, ${OPS_WORKER_TIMESTAMP_HEADER}, ${OPS_WORKER_NONCE_HEADER}`
 const PRODUCTION = process.env.NODE_ENV === 'production'
 
 let prisma
@@ -397,14 +402,29 @@ function startDomainEventStream(request, response, db, context, url) {
     if (closed || polling) return
     polling = true
     try {
-      const events = await listDomainEvents(db, { propertyId: context.propertyId, after, limit: 100 })
+      const liveUser = await requireUser(request)
+      const liveContext = await resolveRequestContext(db, liveUser, request)
+      requireOperationalEventPermission(liveContext.actor)
+      if (liveContext.propertyId !== context.propertyId) {
+        const error = new Error('Operational event access changed.')
+        error.statusCode = 403
+        throw error
+      }
+      const events = await listDomainEvents(db, { propertyId: liveContext.propertyId, after, limit: 100 })
       for (const event of events) {
         after = BigInt(event.id)
+        if (!canReadOperationalEvent(liveContext.actor, event)) continue
         response.write(`id: ${event.id}\n`)
         response.write(`event: ${event.type}\n`)
         response.write(`data: ${JSON.stringify(event)}\n\n`)
       }
-    } catch {
+    } catch (error) {
+      if (error?.statusCode === 401 || error?.statusCode === 403) {
+        if (!closed) response.write('event: access_revoked\ndata: {"reconnect":true}\n\n')
+        cleanup()
+        response.end()
+        return
+      }
       if (!closed) response.write('event: stream_error\ndata: {"retry":true}\n\n')
     } finally {
       polling = false
@@ -583,11 +603,20 @@ async function serveStatic(request, response) {
       return
     }
 
-    createReadStream(filePath).pipe(response)
+    await pipeline(createReadStream(filePath), response)
   } catch (error) {
+    console.error('Static file response failed.', {
+      requestId: request.requestId,
+      name: error instanceof Error ? error.name : 'Error',
+      code: typeof error?.code === 'string' ? error.code : undefined,
+    })
+    if (response.headersSent) {
+      response.destroy()
+      return
+    }
     sendJson(response, 500, {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: 'The requested application asset could not be loaded.',
     })
   }
 }
@@ -917,9 +946,10 @@ async function handleApi(request, response, url) {
       sendJson(response, 401, { ok: false, error: 'Invalid username/email or password.' })
       return true
     }
+    const propertyContext = await resolveRequestContext(db, user, request)
     loginThrottle.recordSuccess(loginIdentity)
-    const token = createSessionToken(user)
-    sendJson(response, 200, { ok: true, user: publicUser(user) }, { 'set-cookie': sessionCookie(token) })
+    const token = createSessionToken(propertyContext.actor)
+    sendJson(response, 200, { ok: true, user: publicUser(propertyContext.actor) }, { 'set-cookie': sessionCookie(token) })
     return true
   }
 
@@ -930,7 +960,8 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/auth/me' && request.method === 'GET') {
     const user = await requireUser(request)
-    sendJson(response, 200, { ok: true, user: publicUser(user) })
+    const propertyContext = await resolveRequestContext(db, user, request)
+    sendJson(response, 200, { ok: true, user: publicUser(propertyContext.actor) })
     return true
   }
 
@@ -982,10 +1013,14 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/messages' && request.method === 'POST') {
-    requirePermission(user, 'send:guest-messages')
+    const body = await readJson(request)
+    const recipientType = String(body?.recipientType || '').trim().toUpperCase()
+    if (recipientType === 'GUEST') requirePermission(user, 'send:guest-messages')
+    else if (recipientType === 'STAFF' || recipientType === 'GROUP') requirePermission(user, 'send:staff-messages')
+    else throw new PmsValidationError('recipientType: Select a supported message recipient type.')
     sendJson(response, 201, {
       ok: true,
-      data: await createMessageDraft(db, context, await readJson(request)),
+      data: await createMessageDraft(db, context, body),
       message: 'Message draft saved. No provider delivery was attempted.',
     })
     return true
@@ -1026,14 +1061,14 @@ async function handleApi(request, response, url) {
     requirePermission(user, 'manage:channels')
     sendJson(response, 200, {
       ok: true,
-      data: await deleteChannelMapping(db, context, channelMappingParams.id, { reason: url.searchParams.get('reason') }),
+      data: await deleteChannelMapping(db, context, channelMappingParams.id, await readJson(request)),
       message: 'Channel mapping deleted.',
     })
     return true
   }
 
   if (url.pathname === '/api/events' && request.method === 'GET') {
-    requirePermission(user, 'view:board')
+    requireOperationalEventPermission(user)
     if (String(process.env.SSE_ENABLED ?? 'true').toLowerCase() === 'false') {
       const error = new Error('Operational event streaming is disabled.')
       error.statusCode = 503
@@ -1504,7 +1539,13 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/front-desk/board' && request.method === 'GET') {
     requirePermission(user, 'view:board')
-    sendJson(response, 200, { ok: true, data: await getFrontDeskBoard(db, user) })
+    sendJson(response, 200, {
+      ok: true,
+      data: await getFrontDeskBoard(db, user, {
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+      }),
+    })
     return true
   }
 
@@ -1645,7 +1686,13 @@ async function handleApi(request, response, url) {
 
   if (params && request.method === 'DELETE') {
     requirePermission(user, 'manage:channels')
-    const feed = await deactivateIcalFeedChannel(db, context, params.provider, requestBaseOrigin(request))
+    const feed = await deactivateIcalFeedChannel(
+      db,
+      context,
+      params.provider,
+      requestBaseOrigin(request),
+      await readJson(request),
+    )
     sendJson(response, 200, { ok: true, data: feed, message: `${feed.name} iCal feed disabled.` })
     return true
   }
@@ -1706,18 +1753,62 @@ async function handleApi(request, response, url) {
     return true
   }
 
+  if (url.pathname === '/api/cashier/folios' && request.method === 'GET') {
+    requirePermission(user, 'view:cashier')
+    sendJson(response, 200, { ok: true, data: await listCashierFolios(db, user) })
+    return true
+  }
+
   if (url.pathname === '/api/reservations' && request.method === 'POST') {
     requirePermission(user, 'create:reservation')
-    const reservation = await createReservation(db, await readJson(request), user)
-    sendJson(response, 201, { ok: true, data: reservation, message: `Reservation ${reservation.confirmationCode} created.` })
+    const reservation = await createReservation(db, await readJson(request), user, {
+      idempotencyKey: context.idempotencyKey,
+      requireIdempotency: true,
+    })
+    sendJson(response, reservation.idempotentReplay ? 200 : 201, { ok: true, data: reservation, message: reservation.idempotentReplay ? `Existing reservation ${reservation.confirmationCode} returned.` : `Reservation ${reservation.confirmationCode} created.` })
     return true
   }
 
   params = routeParam(url.pathname, /^\/api\/reservations\/(?<id>[^/]+)$/)
   if (params && request.method === 'PATCH') {
     requirePermission(user, 'edit:reservation')
-    const reservation = await updateReservation(db, params.id, await readJson(request), user)
+    const body = await readJson(request)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
+    const reservation = await updateReservation(db, params.id, {
+      ...body,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    }, user, {
+      idempotencyKey: context.idempotencyKey,
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: `Reservation ${reservation.confirmationCode} updated.` })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/reservations\/(?<id>[^/]+)\/guest$/)
+  if (params && request.method === 'PATCH') {
+    requirePermission(user, 'edit:reservation')
+    requirePermission(user, 'view:guests')
+    const body = await readJson(request)
+    const expectedTokens = [
+      body.expectedGuestUpdatedAt,
+      firstHeaderValue(request.headers['x-guest-expected-updated-at']),
+      firstHeaderValue(request.headers['x-guest-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Guest update tokens do not match.')
+    }
+    const reservation = await updateReservationGuest(db, params.id, {
+      ...body,
+      ...(expectedTokens.length ? { expectedGuestUpdatedAt: String(expectedTokens[0]) } : {}),
+    }, user, { idempotencyKey: context.idempotencyKey })
+    sendJson(response, 200, { ok: true, data: reservation, message: 'Guest profile updated.' })
     return true
   }
 
@@ -1725,7 +1816,18 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
     const body = await readJson(request)
-    const reservation = await assignRoom(db, params.id, body.roomId, user)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
+    const reservation = await assignRoom(db, params.id, body.roomId, user, {
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Room assigned successfully.' })
     return true
   }
@@ -1734,13 +1836,27 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'check-in:guest')
     const body = await readJson(request)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
     const reservation = await checkInReservation(db, params.id, user, body.payment ? {
       ...body,
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
       payment: {
         ...body.payment,
         idempotencyKey: body.payment.idempotencyKey || context.idempotencyKey,
       },
-    } : body)
+    } : {
+      ...body,
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Check-in complete. Room is now occupied.' })
     return true
   }
@@ -1749,13 +1865,27 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'check-out:guest')
     const body = await readJson(request)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
     const reservation = await checkOutReservation(db, params.id, user, body.payment ? {
       ...body,
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
       payment: {
         ...body.payment,
         idempotencyKey: body.payment.idempotencyKey || context.idempotencyKey,
       },
-    } : body)
+    } : {
+      ...body,
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Check-out complete. Room has been sent to housekeeping.' })
     return true
   }
@@ -1764,7 +1894,18 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'cancel:reservation')
     const body = await readJson(request)
-    const reservation = await cancelReservation(db, params.id, user, 'CANCELLED', body.reason || body.notes)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
+    const reservation = await cancelReservation(db, params.id, user, 'CANCELLED', body.reason || body.notes, {
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Reservation cancelled.' })
     return true
   }
@@ -1773,7 +1914,18 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'cancel:reservation')
     const body = await readJson(request)
-    const reservation = await cancelReservation(db, params.id, user, 'NO_SHOW', body.reason || body.notes)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
+    const reservation = await cancelReservation(db, params.id, user, 'NO_SHOW', body.reason || body.notes, {
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Reservation marked as no-show.' })
     return true
   }
@@ -1844,8 +1996,11 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/guests' && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
-    const guest = await createGuest(db, await readJson(request), user)
-    sendJson(response, 201, { ok: true, data: guest, message: 'Guest profile created.' })
+    const guest = await createGuest(db, await readJson(request), user, {
+      idempotencyKey: context.idempotencyKey,
+      requireIdempotency: true,
+    })
+    sendJson(response, guest.idempotentReplay ? 200 : 201, { ok: true, data: guest, message: guest.idempotentReplay ? 'Existing guest profile returned.' : 'Guest profile created.' })
     return true
   }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -38,7 +38,9 @@ import type { Message, MessageTemplate, MessageChannel, MessageType, MessageStat
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { useNavigation } from '@/hooks/use-navigation'
+import { useAuth } from '@/hooks/use-auth'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
 
 function normalizeServerMessage(record: any): Message {
   const metadata = record.metadata && typeof record.metadata === 'object' ? record.metadata : {}
@@ -80,72 +82,153 @@ function normalizeServerTemplate(record: any): MessageTemplate {
   }
 }
 
+type ServerMessagingAvailability = {
+  loading: boolean
+  error: string | null
+  retry: () => void
+}
+
+type MessageDraftSaver = (message: Message) => Promise<void>
+
 export function CommunicationCenterView() {
-  const { navigate } = useNavigation()
-  const [localMessages, setLocalMessages] = useKV<Message[]>('messages', [])
-  const [localTemplates] = useKV<MessageTemplate[]>('message-templates', [])
+  return SERVER_API_ENABLED ? <ServerCommunicationCenterView /> : <DemoCommunicationCenterView />
+}
+
+function ServerCommunicationCenterView() {
   const [serverMessages, setServerMessages] = useState<Message[]>([])
   const [serverTemplates, setServerTemplates] = useState<MessageTemplate[]>([])
   const [serverError, setServerError] = useState<string | null>(null)
-  const [serverLoading, setServerLoading] = useState(SERVER_API_ENABLED)
+  const [serverLoading, setServerLoading] = useState(true)
+  const refreshVersion = useRef(0)
+
+  const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current
+    setServerLoading(true)
+    setServerError(null)
+    try {
+      const [messagePayload, templatePayload] = await Promise.all([
+      pmsApi<{ ok: true; data: any[] }>('/api/messages', null),
+      pmsApi<{ ok: true; data: any[] }>('/api/message-templates', null),
+      ])
+      if (version !== refreshVersion.current) {
+        throw new Error('Authoritative Messaging read-back was superseded.')
+      }
+      setServerMessages((messagePayload.data || []).map(normalizeServerMessage))
+      setServerTemplates((templatePayload.data || []).map(normalizeServerTemplate))
+    } catch (error) {
+      if (version === refreshVersion.current) {
+        setServerError(error instanceof Error ? error.message : 'Messaging records could not be loaded.')
+      }
+      throw error
+    } finally {
+      if (version === refreshVersion.current) setServerLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh().catch(() => undefined)
+    return () => {
+      refreshVersion.current += 1
+    }
+  }, [refresh])
+
+  const saveDraft = useCallback<MessageDraftSaver>(async (message) => {
+    const requestBody = {
+      channel: message.channel,
+      type: message.type,
+      recipientType: message.recipientType,
+      recipientName: message.recipientName,
+      recipientContact: message.recipientContact,
+      roomNumber: message.roomNumber,
+      body: message.body,
+      templateId: message.templateId,
+      subject: message.subject,
+    }
+    const attempt = {
+      operation: 'message-draft',
+      entityId: 'messaging-new-draft',
+      material: requestBody,
+    } satisfies DurableAttemptDescriptor
+    const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
+    await pmsApi<{ ok: true; data: any }>('/api/messages', null, {
+      method: 'POST',
+      headers: { 'x-idempotency-key': idempotencyKey },
+      body: JSON.stringify({ ...requestBody, idempotencyKey }),
+    })
+    await refresh()
+    await durableAttemptKeys.confirmSuccess(attempt)
+    toast.success('Draft saved to the PMS. No provider delivery was attempted.')
+  }, [refresh])
+
+  return (
+    <CommunicationCenterContent
+      messages={serverMessages}
+      templates={serverTemplates}
+      onSaveDraft={saveDraft}
+      serverAvailability={{ loading: serverLoading, error: serverError, retry: () => void refresh().catch(() => undefined) }}
+    />
+  )
+}
+
+function DemoCommunicationCenterView() {
+  const [localMessages, setLocalMessages] = useKV<Message[]>('messages', [])
+  const [localTemplates] = useKV<MessageTemplate[]>('message-templates', [])
+  const saveDraft = useCallback<MessageDraftSaver>(async (message) => {
+    setLocalMessages((current) => [...(current || []), message])
+    toast.success('Message draft recorded for ' + message.channel)
+  }, [setLocalMessages])
+
+  return (
+    <CommunicationCenterContent
+      messages={localMessages || []}
+      templates={localTemplates || []}
+      onSaveDraft={saveDraft}
+    />
+  )
+}
+
+function CommunicationCenterContent({
+  messages,
+  templates,
+  onSaveDraft,
+  serverAvailability,
+}: {
+  messages: Message[]
+  templates: MessageTemplate[]
+  onSaveDraft: MessageDraftSaver
+  serverAvailability?: ServerMessagingAvailability
+}) {
+  const { navigate } = useNavigation()
+  const { hasPermission } = useAuth()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null)
   const [showNewMessage, setShowNewMessage] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<MessageTemplate | null>(null)
-  const messages = SERVER_API_ENABLED ? serverMessages : localMessages || []
-  const templates = SERVER_API_ENABLED ? serverTemplates : localTemplates || []
-
-  useEffect(() => {
-    if (!SERVER_API_ENABLED) return
-    let cancelled = false
-    setServerLoading(true)
-    setServerError(null)
-    void Promise.all([
-      pmsApi<{ ok: true; data: any[] }>('/api/messages', null),
-      pmsApi<{ ok: true; data: any[] }>('/api/message-templates', null),
-    ])
-      .then(([messagePayload, templatePayload]) => {
-        if (cancelled) return
-        setServerMessages((messagePayload.data || []).map(normalizeServerMessage))
-        setServerTemplates((templatePayload.data || []).map(normalizeServerTemplate))
-      })
-      .catch((error) => {
-        if (!cancelled) setServerError(error instanceof Error ? error.message : 'Messaging records could not be loaded.')
-      })
-      .finally(() => {
-        if (!cancelled) setServerLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
+  const canSendGuestMessages = hasPermission('send:guest-messages')
   const saveDraft = async (message: Message) => {
-    if (!SERVER_API_ENABLED) {
-      setLocalMessages((current) => [...(current || []), message])
-      toast.success('Message draft recorded for ' + message.channel)
-      setShowNewMessage(false)
-      return
-    }
-
-    const payload = await pmsApi<{ ok: true; data: any }>('/api/messages', null, {
-      method: 'POST',
-      body: JSON.stringify({
-        channel: message.channel,
-        type: message.type,
-        recipientType: message.recipientType,
-        recipientName: message.recipientName,
-        recipientContact: message.recipientContact,
-        roomNumber: message.roomNumber,
-        body: message.body,
-        templateId: message.templateId,
-        subject: message.subject,
-        idempotencyKey: String(message.metadata?.idempotencyKey || ''),
-      }),
-    })
-    setServerMessages((current) => [normalizeServerMessage(payload.data), ...current])
-    toast.success('Draft saved to the PMS. No provider delivery was attempted.')
+    await onSaveDraft(message)
     setShowNewMessage(false)
+  }
+
+  if (serverAvailability?.loading || serverAvailability?.error) {
+    return (
+      <div className="min-h-screen bg-background" data-testid="server-messaging-unavailable">
+        <div className="border-b bg-card px-6 py-6">
+          <h1 className="text-3xl font-semibold">Guest Communications</h1>
+          <p className="mt-1 text-sm text-muted-foreground">LINE-first messaging center</p>
+        </div>
+        <main className="mx-auto max-w-7xl px-6 py-6">
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900" role="status">
+            <p>{serverAvailability.loading ? 'Loading persistent message drafts and templates…' : `Messaging unavailable: ${serverAvailability.error}`}</p>
+            {serverAvailability.error && (
+              <Button className="mt-3" size="sm" variant="outline" onClick={serverAvailability.retry}>
+                Retry messaging
+              </Button>
+            )}
+          </div>
+        </main>
+      </div>
+    )
   }
 
   const filteredMessages = messages.filter(msg =>
@@ -155,6 +238,7 @@ export function CommunicationCenterView() {
     msg.body.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  const draftMessages = filteredMessages.filter(m => m.status === 'DRAFT')
   const sentMessages = filteredMessages.filter(m => m.status === 'SENT' || m.status === 'DELIVERED' || m.status === 'READ')
   const scheduledMessages = filteredMessages.filter(m => m.status === 'SCHEDULED')
   const failedMessages = filteredMessages.filter(m => m.status === 'FAILED')
@@ -179,11 +263,6 @@ export function CommunicationCenterView() {
 
   return (
     <div className="min-h-screen bg-background">
-      {SERVER_API_ENABLED && (serverLoading || serverError) && (
-        <div className="border-b bg-muted/40 px-6 py-3 text-sm text-muted-foreground">
-          {serverLoading ? 'Loading persistent message drafts and templates…' : `Messaging unavailable: ${serverError}`}
-        </div>
-      )}
       <div className="border-b bg-card sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between mb-6">
@@ -200,25 +279,31 @@ export function CommunicationCenterView() {
               <Button variant="outline" size="icon" onClick={() => navigate('settings')} aria-label="Communication settings">
                 <Gear size={20} />
               </Button>
-              <Dialog open={showNewMessage} onOpenChange={(open) => {
-                setShowNewMessage(open)
-                if (!open) setSelectedTemplate(null)
-              }}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus size={20} className="mr-2" weight="bold" />
-                    New Message
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl">
-                  <NewMessageForm 
-                    templates={templates}
-                    initialTemplate={selectedTemplate}
-                    onClose={() => setShowNewMessage(false)}
-                    onSend={saveDraft}
-                  />
-                </DialogContent>
-              </Dialog>
+              {canSendGuestMessages ? (
+                <Dialog open={showNewMessage} onOpenChange={(open) => {
+                  setShowNewMessage(open)
+                  if (!open) setSelectedTemplate(null)
+                }}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus size={20} className="mr-2" weight="bold" />
+                      New Message
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl">
+                    <NewMessageForm
+                      templates={templates}
+                      initialTemplate={selectedTemplate}
+                      onClose={() => setShowNewMessage(false)}
+                      onSend={saveDraft}
+                    />
+                  </DialogContent>
+                </Dialog>
+              ) : (
+                <span className="self-center text-xs text-muted-foreground" data-testid="messaging-compose-restricted">
+                  Read-only: guest-message permission is required to record drafts.
+                </span>
+              )}
             </div>
           </div>
 
@@ -265,8 +350,11 @@ export function CommunicationCenterView() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-6">
-        <Tabs defaultValue="sent" className="w-full">
+        <Tabs defaultValue="drafts" className="w-full">
           <TabsList>
+            <TabsTrigger value="drafts">
+              Drafts ({draftMessages.length})
+            </TabsTrigger>
             <TabsTrigger value="sent">
               Sent ({sentMessages.length})
             </TabsTrigger>
@@ -280,6 +368,14 @@ export function CommunicationCenterView() {
               Templates ({templates.length})
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="drafts" className="mt-6">
+            <MessageList
+              messages={draftMessages}
+              onSelect={setSelectedMessage}
+              emptyText="No message drafts"
+            />
+          </TabsContent>
 
           <TabsContent value="sent" className="mt-6">
             <MessageList 
@@ -308,6 +404,7 @@ export function CommunicationCenterView() {
           <TabsContent value="templates" className="mt-6">
             <TemplateList
               templates={templates}
+              canCompose={canSendGuestMessages}
               onCreate={() => toast.info('Template creation requires the dedicated audited template editor.')}
               onUse={(template) => {
                 setSelectedTemplate(template)
@@ -404,19 +501,22 @@ function MessageList({ messages, onSelect, emptyText }: MessageListProps) {
 
 interface TemplateListProps {
   templates: MessageTemplate[]
+  canCompose: boolean
   onCreate: () => void
   onUse: (template: MessageTemplate) => void
 }
 
-function TemplateList({ templates, onCreate, onUse }: TemplateListProps) {
+function TemplateList({ templates, canCompose, onCreate, onUse }: TemplateListProps) {
   if (templates.length === 0) {
     return (
       <div className="text-center py-16">
         <p className="text-muted-foreground mb-4">No templates created yet</p>
-        <Button onClick={onCreate}>
-          <Plus size={20} className="mr-2" weight="bold" />
-          Compose Message
-        </Button>
+        {canCompose && (
+          <Button onClick={onCreate}>
+            <Plus size={20} className="mr-2" weight="bold" />
+            Compose Message
+          </Button>
+        )}
       </div>
     )
   }
@@ -440,7 +540,7 @@ function TemplateList({ templates, onCreate, onUse }: TemplateListProps) {
             {template.body}
           </p>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" className="flex-1" onClick={() => onUse(template)}>
+            <Button size="sm" variant="outline" className="flex-1" onClick={() => onUse(template)} disabled={!canCompose} title={!canCompose ? 'Guest-message permission is required.' : undefined}>
               Use
             </Button>
           </div>
@@ -466,9 +566,6 @@ function NewMessageForm({ templates, initialTemplate, onClose, onSend }: NewMess
   const [messageType, setMessageType] = useState<MessageType>(initialTemplate?.type || 'CUSTOM')
   const [templateId, setTemplateId] = useState(initialTemplate?.id || '')
   const [isSaving, setIsSaving] = useState(false)
-  const [draftIdempotencyKey] = useState(() =>
-    globalThis.crypto?.randomUUID?.() || `message-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  )
 
   const handleSend = async () => {
     if (!recipientName || !recipientContact || !body) {
@@ -487,7 +584,7 @@ function NewMessageForm({ templates, initialTemplate, onClose, onSend }: NewMess
       roomNumber: roomNumber || undefined,
       body,
       status: 'DRAFT',
-      metadata: { idempotencyKey: draftIdempotencyKey },
+      metadata: {},
       createdBy: 'Current User',
       createdAt: new Date()
     }

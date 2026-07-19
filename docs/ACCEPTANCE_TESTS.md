@@ -167,8 +167,12 @@ Acceptance requires:
 - reuse of a charge key with a different normalized intent returns `409`; and
 - the same charge idempotency key can be used independently by two properties without cross-property replay;
 - one serialization conflict is retried without double-posting.
-- server-mode financial surfaces reuse one opaque in-memory attempt key for unchanged uncertain retries, rotate it when material input changes, clear it after confirmed success, and never write the attempt/key to `localStorage` or `sessionStorage`;
-- a full page reload is not asserted to recover an uncertain financial attempt key, so reload recovery must reconcile the authoritative folio before another write.
+- server-mode financial surfaces reuse one opaque attempt key for unchanged uncertain retries across a full same-tab reload, rotate it when material input changes, clear it after confirmed success, and store only a hashed slot, fingerprint, and opaque key in `sessionStorage` with no request material, raw entity identifier, PII, amount, reference, or credential and no `localStorage`;
+- after an uncertain financial outcome, a full same-tab reload recovers the same opaque key for only the unchanged intent, while the operator still reconciles the authoritative folio before retrying.
+- server mode never writes authenticated user identity or legacy auth tokens to browser storage;
+- a delayed failed `/api/auth/me` response cannot clear a newer successful interactive login or override logout;
+- server onboarding persists no password or confirmation value and removes legacy credential-bearing draft keys; and
+- enabling Accounting V2 on the backend does not expose the legacy browser-KV Accounting Dashboard or Cash Reconciliation workflow in server mode.
 
 Migration acceptance additionally requires an empty-database migration and a restored sanitized staging-copy migration, zero unresolved null/variance rows, exact aggregate reconciliation, rollback proof using `MONEY_READ_AUTHORITY=legacy_float`, and one full operating cycle on satang reads. Fixture tests alone do not satisfy migration acceptance.
 
@@ -178,18 +182,64 @@ Acceptance requires:
 
 - an authenticated user without an active `UserPropertyMembership` for `SANDBOX` receives `403`;
 - membership role is the effective property role without changing username/email login compatibility;
+- login and `/api/auth/me` expose the effective membership role, and deactivating that membership denies the next request from an already-authenticated session;
 - forged room, reservation, rate, settings, housekeeping, and night-audit identifiers from a second property return no data and cause no mutation;
 - `Guest`, `Payment`, `Charge`, and `AuditLog` have required property ownership after migration, and ambiguous/ownerless legacy backfills fail the migration rather than assigning guessed ownership;
 - `/api/openapi.json` reports OpenAPI 3.1 and matches the registered HTTP methods;
 - `/api/system/capabilities` reports `sourceOfTruth: server` without claiming provider proof;
-- `/api/events` requires session authentication, active membership, and `view:board`;
+- `/api/events` requires session authentication, active membership, and at least one of `view:board`, `view:cashier`, or `view:guests`; non-board sessions receive only the aggregate classes needed by their permitted workspace;
 - invalid or negative `Last-Event-ID`/`after` values return `400`;
 - catch-up is ordered, property-scoped, bounded, and uses string sequence ids; and
 - the public event payload omits metadata, actor identity, guest data, money details, and credentials.
 
 The SSE reconnect test must prove an authoritative refetch after disconnection. Receiving an event is not sufficient evidence that a UI view persisted or refreshed correctly.
 
+## Autonomous Operations Shadow Foundation
+
+Run:
+
+```powershell
+npm.cmd run test:autonomy
+$env:ALLOW_DB_E2E='true'
+$env:E2E_DATABASE_URL='<disposable PostgreSQL URL>'
+npm.cmd run test:e2e:autonomy
+```
+
+Acceptance requires:
+
+- only `OBSERVE`, `SHADOW`, and `PROHIBITED` policies are accepted;
+- room, date-range, rate percentage/absolute/floor/ceiling, hourly/daily volume, quiet-hours, confidence, source-trust, proof, and emergency-stop rules are deterministic;
+- the same provider event/version/content returns the original canonical event, while changed content under the same identity fails closed;
+- concurrent evaluation of one property/event/policy/version creates one run, one decision, and one `SHADOW_NOOP` action;
+- every shadow action records `providerRequestSent=false`, and the database constraint rejects the opposite;
+- two-property event, cursor, policy, run, decision, and action isolation is enforced; snapshot, issue, and dead-letter services remain deferred;
+- only a SYSTEM backend context may ingest trusted provider evidence or invoke shadow evaluation; staff roles cannot assert source trust;
+- disabled policies fail closed with `POLICY_DISABLED`;
+- normalized payloads, proposed commands, explanations, audit evidence, and events reject credential-shaped or direct-contact content;
+- no autonomy source imports OTA workers, browser adapters, provider credentials, or authoritative booking/finance/rate/inventory mutation services;
+- shadow evaluation creates no reservation, payment, charge, rate, availability, or provider request;
+- cursor updates are atomic with canonical event persistence, reject credential-shaped/direct-contact values, and are never exposed in public results;
+- legacy non-empty `Channel.credentials` blocks migration instead of being copied or silently deleted;
+- the deprecated `Channel.credentials` column remains readable as `{}` by an old application build, defaults to `{}`, is ignored by the new Prisma client, and rejects every non-empty insert or update through a PostgreSQL check constraint;
+- `Channel.propertyId` has an enforced property foreign key; and
+- audit plus property-filtered DomainEvent evidence is recorded for ingestion, replay, policy, and decision activity.
+
+Empty-database migration success, a sanitized restored-staging-copy migration, app rollback/PITR proof, external scheduler locking, shadow accuracy comparison, staff workflow acceptance, credentialed provider certification, canary observation, and owner approval remain separate gates. This foundation is not autonomous provider-write readiness.
+
 ## iCal Token Storage And Disclosure
+
+- `/channels` in server mode reads configured feeds, mappings, room types/rooms, and capability evidence only from authenticated APIs; seeded browser fixtures never appear.
+- Failure of any required Channels API produces an explicit unavailable state, blocks writes, and offers an authoritative retry without local fallback.
+- `/rooms` in server mode reads property display, room types, and rooms only from authenticated `/api/front-desk/board`; injected browser room/property/type fixtures never render on a failed load, and retry plus reload show the persisted server snapshot.
+- a housekeeping membership with `view:board` can open the read-only `/rooms` operational projection, but it sees no guest contact/profile data, folio identifiers, or financial values.
+- `view:channels` can inspect server state but cannot use configuration, rotation, removal, or mapping mutation controls; `manage:channels` remains enforced by the backend.
+- Private provider import URLs are rejected and never persist in `Channel.config`; the deploy migration removes legacy values and disables inbound iCal sync.
+- Normal iCal list/configuration responses never include a previously issued export bearer URL; only initial issue or explicit rotation may return a URL. Issue/rotation requires a property/provider-scoped idempotency key: same intent returns the exact original URL without duplicate evidence only while the token is current or in grace. Changed intent, retry after disable, and retry after a superseding rotation's grace expiry return `409`.
+- iCal and mapping inputs reject unknown fields. Configure, rotate, mapping, and disable actions reject URL/credential/contact-shaped JSON-body reasons, sanitize the reason again at persistence, and create property-scoped audit/domain-event evidence with `providerWrite: false`.
+- Concurrent first-time setup serializes to one channel. Configure/rotate and disable share the same property/provider lock so a later disable remains authoritative.
+- Configuration, disable, mapping create/update/pause/activate/delete, and token issue/rotation all require property-scoped idempotency. An unchanged retry returns the original public result with no new audit/domain event; reuse for changed intent returns `409`.
+- Rate push, rate parity, real-time inventory, provider logs/performance, and browser reservation imports are absent from the operational server-mode Channels workspace.
+- `npm.cmd run test:channels-server-authority` covers property isolation, forged mapping IDs, secret non-disclosure, reason/audit evidence, capability wording, and demo/server separation.
 
 Acceptance requires:
 
@@ -198,7 +248,7 @@ Acceptance requires:
 - the migration aborts if an object channel config still contains a raw token;
 - normal channel lists and ordinary configuration updates never return `exportFeedUrl`;
 - initial issue and explicit rotation may return one full URL, while a later list cannot recover it;
-- the previous token stops authorizing a feed after rotation; and
+- the previous token authorizes only during the bounded rotation recovery window; and
 - no migration query, log, audit row, status DTO, screenshot, or test output exposes a raw token.
 
 Focused migration/service regression evidence comes from `scripts/run-ical-property-scope-tests.mjs`. Applying the migration to an empty database is CI engineering evidence; a restored staging-copy migration and postcondition proof remain separate staging evidence.
@@ -250,6 +300,96 @@ Night-audit acceptance requires:
 - `postingMode` remains `VERIFY_EXISTING_CHARGES_ONLY` until room-charge posting is implemented and separately tested.
 
 Backend fixture acceptance is not staff workflow acceptance. The server-mode housekeeping and Night Audit screens are cut over to these APIs, but must still pass disposable-DB reload, error rollback, RBAC, and staff workflow checks before operational sign-off.
+
+## Server Booking Board Operations
+
+Acceptance requires:
+
+- unassigned and assigned stays are selectable without reading browser-KV data;
+- `POST /api/reservations` and `POST /api/guests` require `x-idempotency-key`; concurrent and later same-intent retries create one property-scoped result and return it with `idempotentReplay: true`, while changed intent/operation and superseded/deleted results return `409` without duplicate evidence;
+- room assignment and room moves call the authenticated server command with a per-attempt idempotency header;
+- room assignment sends a matching reservation update token in body and header; a stale assignment changes no reservation, inventory, attempt, audit, history, or event state;
+- the server persists one property-scoped `ReservationMutationAttempt` per idempotency key; a same-intent replay returns the authoritative reservation without duplicate audit, history, or domain-event evidence, while a changed intent returns `409`;
+- stay-date resizing sends both calendar dates to the authenticated PATCH route;
+- cancel and no-show require `cancel:reservation`, an operational reason, an idempotency key, and a matching reservation update token; future no-show and checked-in/terminal lifecycle changes are rejected;
+- same-intent lifecycle replay creates no duplicate history, audit, or domain event, while changed intent, stale state, forged property identifiers, and superseded outcomes return a truthful error;
+- check-in/check-out require a lifecycle idempotency key; the same key is isolated per property, cannot authorize another reservation or intent within one property, and a replay after a later lifecycle mutation returns `409` without new evidence;
+- ambiguous network and `5xx` outcomes retain the exact in-memory request/stale token plus a reload-safe opaque idempotency record with no command material; retrying the unchanged assignment produces one audit, history, and domain event;
+- reservation-scoped guest/VIP editing requires both `edit:reservation` and `view:guests`, supports explicit contact-field clearing, rejects stale guest state, and stores only changed field names in evidence;
+- folio extras require `post:charges`, an open folio, the `legacyFolioCharges` capability, and exact base-10 satang input; an unchanged ambiguous retry reuses the original charge key;
+- a housekeeping Board response omits contact/profile PII, channel references, reservation notes, folio identifiers, and financial values while retaining the minimum guest identity/VIP state required for operations;
+- incompatible room types and non-operational rooms are disabled in the UI and rejected definitively by the backend;
+- successful assignment, move, and resize operations survive a full browser reload and rewrite authoritative `RoomDateInventory`;
+- Board handoffs open guided Front Desk and Cashier workspaces without mutation, including when the target workspace is already mounted; consumed query parameters are cleared;
+- a membership-limited browser does not render unauthorized Board commands, and Front Desk AI has no direct mutation path or browser-storage handoff;
+- two simultaneous attempts to assign the final compatible room result in exactly one success and one `409`, with inventory owned only by the successful reservation;
+- an injected mutation conflict displays the backend failure, refetches, and preserves the prior room/dates;
+- controls are disabled while a command is pending and no optimistic timeline success state is shown; and
+- reservations have no destructive Board delete action and posted financial corrections remain append-only; and
+- dynamic room types, property scope, permission denial, inventory blocks, and overlap rules remain backend-enforced.
+
+Run `npm.cmd run test:booking-board-operations`, `npm.cmd run test:reservation-commands`, guarded `npm.cmd run test:e2e:db`, and `npm.cmd run test:e2e:server`. These are engineering evidence, not credentialed front-desk staff acceptance.
+
+## Server Reservations Authority
+
+Run:
+
+```powershell
+npm.cmd run test:reservations-server-authority
+npm.cmd run test:e2e:server
+```
+
+Acceptance requires:
+
+- server-mode `/reservations` reads the authenticated reservation list and authenticated Board room/readiness snapshot only, and never projects browser-KV reservations, guests, rooms, or unassigned stays;
+- an initial reservation-list or Board-snapshot failure renders a persistent unavailable state with Retry, no server or browser rows, and no create affordance;
+- Retry replaces the unavailable state with the authoritative server list and room/readiness snapshot; a full reload shows that same persisted state; and
+- the server-mode route and backend registry both require `view:reservations`, while browser storage remains free of operational reservation/guest state after the proof.
+
+The browser proof is disposable-DB engineering evidence only. It does not replace staff workflow, restored-staging, provider, or owner acceptance.
+
+## Guest Directory, Front Desk, And Messaging Server Authority
+
+Run:
+
+```powershell
+npm.cmd run test:guests-server-authority
+npm.cmd run test:server-mode-kv
+npm.cmd run test:e2e:server
+```
+
+Acceptance requires:
+
+- server-mode Front Desk mounts no guest/reservation/room KV hooks or KV-backed room sync;
+- a failed Front Desk Board snapshot renders a full unavailable state with Retry and no readiness totals, arrival/departure rows, reservation controls, or assistant context until the authoritative Board is restored;
+- `/guests` renders a fail-closed unavailable state with Retry, no rows, zero-value metrics, or New Guest action when `GET /api/guests` fails;
+- successful guest creation survives reload, uses a property-scoped idempotency key, and `view:guests` without `edit:reservation` exposes neither the UI action nor an authorized POST;
+- real `RESERVATION_ROOM_ASSIGNED`, `RESERVATION_GUEST_UPDATED`, `GUEST_CREATED`, and `GUEST_UPDATED` events trigger authoritative reservation/guest/folio refetches without applying event payloads directly; the guest-directory-only event-access policy permits guest/reservation invalidations but denies room and finance aggregates;
+- `/messaging` renders a fail-closed unavailable state when either messages or templates cannot load, exposes no metrics or New Message action, and Retry restores server state; and
+- `view:messaging` without `send:guest-messages` is read-only in both the UI and API; and
+- an authorized message draft requires one matching header/body idempotency key, is persisted, displayed in the Drafts tab, and remains visible after reload without browser message/template storage. A lost response followed by reload and unchanged recomposition reuses one opaque key, creates one server row, and stores no recipient, contact, or body material in the retry record; simultaneous same-key PostgreSQL writes also return that one row.
+
+The browser proof is disposable-DB engineering evidence only. It does not replace staff workflow, restored-staging, provider, or owner acceptance.
+
+## Server Cashier Authority
+
+Run:
+
+```powershell
+npm.cmd run test:cashier-server-authority
+npm.cmd run test:e2e:server
+```
+
+Acceptance requires:
+
+- server-mode `/cashier` reads authenticated folios from `GET /api/cashier/folios` only and never projects browser-KV folios, cashier folios, or accounting entries;
+- an initial folio-snapshot failure renders a persistent Cashier unavailable state with Retry, no server or browser folios, no zero-value operational dashboard, and no payment or charge affordance;
+- Retry replaces the unavailable state with the authoritative persisted folio and a full reload shows that same server state; and
+- an ambiguous charge response reuses the same idempotency key and creates one exact-satang row, a committed payment whose read-back fails cannot claim UI success and safely replays with the same key after a full reload, and a stale charge against a closed folio remains visibly rejected with no financial row;
+- payment and charge writes remain separately property-scoped, permissioned, and idempotent; the Cashier authority proof does not enable the legacy Accounting Dashboard or Cash Reconciliation workflow in server mode; and
+- a `CAFE_STAFF` session receives permitted property-scoped folio refreshes, sees authoritative folios and the permitted Post Charge control, but sees no Collect or Record payment control and cannot gain payment authority from browser state.
+
+The browser proof is disposable-DB engineering evidence only. It does not replace staff workflow, restored-staging, provider, or owner acceptance.
 
 ## Accounting V2, Direct Booking, And Analyzers
 

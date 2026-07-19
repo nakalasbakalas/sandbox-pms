@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -19,8 +19,10 @@ import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { nightsBetween } from '@/lib/hotel/business-rules'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
 import { toast } from 'sonner'
 import { useNavigation } from '@/hooks/use-navigation'
+import { useAuth } from '@/hooks/use-auth'
 
 export interface Guest {
   id: string
@@ -210,14 +212,127 @@ function localGuestFromForm(form: NewGuestForm): Guest {
   }
 }
 
+type GuestListSetter = (updater: Guest[] | ((current: Guest[]) => Guest[])) => void
+type ServerGuestSnapshotState = 'loading' | 'ready' | 'error'
+
+interface GuestWorkspaceSource {
+  guestsRaw: Guest[]
+  setGuestsRaw: GuestListSetter
+  canonicalGuestsRaw: Guest[]
+  setCanonicalGuests: GuestListSetter
+  serverGuests: Guest[]
+  setServerGuests: GuestListSetter
+  serverGuestSnapshotState: ServerGuestSnapshotState
+  serverGuestSnapshotError: string | null
+  refreshServerGuests: () => Promise<Guest[]>
+}
+
+const noOpGuestListSetter: GuestListSetter = () => undefined
+
 export function GuestsView() {
-  const { navigate } = useNavigation()
+  return SERVER_API_ENABLED ? <ServerGuestsView /> : <DemoGuestsView />
+}
+
+function ServerGuestsView() {
+  const [serverGuests, setServerGuests] = useState<Guest[]>([])
+  const [serverGuestSnapshotState, setServerGuestSnapshotState] = useState<ServerGuestSnapshotState>('loading')
+  const [serverGuestSnapshotError, setServerGuestSnapshotError] = useState<string | null>(null)
+  const refreshGeneration = useRef(0)
+  const mounted = useRef(true)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      refreshGeneration.current += 1
+    }
+  }, [])
+
+  const refreshServerGuests = useCallback(async () => {
+    const generation = refreshGeneration.current + 1
+    refreshGeneration.current = generation
+    setServerGuestSnapshotState('loading')
+    setServerGuestSnapshotError(null)
+    try {
+      const payload = await pmsApi<{ ok: true; data: any[] }>('/api/guests', null)
+      const nextGuests = payload.data.map(guestFromServer)
+      if (!mounted.current || generation !== refreshGeneration.current) return nextGuests
+      setServerGuests(nextGuests)
+      setServerGuestSnapshotState('ready')
+      return nextGuests
+    } catch (error) {
+      if (!mounted.current || generation !== refreshGeneration.current) throw error
+      setServerGuests([])
+      setServerGuestSnapshotState('error')
+      setServerGuestSnapshotError('The PMS guest snapshot is unavailable. Retry before creating or viewing guest profiles.')
+      throw error
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshServerGuests().catch(() => undefined)
+  }, [refreshServerGuests])
+
+  useEffect(() => {
+    let refreshTimer: number | undefined
+    const onDomainEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ aggregateType?: unknown }>).detail
+      const aggregateType = typeof detail?.aggregateType === 'string' ? detail.aggregateType.toLowerCase() : ''
+      if (!['guest', 'reservation'].includes(aggregateType)) return
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => void refreshServerGuests().catch(() => undefined), 100)
+    }
+    window.addEventListener('pms:domain-event', onDomainEvent)
+    return () => {
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
+      window.removeEventListener('pms:domain-event', onDomainEvent)
+    }
+  }, [refreshServerGuests])
+
+  return <GuestsWorkspace source={{
+    guestsRaw: [],
+    setGuestsRaw: noOpGuestListSetter,
+    canonicalGuestsRaw: [],
+    setCanonicalGuests: noOpGuestListSetter,
+    serverGuests,
+    setServerGuests,
+    serverGuestSnapshotState,
+    serverGuestSnapshotError,
+    refreshServerGuests,
+  }} />
+}
+
+function DemoGuestsView() {
   const [guestsRaw, setGuestsRaw] = useKV<Guest[]>('guests-data', [])
   const [canonicalGuestsRaw, setCanonicalGuests] = useKV<Guest[]>('guests', [])
+  return <GuestsWorkspace source={{
+    guestsRaw,
+    setGuestsRaw,
+    canonicalGuestsRaw,
+    setCanonicalGuests,
+    serverGuests: [],
+    setServerGuests: noOpGuestListSetter,
+    serverGuestSnapshotState: 'ready',
+    serverGuestSnapshotError: null,
+    refreshServerGuests: async () => [],
+  }} />
+}
+
+function GuestsWorkspace({ source }: { source: GuestWorkspaceSource }) {
+  const { navigate } = useNavigation()
+  const { hasPermission } = useAuth()
+  const {
+    guestsRaw,
+    setGuestsRaw,
+    canonicalGuestsRaw,
+    setCanonicalGuests,
+    serverGuests,
+    setServerGuests,
+    serverGuestSnapshotState,
+    serverGuestSnapshotError,
+    refreshServerGuests,
+  } = source
   const authToken = null
-  const [serverGuests, setServerGuests] = useState<Guest[]>([])
-  const [isLoadingGuests, setIsLoadingGuests] = useState(false)
-  const [guestError, setGuestError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null)
   const [selectedTab, setSelectedTab] = useState<'all' | 'vip' | 'frequent' | 'recent'>('all')
@@ -225,30 +340,15 @@ export function GuestsView() {
   const [newGuest, setNewGuest] = useState<NewGuestForm>(emptyNewGuest)
   const [newGuestError, setNewGuestError] = useState<string | null>(null)
   const [isSavingGuest, setIsSavingGuest] = useState(false)
+  const canCreateGuest = hasPermission('edit:reservation')
+  const isLoadingGuests = SERVER_API_ENABLED && serverGuestSnapshotState === 'loading'
+  const guestError = SERVER_API_ENABLED && serverGuestSnapshotState === 'error' ? serverGuestSnapshotError : null
 
-  const refreshServerGuests = useCallback(async () => {
-    if (!SERVER_API_ENABLED) return []
-    setIsLoadingGuests(true)
-    setGuestError(null)
-    try {
-      const payload = await pmsApi<{ ok: true; data: any[] }>('/api/guests', authToken)
-      const nextGuests = payload.data.map(guestFromServer)
-      setServerGuests(nextGuests)
-      return nextGuests
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to load guest profiles.'
-      setGuestError(message)
-      return []
-    } finally {
-      setIsLoadingGuests(false)
-    }
-  }, [authToken])
-  
-  useEffect(() => {
-    if (SERVER_API_ENABLED) {
-      void refreshServerGuests()
-    }
-  }, [authToken, refreshServerGuests])
+  const requireAuthoritativeSnapshot = () => {
+    if (!SERVER_API_ENABLED || serverGuestSnapshotState === 'ready') return true
+    toast.error('Guest Directory is unavailable until the authoritative PMS snapshot is restored.')
+    return false
+  }
 
   const guests = useMemo(() => {
     if (SERVER_API_ENABLED) return serverGuests
@@ -261,13 +361,18 @@ export function GuestsView() {
       merged.set(guest.id, guest)
     })
     return [...merged.values()]
-  }, [authToken, canonicalGuestsRaw, guestsRaw, serverGuests])
+  }, [canonicalGuestsRaw, guestsRaw, serverGuests])
 
   const updateNewGuest = (field: keyof NewGuestForm, value: string | boolean) => {
     setNewGuest((current) => ({ ...current, [field]: value }))
   }
 
   const handleCreateGuest = async () => {
+    if (!requireAuthoritativeSnapshot()) return
+    if (!canCreateGuest) {
+      setNewGuestError('Guest creation permission is required.')
+      return
+    }
     if (!newGuest.firstName.trim() || !newGuest.lastName.trim()) {
       setNewGuestError('Guest first and last name are required.')
       return
@@ -281,20 +386,29 @@ export function GuestsView() {
     setNewGuestError(null)
     try {
       if (SERVER_API_ENABLED) {
+        const requestBody = {
+          firstName: newGuest.firstName,
+          lastName: newGuest.lastName,
+          email: newGuest.email || undefined,
+          phone: newGuest.phone || undefined,
+          nationality: newGuest.nationality || undefined,
+          idNumber: newGuest.idNumber || undefined,
+          notes: newGuest.notes || undefined,
+          vipStatus: newGuest.vipStatus,
+        }
+        const attempt = {
+          operation: 'guest-create',
+          entityId: 'guests-new-guest',
+          material: requestBody,
+        } satisfies DurableAttemptDescriptor
+        const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
         const payload = await pmsApi<{ ok: true; data: any }>('/api/guests', authToken, {
           method: 'POST',
-          body: JSON.stringify({
-            firstName: newGuest.firstName,
-            lastName: newGuest.lastName,
-            email: newGuest.email || undefined,
-            phone: newGuest.phone || undefined,
-            nationality: newGuest.nationality || undefined,
-            idNumber: newGuest.idNumber || undefined,
-            notes: newGuest.notes || undefined,
-            vipStatus: newGuest.vipStatus,
-          }),
+          headers: { 'x-idempotency-key': idempotencyKey },
+          body: JSON.stringify(requestBody),
         })
         await refreshServerGuests()
+        await durableAttemptKeys.confirmSuccess(attempt)
         setSelectedGuest(guestFromServer({ ...payload.data, reservations: [] }))
       } else {
         const createdGuest = localGuestFromForm(newGuest)
@@ -358,9 +472,32 @@ export function GuestsView() {
     const parts = (name || 'Guest').split(' ').filter(Boolean)
     return parts.map(p => p[0]).join('').substring(0, 2).toUpperCase()
   }
+
+  if (SERVER_API_ENABLED && serverGuestSnapshotState !== 'ready') {
+    if (serverGuestSnapshotState === 'loading') {
+      return (
+        <div className="flex min-h-full items-center justify-center bg-muted/20 p-6" data-testid="server-guests-loading">
+          <div className="rounded-lg border bg-background px-4 py-3 text-sm text-muted-foreground shadow-sm">
+            Loading authoritative guest profiles…
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="flex min-h-full items-center justify-center bg-muted/20 p-6" data-testid="server-guests-error">
+        <Card className="max-w-md p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold text-foreground">Guest Directory unavailable</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {serverGuestSnapshotError || 'The PMS guest snapshot is unavailable. Retry before creating or viewing guest profiles.'}
+          </p>
+          <Button className="mt-4" variant="outline" onClick={() => void refreshServerGuests().catch(() => undefined)}>Retry</Button>
+        </Card>
+      </div>
+    )
+  }
   
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-background" data-testid={SERVER_API_ENABLED ? 'server-guests-view' : undefined}>
       <div className="flex-none border-b border-border bg-card">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between mb-4">
@@ -370,14 +507,16 @@ export function GuestsView() {
                 Manage guest profiles and preferences
               </p>
             </div>
-            <Button aria-label="New Guest" className="gap-2" onClick={() => {
-              setNewGuest(emptyNewGuest)
-              setNewGuestError(null)
-              setIsNewGuestOpen(true)
-            }}>
-              <Plus size={18} weight="bold" />
-              New Guest
-            </Button>
+            {canCreateGuest && (
+              <Button aria-label="New Guest" className="gap-2" onClick={() => {
+                setNewGuest(emptyNewGuest)
+                setNewGuestError(null)
+                setIsNewGuestOpen(true)
+              }}>
+                <Plus size={18} weight="bold" />
+                New Guest
+              </Button>
+            )}
           </div>
           
           <div className="relative max-w-md">

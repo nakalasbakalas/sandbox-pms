@@ -10,16 +10,79 @@ function route(path, methods, options = {}) {
     methods,
     tag: options.tag || 'PMS',
     summary: options.summary || `${methods.join('/')} ${path}`,
+    parameters: options.parameters || [],
+    methodParameters: options.methodParameters || {},
+    methodResponseStatuses: options.methodResponseStatuses || {},
     public: options.public === true,
     internal: options.internal === true,
   }
 }
+
+const optionalIdempotencyKeyParameter = {
+  name: 'x-idempotency-key',
+  in: 'header',
+  required: false,
+  description: 'Optional retry key. Reuse the same value when retrying the same reservation mutation after an uncertain response.',
+  schema: { type: 'string', maxLength: 200 },
+}
+
+const requiredIdempotencyKeyParameter = {
+  ...optionalIdempotencyKeyParameter,
+  required: true,
+  description: 'Required property-scoped retry key. Reuse the same value when retrying the same lifecycle command after an uncertain response.',
+}
+
+const requiredCreateIdempotencyKeyParameter = {
+  ...requiredIdempotencyKeyParameter,
+  description: 'Required property-scoped create retry key. Reuse the same value only when retrying the same unchanged create request after an uncertain response.',
+  schema: {
+    type: 'string',
+    minLength: 8,
+    maxLength: 200,
+    pattern: '^[a-zA-Z0-9._:-]+$',
+  },
+}
+
+const optionalReservationVersionParameters = [
+  {
+    name: 'x-reservation-expected-updated-at',
+    in: 'header',
+    required: false,
+    description: 'Optional ISO-8601 reservation update token. A stale token returns 409 instead of overwriting a later edit.',
+    schema: { type: 'string', format: 'date-time' },
+  },
+  {
+    name: 'x-reservation-expected-version',
+    in: 'header',
+    required: false,
+    description: 'Compatibility alias for x-reservation-expected-updated-at.',
+    schema: { type: 'string', format: 'date-time' },
+  },
+]
+
+const optionalGuestVersionParameters = [
+  {
+    name: 'x-guest-expected-updated-at',
+    in: 'header',
+    required: false,
+    description: 'Optional ISO-8601 guest update token. A stale token returns 409 instead of overwriting a later edit.',
+    schema: { type: 'string', format: 'date-time' },
+  },
+  {
+    name: 'x-guest-expected-version',
+    in: 'header',
+    required: false,
+    description: 'Compatibility alias for x-guest-expected-updated-at.',
+    schema: { type: 'string', format: 'date-time' },
+  },
+]
 
 const API_ROUTE_CONTRACTS = [
   route('/api/health', ['GET'], { tag: 'System', summary: 'Service health', public: true }),
   route('/api/openapi.json', ['GET'], { tag: 'System', summary: 'Authenticated API contract' }),
   route('/api/system/capabilities', ['GET'], { tag: 'System', summary: 'Operational capability registry' }),
   route('/api/events', ['GET'], { tag: 'System', summary: 'Property-scoped operational event stream' }),
+  route('/api/cashier/folios', ['GET'], { tag: 'Finance', summary: 'Property-scoped exact-satang cashier folio projection' }),
   route('/api/messages', ['GET', 'POST'], { tag: 'Messaging', summary: 'Property-scoped message drafts' }),
   route('/api/message-templates', ['GET', 'POST'], { tag: 'Messaging', summary: 'Property-scoped message templates' }),
   route('/api/public/v1/availability', ['GET'], { tag: 'Public Booking', public: true }),
@@ -65,7 +128,26 @@ const API_ROUTE_CONTRACTS = [
   route('/api/ops/analyzers', ['POST'], { tag: 'Hotel Ops', summary: 'Run deterministic suggest-only operational analyzers' }),
   route('/api/internal/ops/worker/tasks', ['POST'], { tag: 'Internal', internal: true, public: true }),
   route('/api/today', ['GET'], { tag: 'Operations' }),
-  route('/api/front-desk/board', ['GET'], { tag: 'Front Desk' }),
+  route('/api/front-desk/board', ['GET'], {
+    tag: 'Front Desk',
+    summary: 'Property-scoped booking board with an optional bounded date window',
+    parameters: [
+      {
+        name: 'from',
+        in: 'query',
+        required: false,
+        description: 'Inclusive board window start. Must be supplied with to.',
+        schema: { type: 'string', format: 'date' },
+      },
+      {
+        name: 'to',
+        in: 'query',
+        required: false,
+        description: 'Exclusive board window end, at most 93 days after from. Must be supplied with from.',
+        schema: { type: 'string', format: 'date' },
+      },
+    ],
+  }),
   route('/api/front-desk/walk-in', ['POST'], { tag: 'Front Desk' }),
   route('/api/booking-email/status', ['GET'], { tag: 'Booking Inbox' }),
   route('/api/booking-email/sync', ['POST'], { tag: 'Booking Inbox' }),
@@ -90,13 +172,47 @@ const API_ROUTE_CONTRACTS = [
   route('/api/settings/room-types/{id}', ['PATCH', 'DELETE'], { tag: 'Settings' }),
   route('/api/settings/rooms', ['POST'], { tag: 'Settings' }),
   route('/api/settings/rooms/{id}', ['PATCH', 'DELETE'], { tag: 'Settings' }),
-  route('/api/reservations', ['GET', 'POST'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}', ['PATCH'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}/assign-room', ['POST'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}/check-in', ['POST'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}/check-out', ['POST'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}/cancel', ['POST'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}/no-show', ['POST'], { tag: 'Reservations' }),
+  route('/api/reservations', ['GET', 'POST'], {
+    tag: 'Reservations',
+    summary: 'List or create property-scoped reservations',
+    methodParameters: { POST: [requiredCreateIdempotencyKeyParameter] },
+    methodResponseStatuses: { POST: [200, 201, 400, 401, 403, 409, 500] },
+  }),
+  route('/api/reservations/{id}', ['PATCH'], {
+    tag: 'Reservations',
+    summary: 'Update a property-scoped reservation; expectedUpdatedAt may be supplied for optimistic concurrency',
+    parameters: [optionalIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
+  route('/api/reservations/{id}/assign-room', ['POST'], {
+    tag: 'Reservations',
+    summary: 'Assign or move a reservation room',
+    parameters: [optionalIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
+  route('/api/reservations/{id}/check-in', ['POST'], {
+    tag: 'Reservations',
+    summary: 'Check in a property-scoped reservation with retry and stale-write protection',
+    parameters: [requiredIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
+  route('/api/reservations/{id}/check-out', ['POST'], {
+    tag: 'Reservations',
+    summary: 'Check out a property-scoped reservation with retry and stale-write protection',
+    parameters: [requiredIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
+  route('/api/reservations/{id}/guest', ['PATCH'], {
+    tag: 'Reservations',
+    summary: 'Update the guest attached to a property-scoped reservation',
+    parameters: [optionalIdempotencyKeyParameter, ...optionalGuestVersionParameters],
+  }),
+  route('/api/reservations/{id}/cancel', ['POST'], {
+    tag: 'Reservations',
+    summary: 'Cancel a reservation with an operational reason',
+    parameters: [optionalIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
+  route('/api/reservations/{id}/no-show', ['POST'], {
+    tag: 'Reservations',
+    summary: 'Mark a reservation no-show with an operational reason',
+    parameters: [optionalIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
   route('/api/housekeeping/rooms/{id}/status', ['POST'], { tag: 'Housekeeping' }),
   route('/api/housekeeping/tasks', ['GET', 'POST'], { tag: 'Housekeeping' }),
   route('/api/housekeeping/tasks/{id}/assign', ['POST'], { tag: 'Housekeeping' }),
@@ -120,7 +236,12 @@ const API_ROUTE_CONTRACTS = [
   route('/api/accounting/v2/trial-balance', ['GET'], { tag: 'Accounting V2' }),
   route('/api/payments', ['POST'], { tag: 'Finance' }),
   route('/api/charges', ['POST'], { tag: 'Finance' }),
-  route('/api/guests', ['GET', 'POST'], { tag: 'Guests' }),
+  route('/api/guests', ['GET', 'POST'], {
+    tag: 'Guests',
+    summary: 'List or create property-scoped guest profiles',
+    methodParameters: { POST: [requiredCreateIdempotencyKeyParameter] },
+    methodResponseStatuses: { POST: [200, 201, 400, 401, 403, 409, 500] },
+  }),
   route('/api/guests/{id}', ['PATCH'], { tag: 'Guests' }),
 ]
 
@@ -132,6 +253,15 @@ export function listApiRouteContracts({ includeInternal = false } = {}) {
       methods: [...contract.methods],
       tag: contract.tag,
       summary: contract.summary,
+      parameters: contract.parameters.map((parameter) => ({ ...parameter })),
+      methodParameters: Object.fromEntries(Object.entries(contract.methodParameters).map(([method, parameters]) => [
+        method,
+        parameters.map((parameter) => ({ ...parameter })),
+      ])),
+      methodResponseStatuses: Object.fromEntries(Object.entries(contract.methodResponseStatuses).map(([method, statuses]) => [
+        method,
+        [...statuses],
+      ])),
       public: contract.public,
       internal: contract.internal,
     }))
@@ -146,6 +276,15 @@ export function resolveApiRouteContract(pathname) {
     allow: contract.methods.join(', '),
     tag: contract.tag,
     summary: contract.summary,
+    parameters: contract.parameters.map((parameter) => ({ ...parameter })),
+    methodParameters: Object.fromEntries(Object.entries(contract.methodParameters).map(([method, parameters]) => [
+      method,
+      parameters.map((parameter) => ({ ...parameter })),
+    ])),
+    methodResponseStatuses: Object.fromEntries(Object.entries(contract.methodResponseStatuses).map(([method, statuses]) => [
+      method,
+      [...statuses],
+    ])),
     public: contract.public,
     internal: contract.internal,
   }

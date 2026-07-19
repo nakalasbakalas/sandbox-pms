@@ -125,6 +125,11 @@ export function ReportsView() {
   }
 
   const handleExport = (format: 'csv' | 'pdf') => {
+    if (reportsData.isLoading || reportsData.isUnavailable) {
+      toast.error(reportsData.isUnavailable ? 'Reports are unavailable until the PMS server responds.' : 'Reports are still loading.')
+      return
+    }
+
     if (format === 'pdf') {
       window.print()
       toast.success('Print dialog opened for PDF export')
@@ -239,7 +244,7 @@ export function ReportsView() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline">
+                  <Button variant="outline" disabled={reportsData.isLoading || reportsData.isUnavailable}>
                     <Download className="mr-2 h-4 w-4" />
                     Export
                   </Button>
@@ -269,6 +274,28 @@ export function ReportsView() {
           )}
         </div>
 
+        {reportsData.isLoading ? (
+          <div className="p-6" aria-live="polite">
+            <Card>
+              <CardHeader>
+                <CardTitle>Loading reports</CardTitle>
+                <CardDescription>Retrieving authoritative PMS report data.</CardDescription>
+              </CardHeader>
+            </Card>
+          </div>
+        ) : reportsData.isUnavailable ? (
+          <div className="p-6" role="alert">
+            <Card>
+              <CardHeader>
+                <CardTitle>Reports unavailable</CardTitle>
+                <CardDescription>{reportsData.error || 'The PMS server did not return report data. Browser-stored data is not shown in server mode.'}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button onClick={reportsData.refresh}>Retry authoritative reports</Button>
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
           <div className="px-6">
             <TabsList className="grid w-full grid-cols-6 h-auto">
@@ -327,6 +354,7 @@ export function ReportsView() {
             </div>
           </div>
         </Tabs>
+        )}
       </div>
     </div>
   )

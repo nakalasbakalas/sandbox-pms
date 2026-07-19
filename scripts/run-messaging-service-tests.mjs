@@ -61,6 +61,42 @@ assert.equal(replay.id, created.id)
 assert.equal(messages.length, 1)
 assert.equal((await listMessages(prisma, context)).length, 1)
 
+const explicitClientKeyDraft = await createMessageDraft(
+  prisma,
+  { ...context, idempotencyKey: 'client-draft-replay-1' },
+  { ...draftInput, body: 'A client-keyed draft retry must be replay-safe.', idempotencyKey: 'client-draft-replay-1' },
+)
+const explicitClientKeyReplay = await createMessageDraft(
+  prisma,
+  { ...context, idempotencyKey: 'client-draft-replay-1' },
+  { ...draftInput, body: 'A client-keyed draft retry must be replay-safe.', idempotencyKey: 'client-draft-replay-1' },
+)
+assert.equal(explicitClientKeyReplay.id, explicitClientKeyDraft.id, 'the client body key remains the authoritative replay key across a changed request context')
+assert.equal(messages.length, 2, 'the replayed client-keyed draft creates one additional message, not two')
+await assert.rejects(
+  createMessageDraft(
+    prisma,
+    { ...context, idempotencyKey: 'client-draft-replay-1' },
+    { ...draftInput, recipientContact: 'changed-recipient@example.test', body: 'A client-keyed draft retry must be replay-safe.', idempotencyKey: 'client-draft-replay-1' },
+  ),
+  (error) => error.statusCode === 409,
+  'a draft replay key cannot be reused for changed recipient material',
+)
+await assert.rejects(
+  createMessageDraft(prisma, { ...context, idempotencyKey: null }, draftInput),
+  (error) => error.statusCode === 400 && /idempotency-key/.test(error.message),
+  'message drafts require a request-context idempotency key',
+)
+await assert.rejects(
+  createMessageDraft(
+    prisma,
+    { ...context, idempotencyKey: 'message-header-key-1' },
+    { ...draftInput, body: 'Conflicting draft keys must fail.', idempotencyKey: 'message-body-key-2' },
+  ),
+  (error) => error.statusCode === 409 && /must match/.test(error.message),
+  'message drafts reject conflicting header and body keys',
+)
+
 await assert.rejects(
   createMessageDraft(prisma, context, { ...draftInput, password: 'must-not-be-accepted' }),
   /Unrecognized key/,

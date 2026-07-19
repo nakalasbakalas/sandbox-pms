@@ -55,8 +55,8 @@ const primaryNavItems: readonly NavItem[] = [
   { id: 'today', labelKey: 'nav.today', icon: CalendarCheck, anyOf: ['view:board', 'create:reservation', 'view:housekeeping'] as const },
   { id: 'reservations', labelKey: 'nav.reservations', icon: CalendarBlank, permission: 'view:reservations' as const },
   { id: 'booking-inbox', labelKey: 'nav.bookingInbox', icon: Envelope, anyOf: ['view:reservations', 'view:messaging'] as const },
-  { id: 'front-desk', labelKey: 'nav.frontDeskBoard', icon: SquaresFour, anyOf: ['view:board', 'check-in:guest', 'check-out:guest'] as const },
-  { id: 'rooms', labelKey: 'nav.rooms', icon: Bed, anyOf: ['view:board', 'view:housekeeping'] as const },
+  { id: 'board', labelKey: 'nav.frontDeskBoard', icon: SquaresFour, permission: 'view:board' as const },
+  { id: 'rooms', labelKey: 'nav.rooms', icon: Bed, permission: 'view:board' as const },
   { id: 'housekeeping', labelKey: 'nav.housekeeping', icon: Broom, permission: 'view:housekeeping' as const },
   { id: 'guests', labelKey: 'nav.guests', icon: Users, permission: 'view:guests' as const },
   { id: 'cashier', labelKey: 'nav.payments', icon: CurrencyDollar, permission: 'view:cashier' as const },
@@ -103,6 +103,9 @@ export function AppSidebar() {
   const propertyName = SERVER_API_ENABLED ? 'Hotel PMS' : propertyData?.name || 'Hotel PMS'
 
   const canViewItem = (item: NavItem) => {
+    if (SERVER_API_ENABLED && (item.id === 'internal-comms' || item.id === 'guest-communications')) {
+      return false
+    }
     if (SERVER_API_ENABLED && item.id === 'growth-suite' && !capabilityEnabled(registry?.integrations.directBooking)) {
       return false
     }

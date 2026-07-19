@@ -19,8 +19,15 @@ import { createPasswordHash } from './security.mjs'
 import { recordDomainEvent } from './domain-events.mjs'
 import { chargeIntentFingerprint } from './charge-idempotency.mjs'
 import {
+  assertPmsCreateReplay,
+  claimPmsCreateAttempt,
+  completePmsCreateAttempt,
+  requireCreateIdempotencyKey,
+} from './create-mutation-idempotency.mjs'
+import {
   bahtToSatang,
   dualWriteMoney,
+  parseSatang,
   readMoneySatang,
   resolveMoneyInput,
   satangToApiString,
@@ -38,19 +45,24 @@ const reservationInclude = {
         include: {
           sourceEmailEvent: true,
         },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       },
       payments: {
         include: {
           sourceEmailEvent: true,
         },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       },
     },
   },
   bookingEmailEvents: {
-    orderBy: { receivedAt: 'desc' },
+    orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
     take: 10,
   },
 }
+
+const MAX_SAFE_MONEY_SATANG = BigInt(Number.MAX_SAFE_INTEGER)
+const POSTGRES_INTEGER_MAX = 2_147_483_647
 
 async function serializableTransaction(prisma, callback) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -67,6 +79,26 @@ async function serializableTransaction(prisma, callback) {
   }
 }
 
+async function reservationMutationTransaction(prisma, callback) {
+  try {
+    return await serializableTransaction(prisma, callback)
+  } catch (error) {
+    if (error?.code === 'P2034') {
+      throw new PmsValidationError('Room inventory changed before this reservation update could complete. Refresh and try again.', 409)
+    }
+    if (error?.code === 'P2002') {
+      const target = Array.isArray(error?.meta?.target)
+        ? error.meta.target.join(',')
+        : String(error?.meta?.target || '')
+      if (/RoomDateInventory|roomId.*date|date.*roomId/i.test(target)) {
+        throw new PmsValidationError('Room inventory changed before this reservation update could complete. Refresh and try again.', 409)
+      }
+      throw new PmsValidationError('The reservation update conflicts with existing data. Refresh and review the request before trying again.', 409)
+    }
+    throw error
+  }
+}
+
 function actorName(actor) {
   return actor?.name || actor?.email || actor?.username || actor?.id || 'System'
 }
@@ -74,6 +106,102 @@ function actorName(actor) {
 function normalizeNullableString(value) {
   const trimmed = String(value || '').trim()
   return trimmed || null
+}
+
+function normalizeReservationMutationIdempotencyKey(value) {
+  const key = normalizeNullableString(value)
+  if (!key) return null
+  if (key.length > 200) throw new PmsValidationError('Reservation mutation idempotency key must be 200 characters or fewer.')
+  return key
+}
+
+function requireReservationLifecycleIdempotencyKey(value) {
+  const key = normalizeReservationMutationIdempotencyKey(value)
+  if (!key) throw new PmsValidationError('Reservation lifecycle idempotency key is required.')
+  return key
+}
+
+function stableMutationValue(value) {
+  if (typeof value === 'bigint') return value.toString()
+  if (value instanceof Date) return value.toISOString()
+  if (Array.isArray(value)) return value.map(stableMutationValue)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableMutationValue(value[key])]))
+  }
+  return value
+}
+
+function reservationMutationFingerprint(operation, reservationId, intent) {
+  return createHash('sha256')
+    .update(JSON.stringify(stableMutationValue({ operation, reservationId, intent })))
+    .digest('hex')
+}
+
+function reservationMutationResultFingerprint(result) {
+  return createHash('sha256')
+    .update(JSON.stringify(stableMutationValue(result)))
+    .digest('hex')
+}
+
+async function acquireReservationMutationLocks(tx, lockKeys) {
+  if (typeof tx?.$queryRawUnsafe !== 'function') return
+  const uniqueKeys = [...new Set(lockKeys.filter(Boolean).map(String))].sort()
+  for (const lockKey of uniqueKeys) {
+    // The statement is constant and the lock identity is parameterized. Locks end with this transaction.
+    await tx.$queryRawUnsafe('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text AS locked', lockKey)
+  }
+}
+
+function reservationRoomDateLockKeys(propertyId, reservationId, roomId, checkIn, checkOut) {
+  const keys = [`reservation-mutation:reservation:${propertyId}:${reservationId}`]
+  if (!roomId) return keys
+  for (const dateKey of stayDates(checkIn, checkOut)) {
+    keys.push(`reservation-mutation:room-date:${propertyId}:${roomId}:${dateKey}`)
+  }
+  return keys
+}
+
+async function claimReservationMutationAttempt(tx, {
+  propertyId,
+  reservationId,
+  operation,
+  idempotencyKey,
+  intent,
+}) {
+  if (!idempotencyKey) return { replay: false, attempt: null }
+  const intentFingerprint = reservationMutationFingerprint(operation, reservationId, intent)
+  await acquireReservationMutationLocks(tx, [`reservation-mutation:idempotency:${propertyId}:${idempotencyKey}`])
+  const existing = await tx.reservationMutationAttempt.findUnique({
+    where: { propertyId_idempotencyKey: { propertyId, idempotencyKey } },
+  })
+  if (existing) {
+    if (existing.reservationId !== reservationId || existing.operation !== operation || existing.intentFingerprint !== intentFingerprint) {
+      throw new PmsValidationError('This reservation mutation idempotency key was already used for a different command.', 409)
+    }
+    return { replay: true, attempt: existing }
+  }
+  const attempt = await tx.reservationMutationAttempt.create({
+    data: { propertyId, reservationId, operation, idempotencyKey, intentFingerprint },
+  })
+  return { replay: false, attempt }
+}
+
+function replayReservationMutation(attempt, current) {
+  if (!attempt?.resultFingerprint) {
+    throw new PmsValidationError('The original reservation mutation outcome is unavailable. Refresh before trying another command.', 409)
+  }
+  if (attempt.resultFingerprint !== reservationMutationResultFingerprint(current)) {
+    throw new PmsValidationError('The original reservation mutation outcome has been superseded by a later change. Refresh to view the current reservation.', 409)
+  }
+  return current
+}
+
+async function completeReservationMutationAttempt(tx, attempt, result) {
+  if (!attempt) return
+  await tx.reservationMutationAttempt.update({
+    where: { id: attempt.id },
+    data: { resultFingerprint: reservationMutationResultFingerprint(result) },
+  })
 }
 
 function normalizePaymentReferenceFingerprint(method, reference) {
@@ -110,6 +238,7 @@ const RESERVATION_UPDATE_FIELDS = new Set([
   'sourceEmailEventId',
   'notes',
   'specialRequests',
+  'expectedUpdatedAt',
 ])
 
 const CREDENTIAL_FIELD_PATTERN = /(authorization|credential|password|secret|token|api[_-]?key|private[_-]?key|session|cookie)/i
@@ -123,6 +252,30 @@ function validateReservationUpdateInput(value) {
     throw new PmsValidationError('Reservation update contains unsupported fields.')
   }
   return Object.fromEntries(keys.map((key) => [key, value[key]]))
+}
+
+function normalizeExpectedReservationUpdatedAt(value) {
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value !== 'string') {
+    throw new PmsValidationError('expectedUpdatedAt must be an ISO-8601 timestamp.')
+  }
+  const parsed = new Date(value)
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new PmsValidationError('expectedUpdatedAt must be an ISO-8601 timestamp.')
+  }
+  return parsed
+}
+
+function normalizeExpectedGuestUpdatedAt(value) {
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value !== 'string') {
+    throw new PmsValidationError('expectedGuestUpdatedAt must be an ISO-8601 timestamp.')
+  }
+  const parsed = new Date(value)
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new PmsValidationError('expectedGuestUpdatedAt must be an ISO-8601 timestamp.')
+  }
+  return parsed
 }
 
 function requiredMoneyInput(input, legacyField = 'amount', satangField = `${legacyField}Satang`) {
@@ -187,6 +340,47 @@ function nextDateKey(key) {
   const date = dateFromKey(key)
   date.setUTCDate(date.getUTCDate() + 1)
   return date.toISOString().slice(0, 10)
+}
+
+const FRONT_DESK_BOARD_MAX_RANGE_DAYS = 93
+
+function validCalendarDateKey(value, label) {
+  const key = normalizeNullableString(value)
+  if (!key || !/^\d{4}-\d{2}-\d{2}$/.test(key)) {
+    throw new PmsValidationError(`${label} must use YYYY-MM-DD format.`)
+  }
+  const date = dateFromKey(key)
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== key) {
+    throw new PmsValidationError(`${label} must be a valid calendar date.`)
+  }
+  return { key, date }
+}
+
+export function resolveFrontDeskBoardRange(input = {}) {
+  const fromInput = normalizeNullableString(input?.from)
+  const toInput = normalizeNullableString(input?.to)
+  if (!fromInput && !toInput) return null
+  if (!fromInput || !toInput) {
+    throw new PmsValidationError('Board range requires both from and to dates.')
+  }
+
+  const from = validCalendarDateKey(fromInput, 'Board from date')
+  const to = validCalendarDateKey(toInput, 'Board to date')
+  const durationDays = Math.round((to.date.getTime() - from.date.getTime()) / 86_400_000)
+  if (durationDays <= 0) {
+    throw new PmsValidationError('Board to date must be after from date.')
+  }
+  if (durationDays > FRONT_DESK_BOARD_MAX_RANGE_DAYS) {
+    throw new PmsValidationError(`Board date range cannot exceed ${FRONT_DESK_BOARD_MAX_RANGE_DAYS} days.`)
+  }
+
+  return {
+    from: from.key,
+    to: to.key,
+    fromDate: from.date,
+    toDate: to.date,
+    durationDays,
+  }
 }
 
 function isOperationallySellableRoom(room) {
@@ -1433,6 +1627,120 @@ function validateGuestInput(guest) {
   }
 }
 
+const RESERVATION_GUEST_UPDATE_FIELDS = new Set([
+  'firstName', 'lastName', 'email', 'phone', 'nationality', 'idType', 'idNumber', 'vipStatus', 'notes', 'expectedGuestUpdatedAt',
+])
+
+function validateReservationGuestUpdateInput(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new PmsValidationError('Guest update must be an object.')
+  }
+  const keys = Object.keys(value)
+  if (keys.some((key) => !RESERVATION_GUEST_UPDATE_FIELDS.has(key) || CREDENTIAL_FIELD_PATTERN.test(key))) {
+    throw new PmsValidationError('Guest update contains unsupported fields.')
+  }
+  if (!keys.some((key) => key !== 'expectedGuestUpdatedAt')) {
+    throw new PmsValidationError('Guest update must include at least one guest field.')
+  }
+  return Object.fromEntries(keys.map((key) => [key, value[key]]))
+}
+
+function guestUpdateData(current, update) {
+  const updatedValue = (field) => Object.prototype.hasOwnProperty.call(update, field) ? update[field] : current[field]
+  return validateGuestInput({
+    firstName: updatedValue('firstName'),
+    lastName: updatedValue('lastName'),
+    email: updatedValue('email'),
+    phone: updatedValue('phone'),
+    nationality: updatedValue('nationality'),
+    idType: updatedValue('idType'),
+    idNumber: updatedValue('idNumber'),
+    vipStatus: updatedValue('vipStatus'),
+    notes: updatedValue('notes'),
+  })
+}
+
+function boardReservationDto(reservation, actor) {
+  const canViewGuest = canPerformAction(actor, 'view:guests')
+  const canViewReservation = canPerformAction(actor, 'view:reservations')
+  const canViewFinance = canPerformAction(actor, 'view:cashier')
+    || canPerformAction(actor, 'post:charges')
+    || canPerformAction(actor, 'process:payment')
+  const guest = reservation.guest ? {
+    id: reservation.guest.id,
+    firstName: reservation.guest.firstName,
+    lastName: reservation.guest.lastName,
+    vipStatus: Boolean(reservation.guest.vipStatus),
+    updatedAt: reservation.guest.updatedAt,
+    ...(canViewGuest ? {
+      email: reservation.guest.email,
+      phone: reservation.guest.phone,
+      nationality: reservation.guest.nationality,
+      idType: reservation.guest.idType,
+      idNumber: reservation.guest.idNumber,
+      notes: reservation.guest.notes,
+    } : {}),
+  } : null
+  const folio = reservation.folio && canViewFinance ? {
+    id: reservation.folio.id,
+    status: reservation.folio.status,
+    total: reservation.folio.total,
+    paid: reservation.folio.paid,
+    balance: reservation.folio.balance,
+    totalSatang: satangToApiString(readMoneySatang(reservation.folio, 'total')),
+    paidSatang: satangToApiString(readMoneySatang(reservation.folio, 'paid')),
+    balanceSatang: satangToApiString(readMoneySatang(reservation.folio, 'balance')),
+  } : null
+  return {
+    id: reservation.id,
+    confirmationCode: reservation.confirmationCode,
+    propertyId: reservation.propertyId,
+    guestId: reservation.guestId,
+    roomTypeId: reservation.roomTypeId,
+    assignedRoomId: reservation.assignedRoomId,
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    actualCheckIn: reservation.actualCheckIn,
+    actualCheckOut: reservation.actualCheckOut,
+    status: reservation.status,
+    adults: reservation.adults,
+    children: reservation.children,
+    childAges: reservation.childAges,
+    source: reservation.source,
+    ...(canViewReservation ? {
+      channelRef: reservation.channelRef,
+      notes: reservation.notes,
+      specialRequests: reservation.specialRequests,
+    } : {}),
+    updatedAt: reservation.updatedAt,
+    guest,
+    roomType: reservation.roomType ? {
+      id: reservation.roomType.id,
+      code: reservation.roomType.code,
+      name: reservation.roomType.name,
+      standardOcc: reservation.roomType.standardOcc,
+      maxOccupancy: reservation.roomType.maxOccupancy,
+    } : null,
+    assignedRoom: reservation.assignedRoom ? {
+      id: reservation.assignedRoom.id,
+      number: reservation.assignedRoom.number,
+      floor: reservation.assignedRoom.floor,
+      currentStatus: reservation.assignedRoom.currentStatus,
+      operationalStatus: reservation.assignedRoom.operationalStatus,
+    } : null,
+    ...(canViewFinance ? {
+      ratePerNight: reservation.ratePerNight,
+      ratePerNightSatang: satangToApiString(readMoneySatang(reservation, 'ratePerNight')),
+      totalAmount: reservation.totalAmount,
+      totalAmountSatang: satangToApiString(readMoneySatang(reservation, 'totalAmount')),
+      depositAmount: reservation.depositAmount,
+      depositAmountSatang: satangToApiString(readMoneySatang(reservation, 'depositAmount')),
+      depositPaid: reservation.depositPaid,
+      folio,
+    } : {}),
+  }
+}
+
 async function ensureRoomTypeCapacity(tx, propertyId, roomTypeId, checkInKey, checkOutKey, excludeReservationId) {
   const sellableRooms = await tx.room.count({
     where: {
@@ -1488,7 +1796,7 @@ async function validateRoomAssignable(tx, reservation, roomId) {
     throw new PmsValidationError(`Room ${room.number} does not match the reservation room type.`)
   }
   if (['OCCUPIED', 'OCCUPIED_CLEAN', 'OCCUPIED_DIRTY'].includes(room.currentStatus) && room.currentReservation !== reservation.id) {
-    throw new PmsValidationError(`Room ${room.number} is occupied and cannot be assigned.`)
+    throw new PmsValidationError(`Room ${room.number} is occupied and cannot be assigned.`, 409)
   }
 
   const overlappingReservation = await tx.reservation.findFirst({
@@ -1502,7 +1810,7 @@ async function validateRoomAssignable(tx, reservation, roomId) {
     },
   })
   if (overlappingReservation) {
-    throw new PmsValidationError(`Room ${room.number} already has a reservation for the selected dates.`)
+    throw new PmsValidationError(`Room ${room.number} already has a reservation for the selected dates.`, 409)
   }
 
   const inventoryConflict = await tx.roomDateInventory.findFirst({
@@ -1517,7 +1825,7 @@ async function validateRoomAssignable(tx, reservation, roomId) {
     },
   })
   if (inventoryConflict) {
-    throw new PmsValidationError(`Room ${room.number} is not available on ${getBangkokDateKey(inventoryConflict.date)}.`)
+    throw new PmsValidationError(`Room ${room.number} is not available on ${getBangkokDateKey(inventoryConflict.date)}.`, 409)
   }
 
   return room
@@ -1529,19 +1837,8 @@ async function reserveRoomDates(tx, propertyId, reservationId, roomId, checkIn, 
   })
 
   for (const dateKey of stayDates(checkIn, checkOut)) {
-    await tx.roomDateInventory.upsert({
-      where: {
-        roomId_date: {
-          roomId,
-          date: dateFromKey(dateKey),
-        },
-      },
-      update: {
-        propertyId,
-        reservationId,
-        status: 'RESERVED',
-      },
-      create: {
+    await tx.roomDateInventory.create({
+      data: {
         propertyId,
         roomId,
         reservationId,
@@ -2026,15 +2323,161 @@ export async function listReservations(prisma, actor) {
   })
 }
 
-export async function updateReservation(prisma, reservationId, input, actor) {
-  const update = validateReservationUpdateInput(input)
-  return prisma.$transaction(async (tx) => {
+function cashierSatangString(value, label) {
+  if (value === null || value === undefined || value === '') {
+    throw new PmsValidationError(`Cashier data is missing exact satang for ${label}.`, 503)
+  }
+  try {
+    return satangToApiString(parseSatang(value, label))
+  } catch {
+    throw new PmsValidationError(`Cashier data has invalid exact satang for ${label}.`, 503)
+  }
+}
+
+function cashierGuestName(guest) {
+  const value = [guest?.firstName, guest?.lastName]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(' ')
+  return value || 'Guest'
+}
+
+function cashierFolioProjection(folio) {
+  return {
+    id: folio.id,
+    reservationId: folio.reservationId,
+    guestName: cashierGuestName(folio.reservation?.guest),
+    roomNumber: String(folio.reservation?.assignedRoom?.number || 'Unassigned'),
+    checkIn: folio.reservation?.checkIn,
+    checkOut: folio.reservation?.checkOut || null,
+    status: folio.status,
+    charges: folio.charges.map((charge) => ({
+      id: charge.id,
+      postedAt: charge.createdAt,
+      category: charge.category,
+      description: charge.description,
+      quantity: charge.quantity,
+      unitPriceSatang: cashierSatangString(charge.amountSatang, `charge ${charge.id} unit price`),
+      totalSatang: cashierSatangString(charge.totalSatang, `charge ${charge.id} total`),
+      postedBy: charge.createdBy,
+    })),
+    payments: folio.payments.map((payment) => ({
+      id: payment.id,
+      postedAt: payment.createdAt,
+      method: payment.method,
+      amountSatang: cashierSatangString(payment.amountSatang, `payment ${payment.id} amount`),
+      reference: payment.reference || null,
+      receivedBy: payment.processedBy,
+    })),
+    subtotalSatang: cashierSatangString(folio.subtotalSatang, `folio ${folio.id} subtotal`),
+    taxSatang: cashierSatangString(folio.taxSatang, `folio ${folio.id} tax`),
+    totalSatang: cashierSatangString(folio.totalSatang, `folio ${folio.id} total`),
+    paidSatang: cashierSatangString(folio.paidSatang, `folio ${folio.id} paid`),
+    balanceSatang: cashierSatangString(folio.balanceSatang, `folio ${folio.id} balance`),
+    createdAt: folio.createdAt,
+    updatedAt: folio.updatedAt,
+  }
+}
+
+// This intentionally has its own allowlisted projection. Do not substitute the
+// broader reservation include here: it carries booking-email relations and guest
+// contact data that a Cashier workspace never needs.
+export async function listCashierFolios(prisma, actor) {
+  const property = await getProperty(prisma, actor)
+  const folios = await prisma.folio.findMany({
+    where: { reservation: { propertyId: property.id } },
+    select: {
+      id: true,
+      reservationId: true,
+      status: true,
+      subtotalSatang: true,
+      taxSatang: true,
+      totalSatang: true,
+      paidSatang: true,
+      balanceSatang: true,
+      createdAt: true,
+      updatedAt: true,
+      reservation: {
+        select: {
+          checkIn: true,
+          checkOut: true,
+          guest: { select: { firstName: true, lastName: true } },
+          assignedRoom: { select: { number: true } },
+        },
+      },
+      charges: {
+        where: { void: false },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          createdAt: true,
+          category: true,
+          description: true,
+          quantity: true,
+          amountSatang: true,
+          totalSatang: true,
+          createdBy: true,
+        },
+      },
+      payments: {
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          createdAt: true,
+          method: true,
+          amountSatang: true,
+          reference: true,
+          processedBy: true,
+        },
+      },
+    },
+    orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+  })
+
+  return {
+    property: {
+      id: property.id,
+      name: property.name,
+      currency: property.currency,
+    },
+    folios: folios.map(cashierFolioProjection),
+  }
+}
+
+export async function updateReservation(prisma, reservationId, input, actor, options = {}) {
+  const validatedUpdate = validateReservationUpdateInput(input)
+  const expectedUpdatedAt = normalizeExpectedReservationUpdatedAt(validatedUpdate.expectedUpdatedAt)
+  const update = { ...validatedUpdate }
+  delete update.expectedUpdatedAt
+  const idempotencyKey = normalizeReservationMutationIdempotencyKey(options?.idempotencyKey)
+  return reservationMutationTransaction(prisma, async (tx) => {
     const property = await getProperty(tx, actor)
     const current = await tx.reservation.findFirst({
       where: { id: reservationId, propertyId: property.id },
       include: reservationInclude,
     })
     if (!current) throw new PmsValidationError('Reservation was not found.', 404)
+    const proposedCheckIn = update.checkIn ?? current.checkIn
+    const proposedCheckOut = update.checkOut ?? current.checkOut
+    const proposedStay = validateStayInput({ checkIn: proposedCheckIn, checkOut: proposedCheckOut })
+    await acquireReservationMutationLocks(tx, [
+      ...reservationRoomDateLockKeys(property.id, current.id, current.assignedRoomId, current.checkIn, current.checkOut),
+      ...reservationRoomDateLockKeys(property.id, current.id, current.assignedRoomId, proposedStay.checkInKey, proposedStay.checkOutKey),
+    ])
+    const mutationAttempt = await claimReservationMutationAttempt(tx, {
+      propertyId: property.id,
+      reservationId: current.id,
+      operation: 'UPDATE_RESERVATION',
+      idempotencyKey,
+      intent: {
+        update,
+        expectedUpdatedAt: expectedUpdatedAt?.toISOString() || null,
+      },
+    })
+    if (mutationAttempt.replay) return replayReservationMutation(mutationAttempt.attempt, current)
+    if (expectedUpdatedAt && current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new PmsValidationError('This reservation changed after the booking board loaded it. Refresh before applying new stay dates.', 409)
+    }
     if (['CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].includes(current.status)) {
       throw new PmsValidationError('Completed or cancelled reservations cannot be edited.')
     }
@@ -2059,7 +2502,7 @@ export async function updateReservation(prisma, reservationId, input, actor) {
     const adults = update.adults ?? current.adults
     const children = update.children ?? current.children
     const childAges = update.childAges ?? current.childAges
-    const { checkInKey, checkOutKey } = validateStayInput({ checkIn, checkOut })
+    const { checkInKey, checkOutKey } = proposedStay
     const pricing = calculateStayPricing({
       checkIn,
       checkOut,
@@ -2085,7 +2528,7 @@ export async function updateReservation(prisma, reservationId, input, actor) {
     const sourceEmailEventId = update.sourceEmailEventId === undefined
       ? current.sourceEmailEventId
       : await validateSourceEmailEventId(tx, property.id, update.sourceEmailEventId)
-    const updated = await tx.reservation.update({
+    await tx.reservation.update({
       where: { id: current.id },
       data: {
         roomTypeId,
@@ -2135,7 +2578,12 @@ export async function updateReservation(prisma, reservationId, input, actor) {
     await createReservationLog(tx, current.id, 'MODIFIED', actor, { changes: update })
     await createAudit(tx, actor, 'MODIFIED', 'reservation', current.id, update)
     await emitOperationalEvent(tx, current.propertyId, 'RESERVATION_UPDATED', 'reservation', current.id, actor)
-    return updated
+    const result = await tx.reservation.findUnique({
+      where: { id: current.id },
+      include: reservationInclude,
+    })
+    await completeReservationMutationAttempt(tx, mutationAttempt.attempt, result)
+    return result
   })
 }
 
@@ -2402,8 +2850,32 @@ export async function listGuests(prisma, actor) {
   })
 }
 
-async function createReservationInTransaction(tx, input, actor) {
+async function createReservationInTransaction(tx, input, actor, options = {}) {
     const property = await getProperty(tx, actor)
+    const idempotencyKey = options.requireIdempotency || options.idempotencyKey
+      ? requireCreateIdempotencyKey(options.idempotencyKey)
+      : null
+    const createAttempt = idempotencyKey
+      ? await claimPmsCreateAttempt(tx, {
+        propertyId: property.id,
+        idempotencyKey,
+        operation: 'CREATE_RESERVATION',
+        intent: input,
+      })
+      : null
+    if (createAttempt?.replay) {
+      const existing = createAttempt.attempt.entityId
+        ? await tx.reservation.findFirst({
+          where: { id: createAttempt.attempt.entityId, propertyId: property.id },
+          include: reservationInclude,
+        })
+        : null
+      return assertPmsCreateReplay(createAttempt.attempt, {
+        entityType: 'reservation',
+        entityId: existing?.id,
+        result: existing,
+      })
+    }
     const { checkInKey, checkOutKey } = validateStayInput(input)
     const sourceEmailEventId = await validateSourceEmailEventId(tx, property.id, input.sourceEmailEventId)
 
@@ -2501,14 +2973,22 @@ async function createReservationInTransaction(tx, input, actor) {
     await createAudit(tx, actor, 'CREATED', 'reservation', reservation.id, { confirmationCode: reservation.confirmationCode })
     await emitOperationalEvent(tx, property.id, 'RESERVATION_CREATED', 'reservation', reservation.id, actor)
 
-    return tx.reservation.findUnique({
+    const created = await tx.reservation.findUnique({
       where: { id: reservation.id },
       include: reservationInclude,
     })
+    if (createAttempt) {
+      await completePmsCreateAttempt(tx, createAttempt.attempt, {
+        entityType: 'reservation',
+        entityId: reservation.id,
+        result: created,
+      })
+    }
+    return created
 }
 
-export async function createReservation(prisma, input, actor) {
-  return serializableTransaction(prisma, async (tx) => createReservationInTransaction(tx, input, actor))
+export async function createReservation(prisma, input, actor, options = {}) {
+  return serializableTransaction(prisma, async (tx) => createReservationInTransaction(tx, input, actor, options))
 }
 
 export async function listBookingEmailSources(prisma, actor) {
@@ -3094,16 +3574,56 @@ export async function createWalkInCheckIn(prisma, input, actor) {
   })
 }
 
-export async function assignRoom(prisma, reservationId, roomId, actor) {
-  return prisma.$transaction(async (tx) => {
+export async function assignRoom(prisma, reservationId, roomId, actor, options = {}) {
+  const targetRoomId = normalizeNullableString(roomId)
+  if (!targetRoomId) throw new PmsValidationError('Select a room before assigning the reservation.')
+  const idempotencyKey = normalizeReservationMutationIdempotencyKey(options?.idempotencyKey)
+  const expectedUpdatedAt = normalizeExpectedReservationUpdatedAt(options?.expectedUpdatedAt)
+  return reservationMutationTransaction(prisma, async (tx) => {
     const property = await getProperty(tx, actor)
+    await acquireReservationMutationLocks(
+      tx,
+      reservationRoomDateLockKeys(property.id, reservationId, null, null, null),
+    )
     const reservation = await tx.reservation.findFirst({ where: { id: reservationId, propertyId: property.id } })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
+    await acquireReservationMutationLocks(tx, [
+      ...reservationRoomDateLockKeys(property.id, reservation.id, reservation.assignedRoomId, reservation.checkIn, reservation.checkOut),
+      ...reservationRoomDateLockKeys(property.id, reservation.id, targetRoomId, reservation.checkIn, reservation.checkOut),
+    ])
+    const mutationAttempt = await claimReservationMutationAttempt(tx, {
+      propertyId: property.id,
+      reservationId: reservation.id,
+      operation: 'ASSIGN_ROOM',
+      idempotencyKey,
+      intent: {
+        roomId: targetRoomId,
+        expectedUpdatedAt: expectedUpdatedAt?.toISOString() || null,
+      },
+    })
+    if (mutationAttempt.replay) {
+      const current = await tx.reservation.findFirst({
+        where: { id: reservation.id, propertyId: property.id },
+        include: reservationInclude,
+      })
+      return replayReservationMutation(mutationAttempt.attempt, current)
+    }
+    if (expectedUpdatedAt && reservation.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new PmsValidationError('This reservation changed after the booking board loaded it. Refresh before assigning a room.', 409)
+    }
     if (['CANCELLED', 'NO_SHOW', 'CHECKED_OUT'].includes(reservation.status)) {
       throw new PmsValidationError('Only active reservations can be assigned a room.')
     }
+    if (reservation.assignedRoomId === targetRoomId) {
+      const current = await tx.reservation.findFirst({
+        where: { id: reservation.id, propertyId: property.id },
+        include: reservationInclude,
+      })
+      await completeReservationMutationAttempt(tx, mutationAttempt.attempt, current)
+      return current
+    }
 
-    const room = await validateRoomAssignable(tx, reservation, roomId)
+    const room = await validateRoomAssignable(tx, reservation, targetRoomId)
     await reserveRoomDates(tx, property.id, reservation.id, room.id, reservation.checkIn, reservation.checkOut)
 
     const updated = await tx.reservation.update({
@@ -3114,15 +3634,46 @@ export async function assignRoom(prisma, reservationId, roomId, actor) {
     await createReservationLog(tx, reservation.id, 'ASSIGNED_ROOM', actor, { changes: { roomNumber: room.number } })
     await createAudit(tx, actor, 'ASSIGNED_ROOM', 'reservation', reservation.id, { roomId: room.id, roomNumber: room.number })
     await emitOperationalEvent(tx, reservation.propertyId, 'RESERVATION_ROOM_ASSIGNED', 'reservation', reservation.id, actor, { roomId: room.id })
+    await completeReservationMutationAttempt(tx, mutationAttempt.attempt, updated)
     return updated
   })
 }
 
 export async function checkInReservation(prisma, reservationId, actor, options = {}) {
-  return prisma.$transaction(async (tx) => {
+  const idempotencyKey = requireReservationLifecycleIdempotencyKey(options.idempotencyKey)
+  const expectedUpdatedAt = normalizeExpectedReservationUpdatedAt(options.expectedUpdatedAt)
+  const commandOptions = { ...options }
+  delete commandOptions.idempotencyKey
+  delete commandOptions.expectedUpdatedAt
+  return reservationMutationTransaction(prisma, async (tx) => {
     const property = await getProperty(tx, actor)
+    await acquireReservationMutationLocks(
+      tx,
+      reservationRoomDateLockKeys(property.id, reservationId, null, null, null),
+    )
     let reservation = await tx.reservation.findFirst({ where: { id: reservationId, propertyId: property.id }, include: reservationInclude })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
+    await acquireReservationMutationLocks(tx, reservationRoomDateLockKeys(
+      property.id,
+      reservation.id,
+      reservation.assignedRoomId,
+      reservation.checkIn,
+      reservation.checkOut,
+    ))
+    const mutationAttempt = await claimReservationMutationAttempt(tx, {
+      propertyId: property.id,
+      reservationId: reservation.id,
+      operation: 'CHECK_IN_RESERVATION',
+      idempotencyKey,
+      intent: {
+        options: commandOptions,
+        expectedUpdatedAt: expectedUpdatedAt?.toISOString() || null,
+      },
+    })
+    if (mutationAttempt.replay) return replayReservationMutation(mutationAttempt.attempt, reservation)
+    if (expectedUpdatedAt && reservation.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new PmsValidationError('This reservation changed after the front desk loaded it. Refresh before checking in.', 409)
+    }
     if (!['CONFIRMED', 'PENDING'].includes(reservation.status)) {
       throw new PmsValidationError('Only confirmed or pending reservations can be checked in.')
     }
@@ -3248,18 +3799,50 @@ export async function checkInReservation(prisma, reservationId, actor, options =
       },
     })
     await emitOperationalEvent(tx, reservation.propertyId, 'RESERVATION_CHECKED_IN', 'reservation', reservation.id, actor, { roomId: room.id })
-    return tx.reservation.findUnique({
+    const result = await tx.reservation.findUnique({
       where: { id: reservation.id },
       include: reservationInclude,
     })
+    await completeReservationMutationAttempt(tx, mutationAttempt.attempt, result)
+    return result
   })
 }
 
 export async function checkOutReservation(prisma, reservationId, actor, options = {}) {
-  return prisma.$transaction(async (tx) => {
+  const idempotencyKey = requireReservationLifecycleIdempotencyKey(options.idempotencyKey)
+  const expectedUpdatedAt = normalizeExpectedReservationUpdatedAt(options.expectedUpdatedAt)
+  const commandOptions = { ...options }
+  delete commandOptions.idempotencyKey
+  delete commandOptions.expectedUpdatedAt
+  return reservationMutationTransaction(prisma, async (tx) => {
     const property = await getProperty(tx, actor)
+    await acquireReservationMutationLocks(
+      tx,
+      reservationRoomDateLockKeys(property.id, reservationId, null, null, null),
+    )
     let reservation = await tx.reservation.findFirst({ where: { id: reservationId, propertyId: property.id }, include: reservationInclude })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
+    await acquireReservationMutationLocks(tx, reservationRoomDateLockKeys(
+      property.id,
+      reservation.id,
+      reservation.assignedRoomId,
+      reservation.checkIn,
+      reservation.checkOut,
+    ))
+    const mutationAttempt = await claimReservationMutationAttempt(tx, {
+      propertyId: property.id,
+      reservationId: reservation.id,
+      operation: 'CHECK_OUT_RESERVATION',
+      idempotencyKey,
+      intent: {
+        options: commandOptions,
+        expectedUpdatedAt: expectedUpdatedAt?.toISOString() || null,
+      },
+    })
+    if (mutationAttempt.replay) return replayReservationMutation(mutationAttempt.attempt, reservation)
+    if (expectedUpdatedAt && reservation.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new PmsValidationError('This reservation changed after the front desk loaded it. Refresh before checking out.', 409)
+    }
     if (reservation.status !== 'CHECKED_IN') {
       throw new PmsValidationError('Only checked-in reservations can be checked out.')
     }
@@ -3350,39 +3933,121 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
       },
     })
     await emitOperationalEvent(tx, reservation.propertyId, 'RESERVATION_CHECKED_OUT', 'reservation', reservation.id, actor, { roomId: room.id })
-    return tx.reservation.findUnique({
+    const result = await tx.reservation.findUnique({
       where: { id: reservation.id },
       include: reservationInclude,
     })
+    await completeReservationMutationAttempt(tx, mutationAttempt.attempt, result)
+    return result
   })
 }
 
-export async function cancelReservation(prisma, reservationId, actor, status = 'CANCELLED', notes = undefined) {
-  return prisma.$transaction(async (tx) => {
+export async function cancelReservation(prisma, reservationId, actor, status = 'CANCELLED', notes = undefined, options = {}) {
+  const reason = normalizeNullableString(notes)
+  const idempotencyKey = normalizeReservationMutationIdempotencyKey(options.idempotencyKey)
+  const expectedUpdatedAt = normalizeExpectedReservationUpdatedAt(options.expectedUpdatedAt)
+  if (!['CANCELLED', 'NO_SHOW'].includes(status)) {
+    throw new PmsValidationError('Cancellation status must be CANCELLED or NO_SHOW.')
+  }
+  if (!reason) {
+    throw new PmsValidationError(`${status === 'NO_SHOW' ? 'No-show' : 'Cancellation'} reason is required.`)
+  }
+  return reservationMutationTransaction(prisma, async (tx) => {
     const property = await getProperty(tx, actor)
-    const reservation = await tx.reservation.findFirst({ where: { id: reservationId, propertyId: property.id } })
+    const reservation = await tx.reservation.findFirst({
+      where: { id: reservationId, propertyId: property.id },
+      include: reservationInclude,
+    })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
-    if (!['CANCELLED', 'NO_SHOW'].includes(status)) {
-      throw new PmsValidationError('Cancellation status must be CANCELLED or NO_SHOW.')
+    await acquireReservationMutationLocks(tx, reservationRoomDateLockKeys(
+      property.id,
+      reservation.id,
+      reservation.assignedRoomId,
+      reservation.checkIn,
+      reservation.checkOut,
+    ))
+    const mutationAttempt = await claimReservationMutationAttempt(tx, {
+      propertyId: property.id,
+      reservationId: reservation.id,
+      operation: `MARK_${status}`,
+      idempotencyKey,
+      intent: { status, reason, expectedUpdatedAt: expectedUpdatedAt?.toISOString() || null },
+    })
+    if (mutationAttempt.replay) return replayReservationMutation(mutationAttempt.attempt, reservation)
+    if (expectedUpdatedAt && reservation.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new PmsValidationError('This reservation changed after the booking board loaded it. Refresh before changing its status.', 409)
+    }
+    if (['CANCELLED', 'NO_SHOW', 'CHECKED_OUT'].includes(reservation.status)) {
+      throw new PmsValidationError('Completed, cancelled, or no-show reservations cannot be changed.', 409)
     }
     if (reservation.status === 'CHECKED_IN') {
       throw new PmsValidationError('Checked-in reservations must be checked out before cancellation.')
+    }
+    if (status === 'NO_SHOW' && getBangkokDateKey(reservation.checkIn) > getBangkokDateKey(new Date())) {
+      throw new PmsValidationError('A future arrival cannot be marked as a no-show.')
     }
 
     await tx.roomDateInventory.deleteMany({ where: { reservationId } })
     const updated = await tx.reservation.update({
       where: { id: reservation.id },
-      data: { status, notes: notes || reservation.notes },
+      data: {
+        status,
+        notes: [
+          reservation.notes,
+          `${status === 'NO_SHOW' ? 'No-show' : 'Cancellation'} reason: ${reason}`,
+        ].filter(Boolean).join('\n'),
+      },
       include: reservationInclude,
     })
     await createReservationLog(tx, reservation.id, status === 'NO_SHOW' ? 'NO_SHOW' : 'CANCELLED', actor, {
       fromStatus: reservation.status,
       toStatus: status,
-      notes,
+      notes: reason,
     })
-    await createAudit(tx, actor, status, 'reservation', reservation.id, { notes })
+    await createAudit(tx, actor, status, 'reservation', reservation.id, { reason })
     await emitOperationalEvent(tx, reservation.propertyId, status === 'NO_SHOW' ? 'RESERVATION_NO_SHOW' : 'RESERVATION_CANCELLED', 'reservation', reservation.id, actor)
+    await completeReservationMutationAttempt(tx, mutationAttempt.attempt, updated)
     return updated
+  })
+}
+
+export async function updateReservationGuest(prisma, reservationId, input, actor, options = {}) {
+  const validatedUpdate = validateReservationGuestUpdateInput(input)
+  const expectedGuestUpdatedAt = normalizeExpectedGuestUpdatedAt(validatedUpdate.expectedGuestUpdatedAt)
+  const update = { ...validatedUpdate }
+  delete update.expectedGuestUpdatedAt
+  const idempotencyKey = normalizeReservationMutationIdempotencyKey(options.idempotencyKey)
+  return reservationMutationTransaction(prisma, async (tx) => {
+    const property = await getProperty(tx, actor)
+    const reservation = await tx.reservation.findFirst({
+      where: { id: reservationId, propertyId: property.id },
+      include: reservationInclude,
+    })
+    if (!reservation?.guest) throw new PmsValidationError('Reservation was not found.', 404)
+    await acquireReservationMutationLocks(tx, [
+      `reservation-mutation:reservation:${property.id}:${reservation.id}`,
+      `reservation-mutation:guest:${property.id}:${reservation.guest.id}`,
+    ])
+    const mutationAttempt = await claimReservationMutationAttempt(tx, {
+      propertyId: property.id,
+      reservationId: reservation.id,
+      operation: 'UPDATE_RESERVATION_GUEST',
+      idempotencyKey,
+      intent: { update, expectedGuestUpdatedAt: expectedGuestUpdatedAt?.toISOString() || null },
+    })
+    if (mutationAttempt.replay) return replayReservationMutation(mutationAttempt.attempt, reservation)
+    if (expectedGuestUpdatedAt && reservation.guest.updatedAt.getTime() !== expectedGuestUpdatedAt.getTime()) {
+      throw new PmsValidationError('This guest changed after the booking board loaded it. Refresh before saving.', 409)
+    }
+    const data = guestUpdateData(reservation.guest, update)
+    await tx.guest.update({ where: { id: reservation.guest.id }, data })
+    const fieldNames = Object.keys(update).sort()
+    await createReservationLog(tx, reservation.id, 'MODIFIED', actor, { changes: { guestFields: fieldNames } })
+    await createAudit(tx, actor, 'RESERVATION_GUEST_UPDATED', 'reservation', reservation.id, { guestId: reservation.guest.id, fields: fieldNames })
+    await emitOperationalEvent(tx, property.id, 'RESERVATION_GUEST_UPDATED', 'reservation', reservation.id, actor, { guestId: reservation.guest.id, fields: fieldNames })
+    const result = await tx.reservation.findUnique({ where: { id: reservation.id }, include: reservationInclude })
+    await completeReservationMutationAttempt(tx, mutationAttempt.attempt, result)
+    return result
   })
 }
 
@@ -3497,6 +4162,9 @@ async function recordChargeInTransaction(tx, input, actor) {
   if (!validCategories.includes(category)) throw new PmsValidationError('Select a valid charge category.')
   if (amountSatang <= 0n) throw new PmsValidationError('Charge amount must be greater than zero.')
   if (!Number.isInteger(quantity) || quantity < 1) throw new PmsValidationError('Charge quantity must be at least 1.')
+  if (amountSatang > MAX_SAFE_MONEY_SATANG || quantity > POSTGRES_INTEGER_MAX) {
+    throw new PmsValidationError('Charge amount or quantity exceeds the supported exact-money range.')
+  }
 
   const requestedDateKey = input.date ? getBangkokDateKey(input.date) : null
   const sourceEmailEventId = normalizeNullableString(input.sourceEmailEventId)
@@ -3532,6 +4200,9 @@ async function recordChargeInTransaction(tx, input, actor) {
 
   const validatedSourceEmailEventId = await validateSourceEmailEventId(tx, property.id, sourceEmailEventId)
   const totalSatang = amountSatang * BigInt(quantity)
+  if (totalSatang > MAX_SAFE_MONEY_SATANG) {
+    throw new PmsValidationError('Charge total exceeds the supported exact-money range.')
+  }
   const charge = await tx.charge.create({
     data: {
       propertyId: property.id,
@@ -3574,21 +4245,55 @@ export async function createCharge(prisma, input, actor) {
   }
 }
 
-export async function createGuest(prisma, input, actor) {
-  const property = await getProperty(prisma, actor)
-  const guest = await prisma.guest.create({ data: { ...validateGuestInput(input), propertyId: property.id } })
-  await createAudit(prisma, actor, 'CREATED', 'guest', guest.id)
-  return guest
+export async function createGuest(prisma, input, actor, options = {}) {
+  return serializableTransaction(prisma, async (tx) => {
+    const property = await getProperty(tx, actor)
+    const idempotencyKey = options.requireIdempotency || options.idempotencyKey
+      ? requireCreateIdempotencyKey(options.idempotencyKey)
+      : null
+    const createAttempt = idempotencyKey
+      ? await claimPmsCreateAttempt(tx, {
+        propertyId: property.id,
+        idempotencyKey,
+        operation: 'CREATE_GUEST',
+        intent: input,
+      })
+      : null
+    if (createAttempt?.replay) {
+      const existing = createAttempt.attempt.entityId
+        ? await tx.guest.findFirst({ where: { id: createAttempt.attempt.entityId, propertyId: property.id } })
+        : null
+      return assertPmsCreateReplay(createAttempt.attempt, {
+        entityType: 'guest',
+        entityId: existing?.id,
+        result: existing,
+      })
+    }
+    const guest = await tx.guest.create({ data: { ...validateGuestInput(input), propertyId: property.id } })
+    await createAudit(tx, actor, 'CREATED', 'guest', guest.id)
+    await emitOperationalEvent(tx, property.id, 'GUEST_CREATED', 'guest', guest.id, actor)
+    if (createAttempt) {
+      await completePmsCreateAttempt(tx, createAttempt.attempt, {
+        entityType: 'guest',
+        entityId: guest.id,
+        result: guest,
+      })
+    }
+    return guest
+  })
 }
 
 export async function updateGuest(prisma, guestId, input, actor) {
-  const property = await getProperty(prisma, actor)
-  const data = validateGuestInput(input)
-  const existing = await prisma.guest.findFirst({ where: { id: guestId, propertyId: property.id } })
-  if (!existing) throw new PmsValidationError('Guest was not found.', 404)
-  const guest = await prisma.guest.update({ where: { id: existing.id }, data })
-  await createAudit(prisma, actor, 'MODIFIED', 'guest', guest.id)
-  return guest
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx, actor)
+    const data = validateGuestInput(input)
+    const existing = await tx.guest.findFirst({ where: { id: guestId, propertyId: property.id } })
+    if (!existing) throw new PmsValidationError('Guest was not found.', 404)
+    const guest = await tx.guest.update({ where: { id: existing.id }, data })
+    await createAudit(tx, actor, 'MODIFIED', 'guest', guest.id)
+    await emitOperationalEvent(tx, property.id, 'GUEST_UPDATED', 'guest', guest.id, actor)
+    return guest
+  })
 }
 
 export async function getTodayData(prisma, actor) {
@@ -3625,20 +4330,80 @@ export async function getTodayData(prisma, actor) {
   }
 }
 
-export async function getFrontDeskBoard(prisma, actor) {
+export async function getFrontDeskBoard(prisma, actor, rangeInput = {}) {
   const property = await getProperty(prisma, actor)
-  const [rooms, reservations] = await Promise.all([
+  const range = resolveFrontDeskBoardRange(rangeInput)
+  const reservationWhere = {
+    propertyId: property.id,
+    status: { in: activeReservationStatuses() },
+    ...(range ? {
+      checkIn: { lt: range.toDate },
+      checkOut: { gt: range.fromDate },
+    } : {}),
+  }
+  const inventoryBlockWhere = range ? {
+    propertyId: property.id,
+    date: { gte: range.fromDate, lt: range.toDate },
+    status: { in: ['BLOCKED', 'OUT_OF_SERVICE'] },
+  } : null
+
+  const [roomTypes, rooms, reservations, inventoryBlocks] = await Promise.all([
+    prisma.roomType.findMany({
+      where: { propertyId: property.id },
+      orderBy: [{ name: 'asc' }, { code: 'asc' }],
+    }),
     prisma.room.findMany({
       where: { propertyId: property.id },
       include: { roomType: true },
       orderBy: [{ floor: 'asc' }, { number: 'asc' }],
     }),
     prisma.reservation.findMany({
-      where: { propertyId: property.id, status: { in: activeReservationStatuses() } },
+      where: reservationWhere,
       include: reservationInclude,
-      orderBy: [{ checkIn: 'asc' }],
+      orderBy: [{ checkIn: 'asc' }, { checkOut: 'asc' }, { id: 'asc' }],
     }),
+    inventoryBlockWhere
+      ? prisma.roomDateInventory.findMany({
+          where: inventoryBlockWhere,
+          select: {
+            id: true,
+            roomId: true,
+            date: true,
+            status: true,
+            notes: true,
+            updatedAt: true,
+          },
+          orderBy: [{ date: 'asc' }, { roomId: 'asc' }],
+        })
+      : Promise.resolve([]),
   ])
 
-  return { property, rooms, reservations }
+  return {
+    property,
+    rooms,
+    reservations: reservations.map((reservation) => boardReservationDto(reservation, actor)),
+    propertyDisplay: {
+      id: property.id,
+      code: property.code,
+      name: property.name,
+      timezone: property.timezone,
+      currency: property.currency,
+      defaultCheckIn: property.defaultCheckIn,
+      defaultCheckOut: property.defaultCheckOut,
+      extraGuestFee: property.extraGuestFee,
+      extraGuestFeeSatang: satangToApiString(readMoneySatang(property, 'extraGuestFee')),
+      childFee: property.childFee,
+      childFeeSatang: satangToApiString(readMoneySatang(property, 'childFee')),
+      taxRate: property.taxRate,
+      taxRateBasisPoints: property.taxRateBasisPoints ?? Math.round(Number(property.taxRate || 0) * 100),
+    },
+    roomTypes,
+    inventoryBlocks,
+    range: range ? {
+      from: range.from,
+      to: range.to,
+      durationDays: range.durationDays,
+      semantics: 'FROM_INCLUSIVE_TO_EXCLUSIVE',
+    } : null,
+  }
 }

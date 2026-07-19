@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useKV } from '@github/spark/hooks'
 import type { User } from '@/types/auth'
 import type { BoardRoomCard } from '@/types/board'
@@ -131,10 +131,49 @@ const INITIAL_STATE: OnboardingState = {
   },
 }
 
-function sanitizeCompletedState(state: OnboardingState): OnboardingState {
+const SERVER_ONBOARDING_STATE_KEY = 'onboarding:server-state'
+const LEGACY_CREDENTIAL_BEARING_ONBOARDING_KEYS = [
+  'onboarding:state',
+  'onboarding:admin-user',
+  'onboarding-admin-user',
+] as const
+
+type AdminCredentials = Pick<UserSetup, 'password' | 'confirmPassword'>
+
+let transientServerAdminCredentials: AdminCredentials = { password: '', confirmPassword: '' }
+const transientServerCredentialListeners = new Set<() => void>()
+
+function setTransientServerAdminCredentials(credentials: Partial<AdminCredentials>) {
+  transientServerAdminCredentials = { ...transientServerAdminCredentials, ...credentials }
+  transientServerCredentialListeners.forEach((listener) => listener())
+}
+
+function clearTransientServerAdminCredentials() {
+  transientServerAdminCredentials = { password: '', confirmPassword: '' }
+  transientServerCredentialListeners.forEach((listener) => listener())
+}
+
+function subscribeToTransientServerAdminCredentials(listener: () => void) {
+  transientServerCredentialListeners.add(listener)
+  return () => transientServerCredentialListeners.delete(listener)
+}
+
+function useTransientServerAdminCredentials() {
+  return useSyncExternalStore(
+    subscribeToTransientServerAdminCredentials,
+    () => transientServerAdminCredentials,
+    () => transientServerAdminCredentials,
+  )
+}
+
+function removeLegacyOnboardingCredentials() {
+  if (typeof window === 'undefined') return
+  LEGACY_CREDENTIAL_BEARING_ONBOARDING_KEYS.forEach((key) => window.localStorage.removeItem(key))
+}
+
+function withoutAdminCredentials(state: OnboardingState): OnboardingState {
   return {
     ...state,
-    completed: true,
     data: {
       ...state.data,
       adminUser: {
@@ -144,6 +183,10 @@ function sanitizeCompletedState(state: OnboardingState): OnboardingState {
       },
     },
   }
+}
+
+function sanitizeCompletedState(state: OnboardingState): OnboardingState {
+  return { ...withoutAdminCredentials(state), completed: true }
 }
 
 function roomDisplayType(roomType: RoomTypeSetup | undefined, index: number): BoardRoomCard['type'] {
@@ -215,8 +258,11 @@ function validateSetupData(data: OnboardingState['data']) {
 }
 
 export function useOnboarding() {
-  const [completed, setCompleted] = useKV<boolean>('onboarding:completed', false)
-  const [state, setState] = useKV<OnboardingState>('onboarding:state', INITIAL_STATE)
+  const [completed, setCompleted, deleteCompleted] = useKV<boolean>('onboarding:completed', false)
+  const [storedState, setStoredState, deleteStoredState] = useKV<OnboardingState>(
+    SERVER_AUTH_ENABLED ? SERVER_ONBOARDING_STATE_KEY : 'onboarding:state',
+    INITIAL_STATE,
+  )
   const [propertyData, setPropertyData] = useKV<PropertySetup>('onboarding-property', DEFAULT_PROPERTY)
   const [roomTypesData, setRoomTypesData] = useKV<RoomTypeSetup[]>('onboarding-room-types', [])
   const [roomsData, setRoomsData] = useKV<RoomSetup[]>('onboarding-rooms', [])
@@ -230,6 +276,32 @@ export function useOnboarding() {
     hasUsers: true,
   })
   const [setupError, setSetupError] = useState<string | null>(null)
+  const transientCredentials = useTransientServerAdminCredentials()
+  const setState = (next: OnboardingState | ((current: OnboardingState) => OnboardingState)) => {
+    setStoredState((current) => {
+      const resolved = typeof next === 'function' ? next(current) : next
+      return SERVER_AUTH_ENABLED ? withoutAdminCredentials(resolved) : resolved
+    })
+  }
+  const state = useMemo(() => {
+    if (!SERVER_AUTH_ENABLED || !storedState) return storedState
+    return {
+      ...storedState,
+      data: {
+        ...storedState.data,
+        adminUser: {
+          ...storedState.data.adminUser,
+          ...transientCredentials,
+        },
+      },
+    }
+  }, [storedState, transientCredentials])
+
+  useEffect(() => {
+    if (!SERVER_AUTH_ENABLED) return
+    removeLegacyOnboardingCredentials()
+    setStoredState((current) => withoutAdminCredentials(current || INITIAL_STATE))
+  }, [setStoredState])
 
   useEffect(() => {
     if (!SERVER_AUTH_ENABLED) return
@@ -358,6 +430,25 @@ export function useOnboarding() {
   }
 
   const updateAdminUser = (user: Partial<UserSetup>) => {
+    if (SERVER_AUTH_ENABLED) {
+      const { password, confirmPassword, ...persistedUser } = user
+      if (password !== undefined || confirmPassword !== undefined) {
+        setTransientServerAdminCredentials({ password, confirmPassword })
+      }
+      if (Object.keys(persistedUser).length === 0) return
+      setState((current) => {
+        const safeCurrent = withoutAdminCredentials(current || INITIAL_STATE)
+        return {
+          ...safeCurrent,
+          data: {
+            ...safeCurrent.data,
+            adminUser: { ...safeCurrent.data.adminUser, ...persistedUser },
+          },
+        }
+      })
+      return
+    }
+
     setState((current) => {
       if (!current) return INITIAL_STATE
       return {
@@ -372,6 +463,7 @@ export function useOnboarding() {
 
   const completeOnboarding = async () => {
     const currentState = state || INITIAL_STATE
+    if (SERVER_AUTH_ENABLED) removeLegacyOnboardingCredentials()
     validateSetupData(currentState.data)
 
     if (SERVER_AUTH_ENABLED) {
@@ -381,7 +473,11 @@ export function useOnboarding() {
       if (serverSetupStatus?.setupTokenRequired && !setupToken) {
         throw new Error('Setup token is required.')
       }
-      await completeServerSetup(currentState.data, setupToken)
+      try {
+        await completeServerSetup(currentState.data, setupToken)
+      } finally {
+        removeLegacyOnboardingCredentials()
+      }
       setServerSetupStatus({
         needsSetup: false,
         hasProperty: true,
@@ -389,6 +485,10 @@ export function useOnboarding() {
         propertyName: currentState.data.property.name,
         setupTokenRequired: false,
       })
+      clearTransientServerAdminCredentials()
+      deleteStoredState()
+      removeLegacyOnboardingCredentials()
+      return
     } else {
       const email = normalizeAuthEmail(currentState.data.adminUser.email)
       const passwordSalt = createPasswordSalt()
@@ -421,6 +521,13 @@ export function useOnboarding() {
   }
 
   const resetOnboarding = async () => {
+    if (SERVER_AUTH_ENABLED) {
+      deleteCompleted()
+      deleteStoredState()
+      clearTransientServerAdminCredentials()
+      removeLegacyOnboardingCredentials()
+      return
+    }
     setCompleted(false)
     setState(INITIAL_STATE)
   }

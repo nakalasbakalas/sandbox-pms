@@ -1,5 +1,5 @@
 import { useKV } from '@github/spark/hooks'
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { BoardRoomCard } from '@/types/board'
 import type { HousekeepingRoom, CleanStatus } from '@/types/housekeeping'
 import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
@@ -27,9 +27,31 @@ type UseRoomSyncOptions = {
 
 export function useRoomSync(options: UseRoomSyncOptions = {}) {
   const serverSync = options.serverSync ?? true
-  const [roomsRaw, setRoomsRaw] = useKV<BoardRoomCard[]>('pms-rooms', [])
-  const [lastUpdate, setLastUpdate] = useKV<RoomStatusUpdate | null>('last-room-update', null)
+  const [localRoomsRaw, setLocalRoomsRaw] = useKV<BoardRoomCard[]>('pms-rooms', [])
+  const [localLastUpdate, setLocalLastUpdate] = useKV<RoomStatusUpdate | null>('last-room-update', null)
+  const [serverRoomsRaw, setServerRoomsRaw] = useState<BoardRoomCard[]>([])
+  const [serverLastUpdate, setServerLastUpdate] = useState<RoomStatusUpdate | null>(null)
   const authToken = null
+  const roomsRaw = SERVER_API_ENABLED ? serverRoomsRaw : localRoomsRaw
+  const lastUpdate = SERVER_API_ENABLED ? serverLastUpdate : localLastUpdate
+
+  const setRoomsRaw = useCallback((
+    updater: BoardRoomCard[] | ((current: BoardRoomCard[]) => BoardRoomCard[]),
+  ) => {
+    if (SERVER_API_ENABLED) {
+      setServerRoomsRaw(updater)
+      return
+    }
+    setLocalRoomsRaw(updater)
+  }, [setLocalRoomsRaw])
+
+  const setLastUpdate = useCallback((update: RoomStatusUpdate | null) => {
+    if (SERVER_API_ENABLED) {
+      setServerLastUpdate(update)
+      return
+    }
+    setLocalLastUpdate(update)
+  }, [setLocalLastUpdate])
 
   const rooms = useMemo(() => (roomsRaw || []).map(deserializeRoom), [roomsRaw])
 

@@ -42,6 +42,7 @@ import { InventoryCalendar, InventoryOverview } from './InventoryCalendar'
 import { RateParityPanel } from './RateParityPanel'
 import { RatePushPanel } from '../rates/RatePushPanel'
 import type { BoardRoomCard } from '@/types/board'
+import { ServerChannelsView } from './ServerChannelsView'
 
 interface Channel {
   id: string
@@ -213,6 +214,11 @@ const DEFAULT_CHANNELS: Channel[] = [
 ]
 
 export function ChannelsView() {
+  if (SERVER_API_ENABLED) return <ServerChannelsView />
+  return <DemoChannelsView />
+}
+
+function DemoChannelsView() {
   const [demoChannels, setDemoChannels] = useKV<Channel[]>('channels', DEFAULT_CHANNELS)
   const [reservations, setReservations] = useKV<ChannelReservation[]>('channel-reservations', [])
   const [demoSyncLogs, setDemoSyncLogs] = useKV<SyncLog[]>('channel-sync-logs', [])

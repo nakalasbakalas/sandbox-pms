@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useKV } from '@github/spark/hooks'
+import { SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -90,7 +91,30 @@ function downloadCsv(filename: string, rows: CsvValue[][]) {
   URL.revokeObjectURL(url)
 }
 
+function AccountingUnavailable() {
+  return (
+    <Card className="border-amber-300 bg-amber-50/50">
+      <CardHeader>
+        <CardTitle>Accounting dashboard unavailable in server mode</CardTitle>
+        <CardDescription>
+          This browser-backed accounting dashboard is unavailable in server mode. Use server-backed cashier and folio actions;
+          Accounting V2 remains gated until its server reads and writes are wired and proven.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="text-sm text-muted-foreground">
+        No accounting entry, export, or close action can be completed from this screen until a server-backed dashboard is delivered.
+      </CardContent>
+    </Card>
+  )
+}
+
 export function AccountingDashboard() {
+  // The legacy dashboard uses Spark KV. It is an explicit demo-only surface,
+  // never a fallback authority for an enabled server accounting deployment.
+  return SERVER_API_ENABLED ? <AccountingUnavailable /> : <AccountingDashboardDemo />
+}
+
+function AccountingDashboardDemo() {
   const [entries, setEntries] = useKV<AccountingEntry[]>('accounting-entries', [])
   const [folios] = useKV<any[]>('folios', [])
   const [selectedMonth, setSelectedMonth] = useState(new Date())

@@ -1,9 +1,10 @@
 import { z } from 'zod'
+import { beginChannelMutation, completeChannelMutation } from './channel-mutation-idempotency.mjs'
 import { recordDomainEvent } from './domain-events.mjs'
+import { operationalReasonForEvidence, operationalReasonSchema } from './operational-reason.mjs'
 import { PmsValidationError } from './pms-domain.mjs'
 
 const identifier = z.string().trim().min(1).max(200)
-const reason = z.string().trim().min(3).max(1_000)
 const mappingFields = z.object({
   channelId: identifier,
   externalRoomTypeId: identifier,
@@ -14,7 +15,7 @@ const mappingFields = z.object({
   active: z.boolean().default(true),
 }).strict()
 
-const createMappingSchema = mappingFields.extend({ reason }).strict()
+const createMappingSchema = mappingFields.extend({ reason: operationalReasonSchema }).strict()
 const updateMappingSchema = z.object({
   channelId: identifier.optional(),
   externalRoomTypeId: identifier.optional(),
@@ -23,9 +24,9 @@ const updateMappingSchema = z.object({
   roomTypeId: identifier.optional(),
   roomIds: z.array(identifier).min(1).max(500).optional(),
   active: z.boolean().optional(),
-  reason,
+  reason: operationalReasonSchema,
 }).strict()
-const deleteMappingSchema = z.object({ reason }).strict()
+const deleteMappingSchema = z.object({ reason: operationalReasonSchema }).strict()
 
 export const channelMappingServiceSchemas = Object.freeze({ createMapping: createMappingSchema, updateMapping: updateMappingSchema, deleteMapping: deleteMappingSchema })
 
@@ -46,17 +47,18 @@ function contextFor(context) {
 }
 
 function publicMapping(mapping) {
-  return {
+  const payload = {
     id: mapping.id,
     channelId: mapping.channelId,
     externalRoomTypeId: mapping.externalRoomTypeId,
     externalRoomTypeName: mapping.externalRoomTypeName,
-    externalRatePlanId: mapping.externalRatePlanId || undefined,
     roomTypeId: mapping.roomTypeId,
     roomIds: mapping.roomIds,
     active: mapping.active,
     updatedAt: mapping.updatedAt instanceof Date ? mapping.updatedAt.toISOString() : mapping.updatedAt,
   }
+  if (mapping.externalRatePlanId) payload.externalRatePlanId = mapping.externalRatePlanId
+  return payload
 }
 
 async function requireChannel(tx, propertyId, channelId) {
@@ -76,12 +78,13 @@ async function validateInventory(tx, propertyId, roomTypeId, roomIds) {
 }
 
 async function auditAndEmit(tx, resolved, action, eventType, mapping, reasonText) {
+  const safeReason = operationalReasonForEvidence(reasonText)
   await tx.auditLog.create({ data: {
     propertyId: resolved.propertyId, userId: resolved.actorId, action,
     entityType: 'channelMapping', entityId: mapping.id,
     changes: {
       channelId: mapping.channelId, roomTypeId: mapping.roomTypeId, roomCount: mapping.roomIds.length,
-      externalRoomTypeId: mapping.externalRoomTypeId, active: mapping.active, reason: reasonText, providerWrite: false,
+      externalRoomTypeId: mapping.externalRoomTypeId, active: mapping.active, reason: safeReason, providerWrite: false,
     },
   } })
   await recordDomainEvent(tx, {
@@ -104,6 +107,8 @@ export async function createChannelMapping(prisma, context, rawInput) {
   const input = parse(createMappingSchema, rawInput)
   try {
     return await prisma.$transaction(async (tx) => {
+      const attempt = await beginChannelMutation(tx, context, 'CREATE_CHANNEL_MAPPING', input)
+      if (attempt.replay) return attempt.result
       await requireChannel(tx, resolved.propertyId, input.channelId)
       const roomIds = await validateInventory(tx, resolved.propertyId, input.roomTypeId, input.roomIds)
       const mapping = await tx.channelMapping.create({ data: {
@@ -112,7 +117,7 @@ export async function createChannelMapping(prisma, context, rawInput) {
         roomTypeId: input.roomTypeId, roomIds, active: input.active,
       } })
       await auditAndEmit(tx, resolved, 'CHANNEL_MAPPING_CREATED', 'CHANNEL_MAPPING_CREATED', mapping, input.reason)
-      return publicMapping(mapping)
+      return completeChannelMutation(tx, attempt, publicMapping(mapping))
     })
   } catch (error) {
     if (error?.code === 'P2002') throw new PmsValidationError('This channel already has a mapping for the selected room type.', 409)
@@ -124,6 +129,8 @@ export async function updateChannelMapping(prisma, context, mappingId, rawInput)
   const resolved = contextFor(context)
   const input = parse(updateMappingSchema, rawInput)
   return prisma.$transaction(async (tx) => {
+    const attempt = await beginChannelMutation(tx, context, 'UPDATE_CHANNEL_MAPPING', { mappingId, ...input })
+    if (attempt.replay) return attempt.result
     const existing = await tx.channelMapping.findFirst({ where: { id: mappingId, channel: { propertyId: resolved.propertyId } } })
     if (!existing) throw new PmsValidationError('Channel mapping was not found for the active property.', 404)
     const channelId = input.channelId || existing.channelId
@@ -141,7 +148,7 @@ export async function updateChannelMapping(prisma, context, mappingId, rawInput)
       ...(input.active !== undefined ? { active: input.active } : {}),
     } })
     await auditAndEmit(tx, resolved, 'CHANNEL_MAPPING_UPDATED', 'CHANNEL_MAPPING_UPDATED', mapping, input.reason)
-    return publicMapping(mapping)
+    return completeChannelMutation(tx, attempt, publicMapping(mapping))
   })
 }
 
@@ -149,10 +156,12 @@ export async function deleteChannelMapping(prisma, context, mappingId, rawInput)
   const resolved = contextFor(context)
   const input = parse(deleteMappingSchema, rawInput)
   return prisma.$transaction(async (tx) => {
+    const attempt = await beginChannelMutation(tx, context, 'DELETE_CHANNEL_MAPPING', { mappingId, ...input })
+    if (attempt.replay) return attempt.result
     const existing = await tx.channelMapping.findFirst({ where: { id: mappingId, channel: { propertyId: resolved.propertyId } } })
     if (!existing) throw new PmsValidationError('Channel mapping was not found for the active property.', 404)
     await auditAndEmit(tx, resolved, 'CHANNEL_MAPPING_DELETED', 'CHANNEL_MAPPING_DELETED', existing, input.reason)
     await tx.channelMapping.delete({ where: { id: existing.id } })
-    return publicMapping(existing)
+    return completeChannelMutation(tx, attempt, publicMapping(existing))
   })
 }

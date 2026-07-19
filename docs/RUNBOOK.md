@@ -226,6 +226,8 @@ Staff account lockout:
 1. Staff accounts lock after three failed login attempts.
 2. A locked user cannot authenticate until an admin resets that user's password from user management.
 3. Password reset clears `failedLoginAttempts` and `lockedAt`. Do not unlock by editing production database rows directly unless emergency recovery is explicitly approved and recorded.
+4. If a server-mode login appears to revert to the sign-in screen, capture redacted request status and correlation ids for `/api/auth/login` and `/api/auth/me`. Do not restore access by writing `auth:current-user` or a token into browser storage.
+5. Run `npm.cmd run test:server-auth-authority` and the guarded `npm.cmd run test:e2e:server` before accepting an auth-bootstrap correction. The browser test deliberately delivers a stale failed `/api/auth/me` after a successful interactive login.
 4. Do not paste passwords, hashes, cookies, or session tokens into issue comments, screenshots, docs, or chat.
 
 Hotel Ops notification center:
@@ -364,6 +366,18 @@ An invalid or missing read-authority value falls back to `legacy_float`. That fa
 
 ## iCal Export Token Migration And Rotation
 
+The server-mode Channel Manager is an authority boundary, not a channel manager proof screen:
+
+1. Load `/channels` and confirm it reports manual/review-gated iCal and dry-run/unproven OTA capability evidence.
+2. If any channel, mapping, room-setup, or capability request fails, stop. The screen must show `Channel Manager unavailable`, block writes, and must not display browser fixtures.
+3. Channel configuration, export-token rotation, mapping changes, and channel removal require `manage:channels`, a valid `x-idempotency-key`, and an operational reason containing no URL, credential, email address, or phone number. Retain the same key for an unchanged uncertain retry; changed intent returns `409`. A `view:channels` user is read-only.
+4. Do not paste or store an inbound provider iCal URL. The PMS supports hosted outbound date-block feeds only until an approved secret-reference service exists. Migration `20260719100000_remove_raw_ical_import_urls` must remove legacy `config.importUrl` values during deploy.
+5. Initial issue and rotation require `x-idempotency-key`. Retain the same key when retrying an uncertain request: the same intent replays the original URL without a second audit event while that token is still current or in grace. Changed intent, disabled channels, and expired/superseded token attempts return `409`. A new export URL is visible only on issue/rotation. Prior hashed tokens remain valid for 15 minutes; update the provider, verify the new feed, then allow the grace window to expire.
+6. Configuration/removal reasons are JSON-body fields and must contain no credentials, URLs, email addresses, or phone numbers.
+7. Apply migration `20260719103000_channel_mutation_idempotency` before deploying this API/UI pair. Run `npm.cmd run test:channels-server-authority` after changing channel UI, iCal configuration, mapping validation, idempotency, or capability wording.
+
+Rate push, rate parity, real-time inventory, provider sync logs/performance, and browser iCal reservation imports are demo-only. Do not use them as server, staging, or provider evidence.
+
 Migration `20260717141000_ical_token_hash_backfill` requires PostgreSQL `pgcrypto`, hashes the exact UTF-8 token bytes with SHA-256, stores the unpadded base64url digest, and removes the raw `Channel.config.exportToken` field in the same update.
 
 1. Apply it first to an empty database and a restored sanitized staging copy through `npx.cmd prisma migrate deploy`.
@@ -394,12 +408,13 @@ Authenticated PMS routes require an active membership for the configured `SANDBO
 
 - The membership migration backfills existing users. Setup and user-management operations maintain compatibility membership records.
 - Diagnose a membership denial by checking the user active state, the `SANDBOX` property, and the `(userId, propertyId)` membership. Do not change the global role as a shortcut for a missing membership.
+- Compare the role returned by login and `/api/auth/me` with the active membership role, not the legacy `User.role`. Requests re-resolve membership, so an already-issued session must be denied immediately after membership deactivation.
 - Role and membership changes require an authorized admin workflow and audit evidence. Never insert a production membership merely to make a proof script pass.
 - Property-isolation testing must use a disposable database with at least two properties and forged cross-property resource ids.
 
 ## Domain Event Stream
 
-`GET /api/events` is an authenticated, property-scoped SSE endpoint. It requires `view:board`; do not publish it as a public webhook.
+`GET /api/events` is an authenticated, property-scoped SSE endpoint. It requires `view:board`, `view:cashier`, or `view:guests`; do not publish it as a public webhook. Events are filtered by the union of aggregate domains permitted by the effective role: board access does not expose finance, rate, settings, or guest-profile identifiers; cashier authority contributes charge, folio, payment, and reservation invalidations; guest-directory authority contributes guest and reservation invalidations. The server revalidates user and membership authority on every poll and closes the stream after revocation. No stream exposes event metadata or grants a mutation permission.
 
 - `SSE_ENABLED=true` enables the endpoint. Set it to `false` to return a controlled `503` without disabling the underlying transactional event records.
 - Browser reconnect uses the last event id. Operators may use `?after=<non-negative-id>` only while authenticated; invalid or negative ids return `400`.
@@ -442,10 +457,84 @@ node scripts/run-operations-foundation-tests.mjs
 
 Passing the focused checks proves service behavior against fixtures. It does not prove migrations against real data, production scheduling, live staff acceptance, recovery, or provider readiness.
 
+## Server Booking Board Operations
+
+Run:
+
+```powershell
+npm.cmd run test:booking-board-operations
+npm.cmd run test:reservation-commands
+```
+
+In server mode, select an unassigned stay or an assigned timeline segment before choosing a compatible target room or editing stay dates. The PMS validates room type, room operational status, inventory blocks, overlapping reservations, capacity, and property ownership before accepting the command. Do not interpret a disabled button as proof of availability; the backend response is authoritative.
+
+The Board deliberately performs no optimistic move, resize, lifecycle, guest, or charge success. After a confirmed success or definitive client failure it refetches the Board range. The PMS records property-scoped command fingerprints; retry an unchanged network or `5xx` outcome only with its original in-memory key, request body, and reservation update token. Do not change the room, form, or stale token before reconciling an ambiguous outcome. A full reload must show the persisted server state.
+
+In server mode, `/rooms` is a read-only operational projection of `/api/front-desk/board`. If it shows **Rooms unavailable**, use Retry only after restoring the authenticated backend path; do not treat room/property/type data in browser storage as a fallback. After retry or reload, reconcile the displayed property, room type, and room number with the server snapshot. Users without `view:board` must not use `/rooms`; the Housekeeping membership includes `view:board`, so its permitted projection must omit guest contact/profile data, folio identifiers, and financial values.
+
+In server mode, `/reservations` requires both the authenticated reservation list and authenticated Board room/readiness snapshot. If it shows **Reservations unavailable**, restore the backend path and use Retry; do not create a booking or trust a browser-stored reservation, guest, room, or unassigned-stay record while either snapshot is unavailable. Once both authoritative snapshots return, reload before continuing a delayed workflow. `view:reservations` is required to enter the route, and create/edit/lifecycle actions remain subject to their own backend permissions and idempotency rules.
+
+In server mode, Front Desk, `/guests`, and `/messaging` must never be recovered by restoring browser KV values. If any of those workspaces shows its unavailable state, restore the authenticated API and use its Retry control before viewing operational metrics, rows, Front Desk assistant context, or creating work. Guest creation requires `edit:reservation` in addition to route access. Messaging records drafts only and requires `send:guest-messages`; `view:messaging` remains read-only. Use the Drafts tab to confirm the saved record survives reload, and do not treat a draft as provider delivery. If a draft response is uncertain, reload and recompose only the unchanged intent so the same opaque idempotency key can replay the original row. The retry record must contain no recipient, contact, subject, or body material and is cleared after authoritative read-back.
+
+In server mode, if `/cashier` shows **Cashier unavailable**, do not post a charge, collect a payment, or use browser-stored folio/accounting data. Restore the authenticated `GET /api/cashier/folios` path, use Retry or reload, then verify the returned folio before retrying the unchanged financial intent. An uncertain payment or charge keeps only a hashed slot, intent fingerprint, and opaque idempotency key in same-tab `sessionStorage`; this lets a reload reuse the same backend replay key without storing folio, guest, amount, reference, or credential data. Confirmed success clears it. A `CAFE_STAFF` user may post a permitted charge after authority is restored, but must not collect or record a payment.
+
+When creating a reservation or standalone guest profile through the staff API, send a new `x-idempotency-key` for the logical create. If the response is uncertain, retry the unchanged request with that same key before changing any field. A successful retry returns the original entity rather than creating a second guest, reservation, folio, or initial charge. Do not reuse the key for a different guest, stay, or creation type; that is a `409`. The opaque key and one-way fingerprint survive a same-tab reload without persisting the guest or reservation material, so reconcile the authoritative server state and retry only the unchanged intent.
+
+Room assignment and lifecycle requests send `x-reservation-expected-updated-at` and the same `expectedUpdatedAt` body value. A mismatch or stale token is a `409`: inspect the refetched reservation before creating a new command. Check-in and check-out also require an explicit lifecycle idempotency key.
+
+Use the selected-reservation command drawer for:
+
+- cancellation or no-show only with a recorded reason; future arrivals cannot be marked no-show and checked-in stays must be checked out;
+- guest name/contact/VIP changes only with both reservation-edit and guest-view permissions; stale guest timestamps fail with `409`;
+- extras only with `post:charges`, an open folio, and backend `legacyFolioCharges` capability evidence. Enter baht with at most two decimals; the browser converts the string to integer satang without Float arithmetic.
+
+If a lifecycle or guest request returns `409`, inspect the refetched reservation before trying a new command. If an extra request has an unknown network outcome, reconcile the folio before changing any material field. Never repost an extra with a new key merely because the first response was lost.
+
+Guided check-in/check-out and cashier actions are sanitized navigation handoffs. Their URLs contain only allowlisted workflow and record identifiers, and the destination clears the query after consuming it. Front Desk AI may suggest or open these staff workflows, but it applies no reservation, room, folio, payment, rate, or availability change.
+
+Room-block creation/clearing is not yet a Board timeline command. Use the existing permissioned inventory/settings flow until it is separately wired and tested. Reservations are never destructively deleted from the operational Board; correct lifecycle mistakes through audited status actions, and correct posted finances only through append-only reversals/refunds.
+
 ## Accounting V2 And Direct Booking Gates
 
 Keep `ACCOUNTING_V2_ENABLED=false` and `DIRECT_BOOKING_ENABLED=false` until their acceptance matrices pass. Accounting uses append-only exact-satang corrections; never delete a posted financial row. Run `node scripts/run-accounting-v2-tests.mjs` before any staging exercise.
 
+The legacy Accounting Dashboard and Cash Reconciliation tabs must remain unavailable in server mode until they use the Accounting V2 APIs. Run `npm.cmd run test:cashier-accounting-mode`; never treat browser-KV entries or cash counts as operational evidence.
+
 Direct booking does not accept card data. Enabled staging also requires a backend-only `DIRECT_BOOKING_TOKEN_SECRET` with at least 32 characters. Run `node scripts/run-direct-booking-tests.mjs`, then prove concurrent last-room holds, idempotent replay, expiry, recovery, WAF/rate limiting, and staff handling against the exact release candidate before owner approval. Never print or persist the raw hold token after its issue response.
 
 Deterministic analyzers are read-only. Run `node scripts/run-ops-analyzer-tests.mjs`; staff must submit any accepted recommendation through `/api/ops/commands`, where the existing permission, approval, reason, audit, idempotency, and emergency-stop controls apply.
+
+## Autonomy Shadow Foundation
+
+Keep every provider write and near-live automation gate disabled. The autonomy foundation accepts only `OBSERVE`, `SHADOW`, and `PROHIBITED` policy records and produces only `SHADOW_NOOP` action evidence.
+
+Before applying migration `20260718120000_autonomy_shadow_foundation` to a restored staging copy, record counts only:
+
+```sql
+SELECT count(*) AS nonempty_legacy_channel_credentials
+FROM "Channel"
+WHERE "credentials" IS NOT NULL
+  AND "credentials" <> '{}'::jsonb;
+
+SELECT count(*) AS orphaned_channel_properties
+FROM "Channel" c
+LEFT JOIN "Property" p ON p.id = c."propertyId"
+WHERE p.id IS NULL;
+```
+
+Both counts must be zero. A non-zero credential count requires backend secret-reference migration, credential rotation, and owner-approved reconciliation. Do not print the JSON, silently copy it, or weaken the migration guard. A non-zero orphan count requires property-ownership reconciliation.
+
+After migration, `Channel.credentials` deliberately remains as a deprecated old-app rollback compatibility column. New Prisma clients ignore it. PostgreSQL defaults it to `{}` and constraint `Channel_credentials_must_be_empty` rejects every non-empty insert or update. Do not remove this column during the rollback window and do not weaken or bypass the constraint.
+
+Run:
+
+```powershell
+npm.cmd run test:autonomy
+$env:ALLOW_DB_E2E='true'
+$env:E2E_DATABASE_URL='<disposable PostgreSQL URL>'
+npm.cmd run test:e2e:autonomy
+```
+
+The guarded database test proves replay idempotency, concurrent locking, property isolation, emergency-stop blocking, audit/domain evidence, empty-only rollback-column enforcement, and no reservation/payment/provider mutation. It remains engineering evidence only. Production scheduling must use an external durable trigger and exact-release staging proof; the in-process scheduler is not autonomy proof.
+
+Do not add provider acknowledgement or compensation records until a credentialed adapter implements write, acknowledgement, read-back, retry, reconciliation, and rollback semantics. Do not add Agents SDK execution tools; future agent tools may read sanitized snapshots or submit candidates only.

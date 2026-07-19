@@ -1,10 +1,10 @@
 # Codex Launch Finish Packet
 
-Last updated: 2026-07-17
+Last updated: 2026-07-19
 
 Release status must use the four levels in `RELEASE_EVIDENCE_MODEL.md`: engineering-ready, staging-proven, owner-approved, and provider-proven. Do not infer one from another. The current posture is owner-accepted pilot / launch-hardening, not full production sign-off.
 
-PR #174 head `4c1659d` passed both required GitHub checks on 2026-07-16. A later property-scope/acceptance remediation is not covered by that result and must rerun both checks before merge. The release-foundation Blueprint now specifies migration-only predeploy; confirm the active Render service command before deployment because historical live evidence records migration plus `prod-safe` seed.
+Merged `main` is `9208621`. PR #190 is the single main-target consolidation candidate; integration commit `cb34b057fc829914408225802fe25fa235b0b8c5` passed both required GitHub checks in run `29679511970`, but no independent GitHub approval exists and any later head must retain both checks. The release-foundation Blueprint specifies migration-only predeploy; confirm the active Render service command before deployment because historical live evidence records migration plus `prod-safe` seed.
 
 Use this as the first instruction packet for the next Codex run in `nakalasbakalas/sandbox-pms`. It is scoped to prevent another long, overloaded session. The repo already has launch-hardening evidence through 2026-06-15, but current launch sign-off still depends on proof-heavy operational work and a fresh green gate in the current checkout.
 

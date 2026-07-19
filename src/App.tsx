@@ -24,6 +24,7 @@ import { capabilityEnabled, useSystemCapabilities } from './hooks/use-system-cap
 
 const TodayView = lazy(() => import('./components/today/TodayView').then((module) => ({ default: module.TodayView })))
 const Board = lazy(() => import('./components/board/Board').then((module) => ({ default: module.Board })))
+const ServerBookingBoard = lazy(() => import('./components/board/ServerBookingBoard').then((module) => ({ default: module.ServerBookingBoard })))
 const RoomsView = lazy(() => import('./components/rooms/RoomsView').then((module) => ({ default: module.RoomsView })))
 const BookingInboxView = lazy(() => import('./components/booking-email/BookingInboxView').then((module) => ({ default: module.BookingInboxView })))
 const FrontDeskView = lazy(() => import('./components/front-desk/FrontDeskView').then((module) => ({ default: module.FrontDeskView })))
@@ -115,10 +116,18 @@ function CapabilityUnavailable({ title, detail }: { title: string; detail: strin
   )
 }
 
+const serverHiddenCommandIds = new Set([
+  'internal-comms',
+  'guest-communications',
+  'send-email',
+  'daily-summary',
+  'backup-data',
+])
+
 const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
   today: ['view:board', 'create:reservation', 'view:housekeeping'],
   board: ['view:board'],
-  rooms: ['view:board', 'view:housekeeping'],
+  rooms: ['view:board'],
   'booking-inbox': ['view:reservations', 'view:messaging'],
   'front-desk': ['view:board', 'check-in:guest', 'check-out:guest'],
   reservations: ['view:reservations'],
@@ -167,7 +176,7 @@ function AppRouter() {
     case 'today':
       return <TodayView />
     case 'board':
-      return SERVER_API_ENABLED ? <FrontDeskView /> : <Board />
+      return SERVER_API_ENABLED ? <ServerBookingBoard /> : <Board />
     case 'rooms':
       return <RoomsView />
     case 'booking-inbox':
@@ -216,6 +225,9 @@ function AppRouter() {
       }
       return <GuestCommunicationsView />
     case 'daily-summary':
+      if (SERVER_API_ENABLED) {
+        return <CapabilityUnavailable title="Daily Summary is unavailable" detail="This legacy report is browser-backed. Use Today and server-backed Reports for authoritative operational data." />
+      }
       return <DailySummaryReportView />
     case 'night-audit':
       return <NightAuditView />
@@ -228,6 +240,9 @@ function AppRouter() {
     case 'user-management':
       return <UserManagementView />
     case 'data-backup':
+      if (SERVER_API_ENABLED) {
+        return <CapabilityUnavailable title="Browser data backup is unavailable" detail="Server mode stores operational data in PostgreSQL. Browser export, import, and reset controls are disabled." />
+      }
       return <DataBackupView />
     case 'ops-chat':
       return <HotelOpsCommandCenterView tab="chat" />
@@ -283,7 +298,10 @@ function AuthenticatedAppContent() {
     const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false)
     const { navigate } = useNavigation()
     const { toggleDensity } = useDensity()
-    const commands = useMemo(() => createPMSCommands(navigate), [navigate])
+    const commands = useMemo(
+      () => createPMSCommands(navigate).filter((command) => !SERVER_API_ENABLED || !serverHiddenCommandIds.has(command.id)),
+      [navigate],
+    )
     const commandPalette = useCommandPalette(commands)
     
     const shortcuts = useMemo(
@@ -329,6 +347,10 @@ interface ServerDomainEvent {
 const legacyEventTypes: Record<string, DataSyncEvent['type']> = {
   RESERVATION_CREATED: 'RESERVATION_CREATED',
   RESERVATION_UPDATED: 'RESERVATION_MODIFIED',
+  RESERVATION_ROOM_ASSIGNED: 'RESERVATION_MODIFIED',
+  RESERVATION_GUEST_UPDATED: 'RESERVATION_MODIFIED',
+  GUEST_CREATED: 'RESERVATION_MODIFIED',
+  GUEST_UPDATED: 'RESERVATION_MODIFIED',
   RESERVATION_CANCELLED: 'RESERVATION_CANCELLED',
   RESERVATION_NO_SHOW: 'RESERVATION_CANCELLED',
   RESERVATION_CHECKED_IN: 'CHECK_IN',
@@ -341,7 +363,7 @@ const legacyEventTypes: Record<string, DataSyncEvent['type']> = {
 
 function DomainEventBridge() {
   const { hasAnyPermission } = useAuth()
-  const canSubscribe = SERVER_API_ENABLED && hasAnyPermission(['view:board'])
+  const canSubscribe = SERVER_API_ENABLED && hasAnyPermission(['view:board', 'view:cashier', 'view:guests'])
 
   useEffect(() => {
     if (!canSubscribe) return

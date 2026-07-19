@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { recordDomainEvent } from './domain-events.mjs'
 import { PmsValidationError } from './pms-domain.mjs'
+import { requireCreateIdempotencyKey } from './create-mutation-idempotency.mjs'
 
 const identifier = z.string().trim().min(1).max(200)
 const optionalIdentifier = identifier.nullable().optional()
@@ -65,6 +66,39 @@ function metadataOf(message) {
   return message?.metadata && typeof message.metadata === 'object' && !Array.isArray(message.metadata) ? message.metadata : {}
 }
 
+function messageMatchesInput(message, input) {
+  const metadata = metadataOf(message)
+  return (
+    message.channel === input.channel
+    && message.type === input.type
+    && message.recipientType === input.recipientType
+    && (message.recipientId || null) === (input.recipientId || null)
+    && (metadata.recipientName || '') === input.recipientName
+    && (metadata.recipientContact || '') === input.recipientContact
+    && (metadata.reservationId || null) === (input.reservationId || null)
+    && (metadata.roomNumber || null) === (input.roomNumber || null)
+    && (message.templateId || null) === (input.templateId || null)
+    && (message.subject || null) === (input.subject || null)
+    && message.body === input.body
+  )
+}
+
+function messageDraftIdempotencyKey(context, input) {
+  const requestKey = requireCreateIdempotencyKey(context?.idempotencyKey)
+  if (input.idempotencyKey && input.idempotencyKey !== requestKey) {
+    throw new PmsValidationError('The message idempotency key must match x-idempotency-key.', 409)
+  }
+  return requestKey
+}
+
+async function lockMessageDraft(tx, propertyId, idempotencyKey) {
+  if (typeof tx?.$queryRawUnsafe !== 'function') return
+  await tx.$queryRawUnsafe(
+    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text AS locked',
+    `message-draft:${propertyId}:${idempotencyKey}`,
+  )
+}
+
 export function publicMessage(message) {
   const metadata = metadataOf(message)
   return {
@@ -124,17 +158,16 @@ export async function listMessages(prisma, context) {
 export async function createMessageDraft(prisma, context, rawInput) {
   const resolved = contextFor(context)
   const input = parse(createMessageSchema, rawInput)
-  const idempotencyKey = input.idempotencyKey || String(context?.idempotencyKey || '').trim() || null
+  const idempotencyKey = messageDraftIdempotencyKey(context, input)
   return prisma.$transaction(async (tx) => {
+    await lockMessageDraft(tx, resolved.propertyId, idempotencyKey)
     await validateLinks(tx, resolved.propertyId, input)
-    if (idempotencyKey) {
-      const existing = await tx.message.findUnique({ where: { propertyId_idempotencyKey: { propertyId: resolved.propertyId, idempotencyKey } } })
-      if (existing) {
-        if (existing.channel !== input.channel || existing.recipientType !== input.recipientType || existing.body !== input.body) {
-          throw new PmsValidationError('This message idempotency key was already used for a different draft.', 409)
-        }
-        return publicMessage(existing)
+    const existing = await tx.message.findUnique({ where: { propertyId_idempotencyKey: { propertyId: resolved.propertyId, idempotencyKey } } })
+    if (existing) {
+      if (!messageMatchesInput(existing, input)) {
+        throw new PmsValidationError('This message idempotency key was already used for a different draft.', 409)
       }
+      return publicMessage(existing)
     }
     const message = await tx.message.create({ data: {
       propertyId: resolved.propertyId,

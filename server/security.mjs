@@ -52,6 +52,10 @@ function signPayload(payload) {
   return createHmac('sha256', getSessionSecret()).update(payload).digest('base64url')
 }
 
+export function deriveServerScopedSecret(scope) {
+  return createHmac('sha256', getSessionSecret()).update(String(scope || '')).digest('base64url')
+}
+
 export function createSessionToken(user, options = {}) {
   const now = Math.floor(Date.now() / 1000)
   const expiresAt = now + Math.floor((options.hours ?? DEFAULT_SESSION_HOURS) * 60 * 60)

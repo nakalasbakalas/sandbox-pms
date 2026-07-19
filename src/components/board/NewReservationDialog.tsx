@@ -12,11 +12,12 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { ArrowRight, Bed, Calendar as CalendarIcon, CurrencyCircleDollar, NotePencil, Plus, SpinnerGap, User } from '@phosphor-icons/react'
-import { format, addDays, startOfDay } from 'date-fns'
+import { format, addDays, parseISO, startOfDay } from 'date-fns'
 import { toast } from 'sonner'
 import type { BookingSource } from '@/types'
 import type { PropertySetup } from '@/types/onboarding'
-import { calculateStayPricing, nightsBetween, SANDBOX_HOTEL_RULES } from '@/lib/hotel/business-rules'
+import { calculateStayPricing, getBangkokDateKey, nightsBetween, SANDBOX_HOTEL_RULES } from '@/lib/hotel/business-rules'
+import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 
 export interface NewReservationGuest {
   id: string
@@ -63,26 +64,54 @@ export interface NewReservationData {
   createdAt: Date
   updatedAt: Date
   guest: NewReservationGuest
+  roomTypeCode: string
   roomTypeName: string
   roomNumber?: string
+}
+
+export interface ReservationRoomTypeInput {
+  id: string
+  code: string
+  name: string
+  baseRate?: number | string
+  baseRateSatang?: string
+  standardOcc?: number
+  baseOccupancy?: number
+  maxOccupancy?: number
+  extraGuestFee?: number
+  extraGuestFeeSatang?: string
+  childFee?: number
+  childFeeSatang?: string
+}
+
+export interface ReservationPropertyDisplay {
+  id?: string
+  currency?: string
+  extraGuestFee?: number
+  extraGuestFeeSatang?: string
+  childFee?: number
+  childFeeSatang?: string
+  taxRate?: number
+  taxRateBasisPoints?: number
 }
 
 interface NewReservationDialogProps {
   open: boolean
   onClose: () => void
   onSubmit: (reservation: NewReservationData) => void | Promise<void>
+  roomTypes?: ReservationRoomTypeInput[]
+  propertyDisplay?: ReservationPropertyDisplay
   prefilledData?: {
     roomId?: string
     roomNumber?: string
-    roomType?: 'TWIN' | 'DOUBLE'
+    roomType?: string
+    roomTypeId?: string
     checkIn?: Date
   } | null
 }
 
-type ReservationRoomTypeCode = 'TWIN' | 'DOUBLE'
-
 interface ReservationRoomTypeOption {
-  code: ReservationRoomTypeCode
+  code: string
   id: string
   name: string
   baseRate: number
@@ -97,7 +126,7 @@ interface ReservationFormState {
   lastName: string
   email: string
   phone: string
-  roomType: ReservationRoomTypeCode
+  roomTypeId: string
   adults: number
   children: number
   ratePerNight: number
@@ -131,7 +160,7 @@ function createInitialFormData(roomType?: ReservationRoomTypeOption): Reservatio
     lastName: '',
     email: '',
     phone: '',
-    roomType: roomType?.code || 'TWIN',
+    roomTypeId: roomType?.id || '',
     adults: 1,
     children: 0,
     ratePerNight: roomType?.baseRate || 0,
@@ -150,10 +179,67 @@ function parsePositiveInteger(value: string, fallback: number) {
   return Math.max(1, parseNonNegativeInteger(value, fallback))
 }
 
-export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }: NewReservationDialogProps) {
+function bahtFromSatang(value: string | undefined) {
+  if (!value || !/^-?\d+$/.test(value)) return undefined
+  const satang = Number(value)
+  return Number.isSafeInteger(satang) ? satang / 100 : undefined
+}
+
+export function NewReservationDialog(props: NewReservationDialogProps) {
+  if (SERVER_API_ENABLED) {
+    return <ServerConfiguredNewReservationDialog {...props} />
+  }
+
+  return <DemoConfiguredNewReservationDialog {...props} />
+}
+
+function ServerConfiguredNewReservationDialog(props: NewReservationDialogProps) {
+  const [remoteRoomTypes, setRemoteRoomTypes] = useState<ReservationRoomTypeInput[]>([])
+  const [remoteProperty, setRemoteProperty] = useState<ReservationPropertyDisplay>({})
+  const hasProvidedRoomTypes = Boolean(props.roomTypes?.length)
+
+  useEffect(() => {
+    if (!props.open || hasProvidedRoomTypes) return
+    const controller = new AbortController()
+    const from = getBangkokDateKey(new Date())
+    const to = format(addDays(parseISO(from), 1), 'yyyy-MM-dd')
+    const params = new URLSearchParams({ from, to })
+
+    void pmsApi<{
+      ok: true
+      data: {
+        roomTypes?: ReservationRoomTypeInput[]
+        propertyDisplay?: ReservationPropertyDisplay
+      }
+    }>(`/api/front-desk/board?${params.toString()}`, null, { signal: controller.signal })
+      .then((response) => {
+        setRemoteRoomTypes(response.data.roomTypes || [])
+        setRemoteProperty(response.data.propertyDisplay || {})
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setRemoteRoomTypes([])
+          toast.error(error instanceof Error ? error.message : 'Room types could not be loaded.')
+        }
+      })
+
+    return () => controller.abort()
+  }, [hasProvidedRoomTypes, props.open])
+
+  return (
+    <ConfiguredNewReservationDialog
+      {...props}
+      configuredRoomTypes={props.roomTypes || remoteRoomTypes}
+      configuredProperty={props.propertyDisplay || remoteProperty}
+      allowDemoFallback={false}
+    />
+  )
+}
+
+function DemoConfiguredNewReservationDialog(props: NewReservationDialogProps) {
   const [configuredRoomTypes] = useKV<Array<{
     id: string
-    code?: 'TWIN' | 'DOUBLE'
+    code?: string
     name: string
     baseRate: number
     baseOccupancy?: number
@@ -162,6 +248,35 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
     childFee?: number
   }>>('room-types-config', [])
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
+
+  return (
+    <ConfiguredNewReservationDialog
+      {...props}
+      configuredRoomTypes={configuredRoomTypes.map((roomType) => ({
+        ...roomType,
+        code: roomType.code || roomType.id,
+      }))}
+      configuredProperty={propertyData}
+      allowDemoFallback
+    />
+  )
+}
+
+interface ConfiguredNewReservationDialogProps extends NewReservationDialogProps {
+  configuredRoomTypes: ReservationRoomTypeInput[]
+  configuredProperty: ReservationPropertyDisplay
+  allowDemoFallback: boolean
+}
+
+function ConfiguredNewReservationDialog({
+  open,
+  onClose,
+  onSubmit,
+  prefilledData,
+  configuredRoomTypes,
+  configuredProperty,
+  allowDemoFallback,
+}: ConfiguredNewReservationDialogProps) {
   const [checkIn, setCheckIn] = useState<Date>(() => getDefaultCheckInDate())
   const [checkOut, setCheckOut] = useState<Date>(() => getDefaultCheckOutDate())
   const [checkInCalendarOpen, setCheckInCalendarOpen] = useState(false)
@@ -171,36 +286,53 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
 
   const roomTypeOptions = useMemo<ReservationRoomTypeOption[]>(() => {
     if (configuredRoomTypes.length === 0) {
+      if (!allowDemoFallback) return []
       return [
         { code: 'TWIN' as const, id: 'twin', name: 'Standard Twin', baseRate: 2000, baseOccupancy: 2, maxOccupancy: 2, extraGuestFee: 300, childFee: 300 },
         { code: 'DOUBLE' as const, id: 'double', name: 'Superior Double', baseRate: 2000, baseOccupancy: 2, maxOccupancy: 4, extraGuestFee: 300, childFee: 300 },
       ]
     }
 
-    return configuredRoomTypes.map((roomType, index) => {
-      const code = roomType.code || (roomType.name.toLowerCase().includes('double') || roomType.id.toLowerCase().includes('double') || index === 1 ? 'DOUBLE' : 'TWIN') as 'TWIN' | 'DOUBLE'
+    return configuredRoomTypes.map((roomType) => {
       return {
-        code,
+        code: roomType.code,
         id: roomType.id,
         name: roomType.name,
-        baseRate: Number(roomType.baseRate || 0),
-        baseOccupancy: Number(roomType.baseOccupancy || 2),
+        baseRate: bahtFromSatang(roomType.baseRateSatang) ?? Number(roomType.baseRate || 0),
+        baseOccupancy: Number(roomType.standardOcc || roomType.baseOccupancy || 2),
         maxOccupancy: Number(roomType.maxOccupancy || 2),
-        extraGuestFee: Number(roomType.extraGuestFee || 300),
-        childFee: Number(roomType.childFee || 300),
+        extraGuestFee: Number(
+          roomType.extraGuestFee
+          ?? bahtFromSatang(configuredProperty.extraGuestFeeSatang)
+          ?? configuredProperty.extraGuestFee
+          ?? (allowDemoFallback ? 300 : 0),
+        ),
+        childFee: Number(
+          roomType.childFee
+          ?? bahtFromSatang(configuredProperty.childFeeSatang)
+          ?? configuredProperty.childFee
+          ?? (allowDemoFallback ? 300 : 0),
+        ),
       }
     })
-  }, [configuredRoomTypes])
+  }, [
+    allowDemoFallback,
+    configuredProperty.childFee,
+    configuredProperty.childFeeSatang,
+    configuredProperty.extraGuestFee,
+    configuredProperty.extraGuestFeeSatang,
+    configuredRoomTypes,
+  ])
 
-  const selectedRoomType = roomTypeOptions.find((roomType) => roomType.code === formData.roomType) || roomTypeOptions[0]
-  const currency = propertyData?.currency?.trim() || 'THB'
+  const selectedRoomType = roomTypeOptions.find((roomType) => roomType.id === formData.roomTypeId) || roomTypeOptions[0]
+  const currency = configuredProperty.currency?.trim() || 'THB'
   const today = startOfDay(new Date())
 
-  const handleRoomTypeChange = (value: ReservationRoomTypeCode) => {
-    const nextRoomType = roomTypeOptions.find((roomType) => roomType.code === value)
+  const handleRoomTypeChange = (value: string) => {
+    const nextRoomType = roomTypeOptions.find((roomType) => roomType.id === value)
     setFormData((current) => ({
       ...current,
-      roomType: value,
+      roomTypeId: value,
       ratePerNight: nextRoomType?.baseRate || 0,
     }))
   }
@@ -229,13 +361,18 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
 
   useEffect(() => {
     if (prefilledData) {
-      if (prefilledData.roomType) {
-        const nextRoomType = roomTypeOptions.find((roomType) => roomType.code === prefilledData.roomType)
+      const preferredRoomType = prefilledData.roomTypeId || prefilledData.roomType
+      if (preferredRoomType) {
+        const nextRoomType = roomTypeOptions.find((roomType) => (
+          roomType.id === preferredRoomType || roomType.code === preferredRoomType
+        ))
+        if (nextRoomType) {
         setFormData(prev => ({
           ...prev,
-          roomType: prefilledData.roomType as ReservationRoomTypeCode,
-          ratePerNight: nextRoomType?.baseRate || 0,
+          roomTypeId: nextRoomType.id,
+          ratePerNight: nextRoomType.baseRate,
         }))
+        }
       }
       if (prefilledData.checkIn) {
         const nextCheckIn = startOfDay(prefilledData.checkIn)
@@ -249,12 +386,12 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
     if (!open) return
 
     setFormData((current) => {
-      const selected = roomTypeOptions.find((roomType) => roomType.code === current.roomType) || roomTypeOptions[0]
+      const selected = roomTypeOptions.find((roomType) => roomType.id === current.roomTypeId) || roomTypeOptions[0]
       if (!selected) return current
-      if (current.roomType === selected.code && current.ratePerNight > 0) return current
+      if (current.roomTypeId === selected.id && current.ratePerNight > 0) return current
       return {
         ...current,
-        roomType: selected.code,
+        roomTypeId: selected.id,
         ratePerNight: selected.baseRate,
       }
     })
@@ -351,7 +488,7 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
       id: `RES-${Date.now()}`,
       propertyId: 'prop-1',
       guestId: guest.id,
-      roomTypeId: selectedRoomType?.id || formData.roomType.toLowerCase(),
+      roomTypeId: selectedRoomType.id,
       assignedRoomId: prefilledData?.roomId || null,
       status: 'CONFIRMED',
       source: formData.source,
@@ -372,7 +509,8 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
       createdAt: new Date(),
       updatedAt: new Date(),
       guest,
-      roomTypeName: selectedRoomType?.name || formData.roomType,
+      roomTypeCode: selectedRoomType.code,
+      roomTypeName: selectedRoomType.name,
       roomNumber: prefilledData?.roomNumber,
     }
 
@@ -541,13 +679,13 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
                   <div className="grid gap-4 md:grid-cols-[minmax(180px,1.2fr)_110px_110px]">
                     <div>
                       <Label htmlFor="roomType" className="text-sm">Room Type</Label>
-                      <Select value={formData.roomType} onValueChange={(v) => handleRoomTypeChange(v as ReservationRoomTypeCode)}>
+                      <Select value={formData.roomTypeId} onValueChange={handleRoomTypeChange} disabled={roomTypeOptions.length === 0}>
                         <SelectTrigger id="roomType" className="mt-2 h-11 w-full text-sm">
                           <SelectValue placeholder="Select room type" />
                         </SelectTrigger>
                         <SelectContent>
                           {roomTypeOptions.map((roomType) => (
-                            <SelectItem key={roomType.id} value={roomType.code}>{roomType.name}</SelectItem>
+                            <SelectItem key={roomType.id} value={roomType.id}>{roomType.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>

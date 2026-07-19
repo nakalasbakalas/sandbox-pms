@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
@@ -96,6 +97,9 @@ export function PredictiveAnalyticsDashboard() {
   const forwardRange = useMemo(() => ({ from: today, to: addDays(today, horizonDays - 1) }), [today, horizonDays])
   const currentReports = useReportsData(currentRange)
   const forwardReports = useReportsData(forwardRange)
+  const isLoading = currentReports.isLoading || forwardReports.isLoading
+  const isUnavailable = currentReports.isUnavailable || forwardReports.isUnavailable
+  const unavailableMessage = currentReports.error || forwardReports.error || 'The PMS server did not return predictive analytics data. Browser-stored data is not shown in server mode.'
 
   const currentRevenue = currentReports.revenueData.summary
   const forwardRevenue = forwardReports.revenueData.summary
@@ -292,6 +296,29 @@ export function PredictiveAnalyticsDashboard() {
       bgColor: 'bg-orange-50',
     },
   ]
+
+  if (isLoading || isUnavailable) {
+    return (
+      <div className="flex h-full flex-col gap-3 overflow-auto p-4" {...(isUnavailable ? { role: 'alert' } : { 'aria-live': 'polite' })}>
+        <Card>
+          <CardHeader>
+            <CardTitle>{isUnavailable ? 'Predictive analytics unavailable' : 'Loading predictive analytics'}</CardTitle>
+            <CardDescription>
+              {isUnavailable ? unavailableMessage : 'Retrieving authoritative PMS reservation and revenue data.'}
+            </CardDescription>
+            {isUnavailable && (
+              <Button className="mt-3 w-fit" onClick={() => {
+                currentReports.refresh()
+                forwardReports.refresh()
+              }}>
+                Retry authoritative analytics
+              </Button>
+            )}
+          </CardHeader>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-auto p-4">
