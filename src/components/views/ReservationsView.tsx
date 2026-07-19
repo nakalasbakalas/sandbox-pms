@@ -31,7 +31,7 @@ import {
   User,
   Warning,
 } from '@phosphor-icons/react'
-import { format, isBefore, isToday, startOfDay } from 'date-fns'
+import { format, isBefore, isToday, parseISO, startOfDay } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { printReservationsList } from '@/lib/print-utils'
 import { toast } from 'sonner'
@@ -44,8 +44,9 @@ import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
 import { useNavigation } from '@/hooks/use-navigation'
 import { getBangkokDateKey, nightsBetween, reservationsOverlap } from '@/lib/hotel/business-rules'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
-import { createPmsIdempotencyKey, isDefinitivePmsApiError, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { isDefinitivePmsApiError, mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
+import { useServerBookingBoard } from '@/hooks/use-server-booking-board'
 import { emailReservationDocument, printReservationDocument } from '@/lib/reservation-document-actions'
 import type { BoardRoomCard } from '@/types/board'
 import type { BookingEmailEvent } from '@/types/booking-email'
@@ -152,6 +153,7 @@ interface GuestDirectoryRecord {
 }
 
 type ReservationTab = 'all' | 'arrivals' | 'departures' | 'upcoming' | 'in-house' | 'past'
+type ServerReservationSnapshotState = 'loading' | 'ready' | 'error'
 
 function isOccupied(room: BoardRoomCard) {
   return room.status === 'OCCUPIED_CLEAN' || room.status === 'OCCUPIED_DIRTY'
@@ -602,20 +604,131 @@ function reservationToDeparture(reservation: Reservation, room?: BoardRoomCard):
   }
 }
 
+type ReservationListSetter = (updater: Reservation[] | ((current: Reservation[]) => Reservation[])) => void
+type RoomListSetter = (updater: BoardRoomCard[] | ((current: BoardRoomCard[]) => BoardRoomCard[])) => void
+type UnassignedReservationSetter = (updater: UnassignedReservation[] | ((current: UnassignedReservation[]) => UnassignedReservation[])) => void
+type GuestDirectorySetter = (updater: GuestDirectoryRecord[] | ((current: GuestDirectoryRecord[]) => GuestDirectoryRecord[])) => void
+
+interface ReservationWorkspaceSource {
+  rooms: BoardRoomCard[]
+  setRooms: RoomListSetter
+  reservationsRaw: Reservation[]
+  setReservationsRaw: ReservationListSetter
+  canonicalReservationsRaw: Reservation[]
+  setCanonicalReservations: ReservationListSetter
+  unassignedReservations: UnassignedReservation[]
+  setUnassignedReservations: UnassignedReservationSetter
+  setGuestDirectory: GuestDirectorySetter
+  setCanonicalGuestDirectory: GuestDirectorySetter
+  serverReservations: Reservation[]
+  setServerReservations: ReservationListSetter
+  serverReservationState: ServerReservationSnapshotState
+  serverSnapshotError: string | null
+  refreshServerReservations: () => Promise<void>
+  refreshServerBoardRooms: () => void
+}
+
+const noOpReservationListSetter: ReservationListSetter = () => undefined
+const noOpRoomListSetter: RoomListSetter = () => undefined
+const noOpUnassignedReservationSetter: UnassignedReservationSetter = () => undefined
+const noOpGuestDirectorySetter: GuestDirectorySetter = () => undefined
+
+function serverToday() {
+  return startOfDay(parseISO(getBangkokDateKey(new Date())))
+}
+
 export function ReservationsView() {
+  return SERVER_API_ENABLED ? <ServerReservationsView /> : <DemoReservationsView />
+}
+
+function ServerReservationsView() {
+  const board = useServerBookingBoard(serverToday(), 14)
+  const [serverReservations, setServerReservations] = useState<Reservation[]>([])
+  const [reservationSnapshotState, setReservationSnapshotState] = useState<ServerReservationSnapshotState>('loading')
+  const [reservationSnapshotError, setReservationSnapshotError] = useState<string | null>(null)
+
+  const refreshServerReservations = useCallback(async () => {
+    setReservationSnapshotState('loading')
+    setReservationSnapshotError(null)
+    try {
+      const payload = await pmsApi<{ ok: true; data: any[] }>('/api/reservations', null)
+      setServerReservations(payload.data.map(reservationFromServer))
+      setReservationSnapshotState('ready')
+    } catch (error) {
+      setServerReservations([])
+      setReservationSnapshotState('error')
+      setReservationSnapshotError('The PMS reservation snapshot is unavailable. Retry before making reservation changes.')
+      throw error
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshServerReservations().catch(() => undefined)
+  }, [refreshServerReservations])
+
+  const serverReservationState: ServerReservationSnapshotState = reservationSnapshotState === 'error' || board.error
+    ? 'error'
+    : reservationSnapshotState === 'ready' && !board.loading && board.data
+      ? 'ready'
+      : 'loading'
+  const serverSnapshotError = reservationSnapshotError || (board.error
+    ? 'The PMS reservation or room snapshot is unavailable. Retry before making reservation changes.'
+    : null)
+  const rooms = useMemo(() => board.data ? mapServerBoardRooms(board.data) : [], [board.data])
+
+  return (
+    <ReservationsWorkspace
+      source={{
+        rooms,
+        setRooms: noOpRoomListSetter,
+        reservationsRaw: [],
+        setReservationsRaw: noOpReservationListSetter,
+        canonicalReservationsRaw: [],
+        setCanonicalReservations: noOpReservationListSetter,
+        unassignedReservations: [],
+        setUnassignedReservations: noOpUnassignedReservationSetter,
+        setGuestDirectory: noOpGuestDirectorySetter,
+        setCanonicalGuestDirectory: noOpGuestDirectorySetter,
+        serverReservations,
+        setServerReservations,
+        serverReservationState,
+        serverSnapshotError,
+        refreshServerReservations: async () => {
+          board.reload()
+          await refreshServerReservations()
+        },
+        refreshServerBoardRooms: board.reload,
+      }}
+    />
+  )
+}
+
+function ReservationsWorkspace({ source }: { source: ReservationWorkspaceSource }) {
   const pendingAssignmentAttempt = useRef<PendingReservationAttempt | null>(null)
   const pendingCheckInAttempt = useRef<PendingReservationAttempt | null>(null)
   const pendingCheckOutAttempt = useRef<PendingReservationAttempt | null>(null)
-  const [reservationsRaw, setReservationsRaw] = useKV<Reservation[]>('reservations-data', [])
-  const [canonicalReservationsRaw, setCanonicalReservations] = useKV<Reservation[]>('reservations', [])
-  const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
-  const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
-  const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
+  const pendingDirectAssignmentAttempt = useRef<PendingReservationAttempt | null>(null)
+  const {
+    rooms,
+    setRooms,
+    reservationsRaw,
+    setReservationsRaw,
+    canonicalReservationsRaw,
+    setCanonicalReservations,
+    unassignedReservations,
+    setUnassignedReservations,
+    setGuestDirectory,
+    setCanonicalGuestDirectory,
+    serverReservations,
+    setServerReservations,
+    serverReservationState,
+    serverSnapshotError,
+    refreshServerReservations,
+    refreshServerBoardRooms,
+  } = source
   const authToken = null
-  const { rooms, setRooms } = useRoomSync()
   const { user, hasPermission } = useAuth()
   const { navigate } = useNavigation()
-  const [serverReservations, setServerReservations] = useState<Reservation[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTab, setSelectedTab] = useState<ReservationTab>('all')
   const [showNewReservationDialog, setShowNewReservationDialog] = useState(false)
@@ -683,26 +796,39 @@ export function ReservationsView() {
     })
   }
 
-  const refreshServerReservations = useCallback(async () => {
-    if (!SERVER_API_ENABLED) return
-    const payload = await pmsApi<{ ok: true; data: any[] }>('/api/reservations', authToken)
-    setServerReservations(payload.data.map(reservationFromServer))
-  }, [authToken])
-
   useEffect(() => {
     if (!SERVER_API_ENABLED) return
-    let cancelled = false
-    void refreshServerReservations().catch((error) => {
-      if (!cancelled) toast.error(error instanceof Error ? error.message : 'Could not load reservations from the PMS API.')
-    })
-    return () => { cancelled = true }
+
+    let refreshTimer: number | undefined
+    const onDomainEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ aggregateType?: unknown }>).detail
+      const aggregateType = typeof detail?.aggregateType === 'string' ? detail.aggregateType.toLowerCase() : ''
+      if (!['reservation', 'payment', 'charge', 'folio'].includes(aggregateType)) return
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => {
+        void refreshServerReservations().catch(() => undefined)
+      }, 100)
+    }
+
+    window.addEventListener('pms:domain-event', onDomainEvent)
+    return () => {
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
+      window.removeEventListener('pms:domain-event', onDomainEvent)
+    }
   }, [refreshServerReservations])
 
   useEffect(() => {
     setManualRoomSelection('')
   }, [selectedReservation?.id])
+
+  const requireAuthoritativeSnapshot = () => {
+    if (!SERVER_API_ENABLED || serverReservationState === 'ready') return true
+    toast.error('Reservations are unavailable until the authoritative PMS snapshot is restored.')
+    return false
+  }
   
   const handleCreateReservation = async (reservation: NewReservationData) => {
+    if (!requireAuthoritativeSnapshot()) return
     if (!canCreateReservation) {
       toast.error('Reservation creation permission is required.')
       return
@@ -742,6 +868,7 @@ export function ReservationsView() {
       await durableAttemptKeys.confirmSuccess(attempt)
       const serverReservation = reservationFromServer(payload.data)
       setReservations((current) => [...current.filter((item) => item.id !== serverReservation.id), serverReservation])
+      await refreshServerReservations().catch(() => toast.warning('Reservation was created, but the authoritative list could not be refreshed.'))
       toast.success(payload.message || `Reservation ${serverReservation.confirmationNumber} created.`)
       setShowNewReservationDialog(false)
       return
@@ -819,6 +946,7 @@ export function ReservationsView() {
   }
 
   const openCheckIn = (reservation: Reservation, mode: 'express' | 'guided' = 'guided') => {
+    if (!requireAuthoritativeSnapshot()) return
     if (!canCheckIn) {
       toast.error('Check-in permission is required.')
       return
@@ -844,6 +972,7 @@ export function ReservationsView() {
   }
 
   const openCheckOut = (reservation: Reservation, mode: 'express' | 'guided' = 'guided') => {
+    if (!requireAuthoritativeSnapshot()) return
     if (!canCheckOut) {
       toast.error('Check-out permission is required.')
       return
@@ -861,6 +990,7 @@ export function ReservationsView() {
   }
 
   const markRoomReady = async (roomId: string) => {
+    if (!requireAuthoritativeSnapshot()) return
     if (!canEditRoomStatus) {
       toast.error('Room-status edit permission is required.')
       return
@@ -874,6 +1004,7 @@ export function ReservationsView() {
           method: 'POST',
           body: JSON.stringify({ status: 'INSPECTED', notes: 'Reservations quick action: room ready for check-in' }),
         })
+        refreshServerBoardRooms()
         toast.success(`Room ${room.number} marked clean/inspected.`)
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Room readiness update failed.')
@@ -897,6 +1028,7 @@ export function ReservationsView() {
   }
 
   const assignRoomToReservation = async (reservation: Reservation, roomId: string) => {
+    if (!requireAuthoritativeSnapshot()) return
     if (!canEditReservation) {
       toast.error('Reservation edit permission is required to assign a room.')
       return
@@ -912,19 +1044,53 @@ export function ReservationsView() {
     }
 
     if (SERVER_API_ENABLED) {
+      const expectedUpdatedAt = reservation.updatedAt.toISOString()
+      const signature = JSON.stringify({ reservationId: reservation.id, roomId, expectedUpdatedAt })
+      if (pendingDirectAssignmentAttempt.current?.signature !== signature) {
+        const requestBody = { roomId, expectedUpdatedAt }
+        pendingDirectAssignmentAttempt.current = {
+          signature,
+          descriptor: {
+            operation: 'reservation-assign-room',
+            entityId: reservation.id,
+            material: requestBody,
+          },
+          expectedUpdatedAt,
+          requestBody,
+        }
+      }
+      const assignmentAttempt = pendingDirectAssignmentAttempt.current
+      const idempotencyKey = await durableAttemptKeys.getOrCreate(assignmentAttempt.descriptor)
       try {
         const payload = await pmsApi<{ ok: true; data: any; message?: string }>(`/api/reservations/${reservation.id}/assign-room`, authToken, {
           method: 'POST',
-          headers: { 'x-idempotency-key': createPmsIdempotencyKey('reservations-assign-room') },
-          body: JSON.stringify({ roomId }),
+          headers: {
+            'x-idempotency-key': idempotencyKey,
+            'x-reservation-expected-updated-at': assignmentAttempt.expectedUpdatedAt!,
+          },
+          body: JSON.stringify(assignmentAttempt.requestBody),
         })
+        await durableAttemptKeys.confirmSuccess(assignmentAttempt.descriptor)
+        pendingDirectAssignmentAttempt.current = null
         const updated = reservationFromServer(payload.data)
         setReservations((current) => [...current.filter((item) => item.id !== updated.id), updated])
+        await refreshServerReservations().catch(() => toast.warning('Room assignment was saved, but the authoritative list could not be refreshed.'))
+        refreshServerBoardRooms()
         setSelectedReservation(updated)
         setManualRoomSelection('')
         toast.success(payload.message || `Room ${option.room.number} assigned.`)
       } catch (error) {
+        const definitiveRejection = isDefinitivePmsApiError(error)
+        if (definitiveRejection) {
+          await durableAttemptKeys.confirmSuccess(assignmentAttempt.descriptor)
+          pendingDirectAssignmentAttempt.current = null
+        }
+        await refreshServerReservations().catch(() => undefined)
+        refreshServerBoardRooms()
         toast.error(error instanceof Error ? error.message : 'Room assignment failed.')
+        if (!definitiveRejection) {
+          toast.message('Connection outcome is unknown. Retry the same assignment to reuse its protected request key.')
+        }
       }
       return
     }
@@ -966,6 +1132,7 @@ export function ReservationsView() {
   }
 
   const openStatusAction = (reservation: Reservation, action: 'cancel' | 'no-show') => {
+    if (!requireAuthoritativeSnapshot()) return
     if (!canCancelReservation) {
       toast.error('Reservation cancellation permission is required.')
       return
@@ -976,6 +1143,7 @@ export function ReservationsView() {
 
   const confirmStatusAction = async () => {
     if (!statusAction) return
+    if (!requireAuthoritativeSnapshot()) return
     if (!canCancelReservation) {
       toast.error('Reservation cancellation permission is required.')
       return
@@ -1009,6 +1177,7 @@ export function ReservationsView() {
         await durableAttemptKeys.confirmSuccess(attempt)
         const updated = reservationFromServer(payload.data)
         setReservations((current) => current.map((item) => item.id === updated.id ? updated : item))
+        await refreshServerReservations().catch(() => toast.warning('Reservation status was saved, but the authoritative list could not be refreshed.'))
         setSelectedReservation(updated)
         setStatusAction(null)
         setStatusActionReason('')
@@ -1047,6 +1216,7 @@ export function ReservationsView() {
 
   const confirmCheckIn = async (data: CheckInData) => {
     if (!selectedArrival) return
+    if (!requireAuthoritativeSnapshot()) return
     if (!canCheckIn) {
       toast.error('Check-in permission is required.')
       return
@@ -1242,6 +1412,7 @@ export function ReservationsView() {
 
   const confirmCheckOut = async (data: CheckOutData) => {
     if (!selectedDeparture) return
+    if (!requireAuthoritativeSnapshot()) return
     if (!canCheckOut) {
       toast.error('Check-out permission is required.')
       return
@@ -1520,9 +1691,35 @@ export function ReservationsView() {
     )
     toast.success('Opening print preview...')
   }
+
+  if (SERVER_API_ENABLED && serverReservationState !== 'ready') {
+    if (serverReservationState === 'loading') {
+      return (
+        <div className="flex min-h-full items-center justify-center bg-muted/20 p-6" data-testid="server-reservations-loading">
+          <div className="rounded-lg border bg-background px-4 py-3 text-sm text-muted-foreground shadow-sm">
+            Loading authoritative reservations…
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="flex min-h-full items-center justify-center bg-muted/20 p-6" data-testid="server-reservations-error">
+        <Card className="max-w-md p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold text-foreground">Reservations unavailable</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {serverSnapshotError || 'The PMS reservation snapshot is unavailable. Retry before making reservation changes.'}
+          </p>
+          <Button className="mt-4" variant="outline" onClick={() => void refreshServerReservations().catch(() => undefined)}>
+            Retry
+          </Button>
+        </Card>
+      </div>
+    )
+  }
   
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-background" data-testid={SERVER_API_ENABLED ? 'server-reservations-view' : undefined}>
       <div className="flex-none border-b border-border bg-card">
         <div className="px-6 py-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-4">
@@ -1907,6 +2104,38 @@ export function ReservationsView() {
         onConfirm={confirmCheckOut}
       />
     </div>
+  )
+}
+
+function DemoReservationsView() {
+  const [reservationsRaw, setReservationsRaw] = useKV<Reservation[]>('reservations-data', [])
+  const [canonicalReservationsRaw, setCanonicalReservations] = useKV<Reservation[]>('reservations', [])
+  const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
+  const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
+  const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
+  const { rooms, setRooms } = useRoomSync()
+
+  return (
+    <ReservationsWorkspace
+      source={{
+        rooms,
+        setRooms,
+        reservationsRaw,
+        setReservationsRaw,
+        canonicalReservationsRaw,
+        setCanonicalReservations,
+        unassignedReservations,
+        setUnassignedReservations,
+        setGuestDirectory,
+        setCanonicalGuestDirectory,
+        serverReservations: [],
+        setServerReservations: noOpReservationListSetter,
+        serverReservationState: 'ready',
+        serverSnapshotError: null,
+        refreshServerReservations: async () => undefined,
+        refreshServerBoardRooms: () => undefined,
+      }}
+    />
   )
 }
 

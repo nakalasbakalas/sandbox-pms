@@ -330,6 +330,24 @@ Acceptance requires:
 
 Run `npm.cmd run test:booking-board-operations`, `npm.cmd run test:reservation-commands`, guarded `npm.cmd run test:e2e:db`, and `npm.cmd run test:e2e:server`. These are engineering evidence, not credentialed front-desk staff acceptance.
 
+## Server Reservations Authority
+
+Run:
+
+```powershell
+npm.cmd run test:reservations-server-authority
+npm.cmd run test:e2e:server
+```
+
+Acceptance requires:
+
+- server-mode `/reservations` reads the authenticated reservation list and authenticated Board room/readiness snapshot only, and never projects browser-KV reservations, guests, rooms, or unassigned stays;
+- an initial reservation-list or Board-snapshot failure renders a persistent unavailable state with Retry, no server or browser rows, and no create affordance;
+- Retry replaces the unavailable state with the authoritative server list and room/readiness snapshot; a full reload shows that same persisted state; and
+- the server-mode route and backend registry both require `view:reservations`, while browser storage remains free of operational reservation/guest state after the proof.
+
+The browser proof is disposable-DB engineering evidence only. It does not replace staff workflow, restored-staging, provider, or owner acceptance.
+
 ## Accounting V2, Direct Booking, And Analyzers
 
 Run:

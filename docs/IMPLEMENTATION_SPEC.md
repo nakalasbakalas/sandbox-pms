@@ -336,6 +336,7 @@ Notifications are backend records:
 - The public event payload intentionally omits actor id and metadata. It contains only string id, event type, aggregate type/id, and occurrence time.
 - The React bridge maps the existing reservation, room, payment, and charge event types to client refresh signals. Rates, settings, housekeeping, and night-audit views still need explicit event/refetch handling where their UI requires immediate refresh.
 - In server mode, `/rooms` consumes the authenticated `/api/front-desk/board` snapshot for property display, room types, and rooms. It fails closed with an unavailable/retry state when that API fails; Spark/browser-KV room, property, and room-type data remains demo-only.
+- In server mode, `/reservations` consumes authenticated reservation-list data and the Board room/readiness snapshot only. It fails closed with an unavailable/retry state when either API authority fails; Spark/browser-KV reservation, guest, room, and unassigned-stay data remains demo-only, and no create affordance is rendered until both server snapshots are ready.
 
 ## Rate And Settings Services
 

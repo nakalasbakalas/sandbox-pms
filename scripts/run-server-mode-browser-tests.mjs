@@ -727,23 +727,41 @@ try {
   ), ['pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations', 'guests'])
   assert.match(injectedBoardStorage['pms-rooms'] || '', new RegExp(fakeBoardRoomNumber), 'the fake room fixture existed while the board ignored it')
   assert.match(injectedBoardStorage.reservations || '', new RegExp(fakeBoardGuest), 'the fake reservation fixture existed while the board ignored it')
+
+  // The same failed Board authority must also fail the Reservations workspace closed. Its
+  // server path owns both the reservation list and room/readiness projection, so it must not
+  // offer creation or render either persisted server rows or the browser fixture.
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/reservations'))
+  await page.goto('/reservations', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-reservations-error').waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: 'Reservations unavailable', exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(boardGuestOne, { exact: false }).count(), 0, 'a failed Board snapshot leaves Reservations without persisted server rows')
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'a failed Board snapshot leaves Reservations without fake browser reservation or guest data')
+  assert.equal(await page.getByRole('button', { name: 'New Reservation', exact: true }).count(), 0, 'a failed Board snapshot exposes no reservation create affordance')
+  const injectedBoardFailureReservationsStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations', 'guests', 'guests-data'])
+  assert.match(injectedBoardFailureReservationsStorage.reservations || '', new RegExp(fakeBoardGuest), 'the fake reservation fixture existed while failed server Reservations ignored it')
+  assert.match(injectedBoardFailureReservationsStorage.guests || '', new RegExp(fakeBoardGuest), 'the fake guest fixture existed while failed server Reservations ignored it')
   await page.unroute('**/api/front-desk/board?*')
-  await page.evaluate((keys) => {
-    for (const key of keys) window.localStorage.removeItem(key)
-  }, Object.keys(injectedBoardStorage))
-  await assertNoOperationalBrowserStorage('server-mode booking board before retry')
-  const boardRetry = page.getByRole('button', { name: 'Retry' })
-  if (await boardRetry.isVisible().catch(() => false)) {
-    await boardRetry.click({ timeout: 5_000 }).catch(() => undefined)
-  }
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByTestId('server-reservations-view').waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'Reservations retry restores only authoritative reservation and room/readiness snapshots')
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
   await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
   await page.getByText(`Room ${boardRoomNumber}`, { exact: true }).waitFor({ state: 'visible' })
   await page.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+  }, [...new Set([...Object.keys(injectedBoardStorage), ...Object.keys(injectedBoardFailureReservationsStorage)])])
+  await assertNoOperationalBrowserStorage('server-mode booking board before retry')
   await page.getByText(boardGuestTwo, { exact: true }).waitFor({ state: 'visible' })
   await page.getByText(boardGuestThree, { exact: false }).waitFor({ state: 'visible' })
   assert.equal(await page.getByText(boardGuestOne, { exact: true }).count(), 1, 'the first same-room stay renders as one distinct segment')
   assert.equal(await page.getByText(boardGuestTwo, { exact: true }).count(), 1, 'the second same-room stay renders as one distinct segment')
-  assert.equal(await page.getByRole('alert').count(), 0, 'retry replaces the truthful error with authoritative board data')
+  assert.equal(await page.getByRole('alert').count(), 0, 'restored authority replaces the truthful error with authoritative Board data')
   await assertNoOperationalBrowserStorage('server-mode booking board after retry')
 
   // Server-mode Rooms must not display browser-owned property, type, or room data when its
@@ -792,6 +810,49 @@ try {
     window.sessionStorage.removeItem('inject-local-operational-fixture')
   }, Object.keys(injectedRoomsStorage))
   await assertNoOperationalBrowserStorage('server-mode Rooms authority and reload')
+
+  // Server-mode Reservations must not display browser-owned reservation or guest data when
+  // the authenticated reservation list is unavailable. A successful retry and reload must
+  // show the persisted API list instead, with no create affordance before that authority exists.
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/reservations'))
+  await page.route('**/api/reservations', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Reservations authoritative snapshot failure.' }),
+    })
+  })
+  await page.goto('/reservations', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-reservations-error').waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: 'Reservations unavailable', exact: true }).waitFor({ state: 'visible' })
+  await page.getByText('The PMS reservation snapshot is unavailable. Retry before making reservation changes.', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(boardGuestOne, { exact: false }).count(), 0, 'an initial Reservations failure does not retain server rows')
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'Reservations ignores fake browser reservation and guest data during an authority failure')
+  assert.equal(await page.getByRole('button', { name: 'New Reservation', exact: true }).count(), 0, 'Reservations exposes no create affordance without an authoritative snapshot')
+  const injectedReservationsStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations', 'guests', 'guests-data'])
+  assert.match(injectedReservationsStorage['pms-rooms'] || '', new RegExp(fakeBoardRoomNumber), 'the fake room fixture existed while Reservations ignored it')
+  assert.match(injectedReservationsStorage.reservations || '', new RegExp(fakeBoardGuest), 'the fake reservation fixture existed while Reservations ignored it')
+  assert.match(injectedReservationsStorage.guests || '', new RegExp(fakeBoardGuest), 'the fake guest fixture existed while Reservations ignored it')
+  await page.unroute('**/api/reservations')
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByTestId('server-reservations-view').waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'Reservations retry remains free of fake browser reservation and guest data')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-reservations-view').waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'Reservations reload remains free of fake browser reservation and guest data')
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+  }, Object.keys(injectedReservationsStorage))
+  await assertNoOperationalBrowserStorage('server-mode Reservations authority and reload')
   await page.goto('/board', { waitUntil: 'domcontentloaded' })
   await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
 
