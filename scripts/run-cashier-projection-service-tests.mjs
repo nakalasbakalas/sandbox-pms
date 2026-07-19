@@ -144,14 +144,14 @@ assert.equal(cashierRoute?.tag, 'Finance')
 const source = await readFile(new URL('../server/index.mjs', import.meta.url), 'utf8')
 assert.match(source, /url\.pathname === '\/api\/cashier\/folios'[\s\S]{0,250}requirePermission\(user, 'view:cashier'\)/, 'cashier endpoint requires cashier view permission')
 assert.match(source, /url\.pathname === '\/api\/events'[\s\S]{0,180}requireOperationalEventPermission\(user\)/, 'event stream permits the dedicated board-or-cashier guard')
-assert.match(source, /if \(!canReadOperationalEvent\(actor, event\)\) continue/, 'event catch-up advances past but never emits identifiers outside the actor permission filter')
+assert.match(source, /if \(!canReadOperationalEvent\(liveContext\.actor, event\)\) continue/, 'event catch-up advances past but never emits identifiers outside the freshly revalidated actor permission filter')
 
 assert.doesNotThrow(() => requireOperationalEventPermission({ role: 'CAFE_STAFF' }), 'cafe staff can subscribe to property-filtered operational events')
 assert.throws(() => requireOperationalEventPermission({ role: 'UNKNOWN_ROLE' }), { statusCode: 403 }, 'staff without board or cashier permission cannot subscribe')
 assert.equal(canReadOperationalEvent({ role: 'CAFE_STAFF' }, { aggregateType: 'folio' }), true, 'cashier-only staff receive folio invalidations')
 assert.equal(canReadOperationalEvent({ role: 'CAFE_STAFF' }, { aggregateType: 'payment' }), true, 'cashier-only staff receive payment invalidations')
 assert.equal(canReadOperationalEvent({ role: 'CAFE_STAFF' }, { aggregateType: 'message' }), false, 'cashier-only staff cannot observe message identifiers')
-assert.equal(canReadOperationalEvent({ role: 'FRONT_DESK' }, { aggregateType: 'message' }), true, 'board viewers retain the existing property event stream')
+assert.equal(canReadOperationalEvent({ role: 'FRONT_DESK' }, { aggregateType: 'message' }), true, 'a role with messaging permission receives message invalidations')
 
 function contextPrisma(membership) {
   return {

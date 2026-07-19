@@ -2,7 +2,7 @@
 
 Checked command-based items reflect point-in-time evidence recorded in `docs/launch/evidence/` and `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, production data ownership, provider dashboards, or role-by-role manual sign-off may be closed only by proof or explicit owner accepted-risk sign-off.
 
-Current release posture (2026-07-17): **owner-accepted pilot / launch-hardening**. Full production sign-off is open. Apply the four evidence levels in `docs/launch/RELEASE_EVIDENCE_MODEL.md`; a checked historical item proves only the exact commit, environment, and capability named by its evidence. Owner-accepted risk is not staging or provider proof. PR #174 head `4c1659d` passed both required GitHub jobs on 2026-07-16, but the subsequent property-scope acceptance remediation must pass the same jobs at its own exact commit before merge.
+Current release posture (2026-07-19): **owner-accepted pilot / launch-hardening**. Full production sign-off is open. Apply the four evidence levels in `docs/launch/RELEASE_EVIDENCE_MODEL.md`; a checked historical item proves only the exact commit, environment, and capability named by its evidence. Owner-accepted risk is not staging or provider proof. Merged `main` is `9208621`. The validated product-stack head `c3f1dcd` passed both required GitHub jobs in PR #189, but the consolidated integration branch adds later authority and launch-truth corrections and must pass those jobs at its own exact commit before review or merge.
 
 ## Historical 2026-07-04 to 2026-07-07 Evidence Refresh
 

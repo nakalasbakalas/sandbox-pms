@@ -187,7 +187,7 @@ Acceptance requires:
 - `Guest`, `Payment`, `Charge`, and `AuditLog` have required property ownership after migration, and ambiguous/ownerless legacy backfills fail the migration rather than assigning guessed ownership;
 - `/api/openapi.json` reports OpenAPI 3.1 and matches the registered HTTP methods;
 - `/api/system/capabilities` reports `sourceOfTruth: server` without claiming provider proof;
-- `/api/events` requires session authentication, active membership, and `view:board`;
+- `/api/events` requires session authentication, active membership, and at least one of `view:board`, `view:cashier`, or `view:guests`; non-board sessions receive only the aggregate classes needed by their permitted workspace;
 - invalid or negative `Last-Event-ID`/`after` values return `400`;
 - catch-up is ordered, property-scoped, bounded, and uses string sequence ids; and
 - the public event payload omits metadata, actor identity, guest data, money details, and credentials.
@@ -345,6 +345,29 @@ Acceptance requires:
 - an initial reservation-list or Board-snapshot failure renders a persistent unavailable state with Retry, no server or browser rows, and no create affordance;
 - Retry replaces the unavailable state with the authoritative server list and room/readiness snapshot; a full reload shows that same persisted state; and
 - the server-mode route and backend registry both require `view:reservations`, while browser storage remains free of operational reservation/guest state after the proof.
+
+The browser proof is disposable-DB engineering evidence only. It does not replace staff workflow, restored-staging, provider, or owner acceptance.
+
+## Guest Directory, Front Desk, And Messaging Server Authority
+
+Run:
+
+```powershell
+npm.cmd run test:guests-server-authority
+npm.cmd run test:server-mode-kv
+npm.cmd run test:e2e:server
+```
+
+Acceptance requires:
+
+- server-mode Front Desk mounts no guest/reservation/room KV hooks or KV-backed room sync;
+- a failed Front Desk Board snapshot renders a full unavailable state with Retry and no readiness totals, arrival/departure rows, reservation controls, or assistant context until the authoritative Board is restored;
+- `/guests` renders a fail-closed unavailable state with Retry, no rows, zero-value metrics, or New Guest action when `GET /api/guests` fails;
+- successful guest creation survives reload, uses a property-scoped idempotency key, and `view:guests` without `edit:reservation` exposes neither the UI action nor an authorized POST;
+- real `RESERVATION_ROOM_ASSIGNED`, `RESERVATION_GUEST_UPDATED`, `GUEST_CREATED`, and `GUEST_UPDATED` events trigger authoritative reservation/guest/folio refetches without applying event payloads directly; the guest-directory-only event-access policy permits guest/reservation invalidations but denies room and finance aggregates;
+- `/messaging` renders a fail-closed unavailable state when either messages or templates cannot load, exposes no metrics or New Message action, and Retry restores server state; and
+- `view:messaging` without `send:guest-messages` is read-only in both the UI and API; and
+- an authorized message draft requires one matching header/body idempotency key, is persisted, displayed in the Drafts tab, and remains visible after reload without browser message/template storage. A lost response followed by reload and unchanged recomposition reuses one opaque key, creates one server row, and stores no recipient, contact, or body material in the retry record; simultaneous same-key PostgreSQL writes also return that one row.
 
 The browser proof is disposable-DB engineering evidence only. It does not replace staff workflow, restored-staging, provider, or owner acceptance.
 

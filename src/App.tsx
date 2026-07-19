@@ -347,6 +347,10 @@ interface ServerDomainEvent {
 const legacyEventTypes: Record<string, DataSyncEvent['type']> = {
   RESERVATION_CREATED: 'RESERVATION_CREATED',
   RESERVATION_UPDATED: 'RESERVATION_MODIFIED',
+  RESERVATION_ROOM_ASSIGNED: 'RESERVATION_MODIFIED',
+  RESERVATION_GUEST_UPDATED: 'RESERVATION_MODIFIED',
+  GUEST_CREATED: 'RESERVATION_MODIFIED',
+  GUEST_UPDATED: 'RESERVATION_MODIFIED',
   RESERVATION_CANCELLED: 'RESERVATION_CANCELLED',
   RESERVATION_NO_SHOW: 'RESERVATION_CANCELLED',
   RESERVATION_CHECKED_IN: 'CHECK_IN',
@@ -359,7 +363,7 @@ const legacyEventTypes: Record<string, DataSyncEvent['type']> = {
 
 function DomainEventBridge() {
   const { hasAnyPermission } = useAuth()
-  const canSubscribe = SERVER_API_ENABLED && hasAnyPermission(['view:board', 'view:cashier'])
+  const canSubscribe = SERVER_API_ENABLED && hasAnyPermission(['view:board', 'view:cashier', 'view:guests'])
 
   useEffect(() => {
     if (!canSubscribe) return

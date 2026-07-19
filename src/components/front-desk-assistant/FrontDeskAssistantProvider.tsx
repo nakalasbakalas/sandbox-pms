@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { toast } from 'sonner'
 import { Sparkle, ArrowClockwise, Warning, CheckCircle, PaperPlaneTilt, Database, Clock, ListMagnifyingGlass } from '@phosphor-icons/react'
@@ -141,6 +141,16 @@ interface FrontDeskAssistantRuntimeProps {
   onRequestHandled: (requestId: number) => void
 }
 
+type AssistantRuntimeSource = {
+  isServer: boolean
+  rooms: BoardRoomCard[]
+  fallbackReservations: AssistantReservation[]
+  board: ServerBoard | null
+  boardState: 'loading' | 'ready' | 'error'
+  boardError: string | null
+  refreshBoard: () => Promise<void>
+}
+
 export function FrontDeskAssistantProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [request, setRequest] = useState<PendingAssistantRequest | null>(null)
@@ -177,62 +187,113 @@ export function FrontDeskAssistantProvider({ children }: { children: ReactNode }
   )
 }
 
-function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandled }: FrontDeskAssistantRuntimeProps) {
+function FrontDeskAssistantRuntime(props: FrontDeskAssistantRuntimeProps) {
+  return SERVER_API_ENABLED
+    ? <ServerFrontDeskAssistantRuntime {...props} />
+    : <DemoFrontDeskAssistantRuntime {...props} />
+}
+
+function ServerFrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandled }: FrontDeskAssistantRuntimeProps) {
+  const [board, setBoard] = useState<ServerBoard | null>(null)
+  const [boardState, setBoardState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [boardError, setBoardError] = useState<string | null>(null)
+  const refreshGeneration = useRef(0)
+
+  const refreshBoard = useCallback(async () => {
+    const generation = ++refreshGeneration.current
+    setBoardState('loading')
+    setBoardError(null)
+    try {
+      const payload = await pmsApi<{ ok: true; data: ServerBoard }>('/api/front-desk/board', null)
+      if (generation !== refreshGeneration.current) return
+      setBoard(payload.data)
+      setBoardState('ready')
+    } catch (error) {
+      if (generation !== refreshGeneration.current) return
+      setBoard(null)
+      setBoardState('error')
+      setBoardError(error instanceof Error ? error.message : 'Live PMS board is unavailable.')
+      throw error
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    void refreshBoard().catch(() => undefined)
+    return () => {
+      refreshGeneration.current += 1
+    }
+  }, [open, refreshBoard])
+
+  return (
+    <FrontDeskAssistantContent
+      open={open}
+      onOpenChange={onOpenChange}
+      request={request}
+      onRequestHandled={onRequestHandled}
+      source={{
+        isServer: true,
+        rooms: [],
+        fallbackReservations: [],
+        board,
+        boardState,
+        boardError,
+        refreshBoard,
+      }}
+    />
+  )
+}
+
+function DemoFrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandled }: FrontDeskAssistantRuntimeProps) {
+  const [unassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
+  const [localReservations] = useKV<any[]>('reservations-data', [])
+  const { rooms } = useRoomSync({ serverSync: false })
+  const refreshBoard = useCallback(async () => undefined, [])
+  const fallbackReservations = useMemo(() => [
+    ...(localReservations || []).map(localReservationToAssistant),
+    ...(unassignedReservations || []).map(unassignedToAssistant),
+  ], [localReservations, unassignedReservations])
+
+  return (
+    <FrontDeskAssistantContent
+      open={open}
+      onOpenChange={onOpenChange}
+      request={request}
+      onRequestHandled={onRequestHandled}
+      source={{
+        isServer: false,
+        rooms,
+        fallbackReservations,
+        board: null,
+        boardState: 'ready',
+        boardError: null,
+        refreshBoard,
+      }}
+    />
+  )
+}
+
+function FrontDeskAssistantContent({ open, onOpenChange, request, onRequestHandled, source }: FrontDeskAssistantRuntimeProps & { source: AssistantRuntimeSource }) {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<AssistantMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [context, setContext] = useState<OpenAssistantOptions>({})
-  const [serverBoard, setServerBoard] = useState<ServerBoard | null>(null)
-  const [serverBoardState, setServerBoardState] = useState<'loading' | 'ready' | 'error'>(SERVER_API_ENABLED ? 'loading' : 'ready')
-  const [serverBoardError, setServerBoardError] = useState<string | null>(null)
-  const authToken = null
-  const [unassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
-  const [localReservations] = useKV<any[]>('reservations-data', [])
   const { user, hasPermission } = useAuth()
   const { currentRoute, navigate } = useNavigation()
-  const { rooms, setRooms } = useRoomSync({ serverSync: false })
-
-  const refreshServerBoard = useCallback(async () => {
-    if (!SERVER_API_ENABLED) return
-    setServerBoardState('loading')
-    setServerBoardError(null)
-    try {
-      const payload = await pmsApi<{ ok: true; data: ServerBoard }>('/api/front-desk/board', authToken)
-      setServerBoard(payload.data)
-      setRooms(mapServerBoardRooms(payload.data))
-      setServerBoardState('ready')
-    } catch (error) {
-      setServerBoard(null)
-      setServerBoardState('error')
-      setServerBoardError(error instanceof Error ? error.message : 'Live PMS board is unavailable.')
-      throw error
-    }
-  }, [authToken, setRooms])
-
-  useEffect(() => {
-    if (!open) return
-    void refreshServerBoard().catch(() => undefined)
-  }, [open, refreshServerBoard])
 
   const snapshot = useMemo<AssistantSnapshot>(() => {
-    const serverReservations = (serverBoard?.reservations || []).map(normalizeServerReservation)
-    const fallbackReservations = SERVER_API_ENABLED
-      ? []
-      : [
-          ...(localReservations || []).map(localReservationToAssistant),
-          ...(unassignedReservations || []).map(unassignedToAssistant),
-        ]
+    const serverReservations = (source.board?.reservations || []).map(normalizeServerReservation)
     return buildSnapshotFromData({
       hotelDateKey: getBangkokDateKey(new Date()),
-      rooms: SERVER_API_ENABLED ? (serverBoard ? mapServerBoardRooms(serverBoard) : []) : rooms,
-      reservations: [...serverReservations, ...fallbackReservations],
+      rooms: source.isServer ? (source.board ? mapServerBoardRooms(source.board) : []) : source.rooms,
+      reservations: source.isServer ? serverReservations : source.fallbackReservations,
       currentRoute,
       currentRoomNumber: context.roomNumber,
       currentReservationId: context.reservationId,
       user: user ? { id: user.id, role: user.role, displayName: user.displayName } : null,
     })
-  }, [context.reservationId, context.roomNumber, currentRoute, localReservations, rooms, serverBoard, unassignedReservations, user])
+  }, [context.reservationId, context.roomNumber, currentRoute, source.board, source.fallbackReservations, source.isServer, source.rooms, user])
 
   const addAssistantAnswer = useCallback((prompt: string, answer: AssistantAnswer) => {
     const now = new Date().toISOString()
@@ -268,10 +329,10 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
     if (!trimmed) return
     onOpenChange(true)
     setError(null)
-    if (SERVER_API_ENABLED && serverBoardState !== 'ready') {
-      const unavailable = serverBoardState === 'loading'
+    if (source.isServer && source.boardState !== 'ready') {
+      const unavailable = source.boardState === 'loading'
         ? 'Live PMS records are still loading. Please wait for the board to finish loading before asking about guests or rooms.'
-        : `Live PMS records are unavailable${serverBoardError ? `: ${serverBoardError}` : ''}. Retry the live board before relying on this assistant.`
+        : `Live PMS records are unavailable${source.boardError ? `: ${source.boardError}` : ''}. Retry the live board before relying on this assistant.`
       addAssistantAnswer(trimmed, {
         id: `live-pms-unavailable-${Date.now()}`,
         intent: 'HELP',
@@ -312,15 +373,15 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
         setLoading(false)
       }
     }, 120)
-  }, [addAssistantAnswer, context, onOpenChange, serverBoardError, serverBoardState, snapshot])
+  }, [addAssistantAnswer, context, onOpenChange, snapshot, source.boardError, source.boardState, source.isServer])
 
   useEffect(() => {
     if (!request) return
-    if (SERVER_API_ENABLED && serverBoardState === 'loading') return
+    if (source.isServer && source.boardState === 'loading') return
     setContext((current) => ({ ...current, ...request }))
     if (request.prompt) submitAssistantPrompt(request.prompt, request)
     onRequestHandled(request.requestId)
-  }, [onRequestHandled, request, serverBoardState, submitAssistantPrompt])
+  }, [onRequestHandled, request, source.boardState, source.isServer, submitAssistantPrompt])
 
   const executeAction = useCallback((actionToRun: AssistantAction) => {
     if (actionToRun.disabled) return
@@ -375,7 +436,7 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
               <Sparkle size={17} weight="duotone" className="text-blue-600" />
               Front Desk AI
               <Badge variant="outline" className="ml-auto text-[10px]">
-                {SERVER_API_ENABLED ? (serverBoardState === 'ready' ? 'Live PMS' : serverBoardState === 'loading' ? 'Loading PMS' : 'PMS unavailable') : 'Demo PMS'}
+                {source.isServer ? (source.boardState === 'ready' ? 'Live PMS' : source.boardState === 'loading' ? 'Loading PMS' : 'PMS unavailable') : 'Demo PMS'}
               </Badge>
             </SheetTitle>
             <SheetDescription className="sr-only">
@@ -391,11 +452,11 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
             </div>
           </SheetHeader>
 
-          {SERVER_API_ENABLED && serverBoardState !== 'ready' && (
+          {source.isServer && source.boardState !== 'ready' && (
             <div className="flex items-center justify-between gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900" role="status">
-              <span>{serverBoardState === 'loading' ? 'Loading live PMS records. Guest context is unavailable.' : `Live PMS unavailable${serverBoardError ? `: ${serverBoardError}` : ''}`}</span>
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void refreshServerBoard().catch(() => undefined)} disabled={serverBoardState === 'loading'}>
-                {serverBoardState === 'loading' ? 'Loading…' : 'Retry'}
+              <span>{source.boardState === 'loading' ? 'Loading live PMS records. Guest context is unavailable.' : `Live PMS unavailable${source.boardError ? `: ${source.boardError}` : ''}`}</span>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void source.refreshBoard().catch(() => undefined)} disabled={source.boardState === 'loading'}>
+                {source.boardState === 'loading' ? 'Loading…' : 'Retry'}
               </Button>
             </div>
           )}

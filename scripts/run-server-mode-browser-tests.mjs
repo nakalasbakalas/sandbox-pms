@@ -24,6 +24,8 @@ const channelViewerUsername = `server-browser-channel-viewer-${runId}`
 const channelViewerPassword = `Server-Browser-Channel-Viewer-${runId}-Pass!`
 const cafeCashierUsername = `server-browser-cafe-cashier-${runId}`
 const cafeCashierPassword = `Server-Browser-Cafe-Cashier-${runId}-Pass!`
+const guestViewerUsername = `server-browser-guest-viewer-${runId}`
+const guestViewerPassword = `Server-Browser-Guest-Viewer-${runId}-Pass!`
 const taskTitle = `Server reload task ${runId}`
 const ruleName = `Server reload rate ${runId}`
 const boardRoomNumber = `B-${runId.slice(0, 8)}`
@@ -34,6 +36,7 @@ const boardGuestThree = `Board Charlie ${runId}`
 const cashierMutationGuest = `Cashier Mutation ${runId}`
 const fakeBoardRoomNumber = `LOCAL-${runId}`
 const fakeBoardGuest = `Browser Shadow ${runId}`
+const fakeGuestDirectoryName = `Browser Guest Directory Shadow ${runId}`
 const fakeChannelName = `Browser Fake Channel ${runId}`
 const fakeRoomsPropertyName = `Browser Rooms Property ${runId}`
 const fakeRoomsTypeName = `Browser Rooms Type ${runId}`
@@ -125,6 +128,45 @@ function boundedSignal(signal, label, timeoutMs = 15_000) {
   })
 }
 
+async function armDomainEventProbe(page, expected) {
+  await page.evaluate((target) => {
+    const previous = window.__pmsDomainEventProbe
+    if (previous?.onEvent) window.removeEventListener('pms:domain-event', previous.onEvent)
+    const seenAtById = {}
+    const onEvent = (event) => {
+      const detail = event.detail || {}
+      if (
+        detail.type === target.type
+        && detail.aggregateType === target.aggregateType
+        && detail.aggregateId === target.aggregateId
+      ) {
+        seenAtById[String(detail.id)] = Date.now()
+      }
+    }
+    window.__pmsDomainEventProbe = { target, seenAtById, onEvent }
+    window.addEventListener('pms:domain-event', onEvent)
+  }, expected)
+}
+
+async function waitForDomainEventProbe(page, expected) {
+  await page.waitForFunction((target) => {
+    const probe = window.__pmsDomainEventProbe
+    return Boolean(
+      probe?.target?.type === target.type
+      && probe.target?.aggregateType === target.aggregateType
+      && probe.target?.aggregateId === target.aggregateId
+      && probe.seenAtById?.[String(target.id)],
+    )
+  }, expected)
+  return page.evaluate((target) => {
+    const probe = window.__pmsDomainEventProbe
+    const seenAt = probe?.seenAtById?.[String(target.id)]
+    if (probe?.onEvent) window.removeEventListener('pms:domain-event', probe.onEvent)
+    window.__pmsDomainEventProbe = undefined
+    return seenAt
+  }, expected)
+}
+
 async function waitForHttp(url, server) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (server.child.exitCode !== null) throw new Error(`PMS server exited early.\n${server.output()}`)
@@ -180,6 +222,32 @@ async function readNextSseEvent({ url, cookie, lastEventId, trigger }) {
         const data = frame.match(/(?:^|\n)data: (.+)$/m)?.[1]
         if (id && data) return { id, data: JSON.parse(data), raw: frame }
       }
+    }
+  } finally {
+    clearTimeout(timeout)
+    controller.abort()
+  }
+}
+
+async function readSseAccessRevoked({ url, cookie, lastEventId, trigger }) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15_000)
+  try {
+    const response = await fetch(`${url}/api/events?after=${encodeURIComponent(String(lastEventId))}`, {
+      headers: { cookie },
+      signal: controller.signal,
+    })
+    assert.equal(response.status, 200, 'authorized SSE connection opens before membership revocation')
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    await trigger()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) throw new Error('SSE stream closed without an access-revoked frame.')
+      buffer += decoder.decode(value, { stream: true })
+      if (buffer.includes('event: access_revoked') && buffer.includes('"reconnect":true')) return
+      if (buffer.length > 20_000) buffer = buffer.slice(-20_000)
     }
   } finally {
     clearTimeout(timeout)
@@ -260,6 +328,18 @@ await prisma.user.create({
     lastName: 'Cashier',
     role: 'ADMIN',
     propertyMemberships: { create: { propertyId: property.id, role: 'CAFE_STAFF', active: true } },
+  },
+})
+
+await prisma.user.create({
+  data: {
+    username: guestViewerUsername,
+    email: `${guestViewerUsername}@example.test`,
+    passwordHash: await createPasswordHash(guestViewerPassword),
+    firstName: 'Guest',
+    lastName: 'Viewer',
+    role: 'ADMIN',
+    propertyMemberships: { create: { propertyId: property.id, role: 'CASHIER', active: true } },
   },
 })
 
@@ -363,13 +443,14 @@ try {
   await authRaceContext.close()
 
   const context = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1440, height: 1000 } })
-  await context.addInitScript(({ fakeRoomNumber, fakeGuestName, fakeChannel, fakePropertyName, fakeRoomTypeName, fakeRoomsNumber, fakeCashierGuestName, fakeCashierFolio }) => {
+  await context.addInitScript(({ fakeRoomNumber, fakeGuestName, fakeGuestDirectoryName, fakeChannel, fakePropertyName, fakeRoomTypeName, fakeRoomsNumber, fakeCashierGuestName, fakeCashierFolio }) => {
     window.localStorage.clear()
     const requestedFixturePath = window.sessionStorage.getItem('inject-local-operational-fixture')
     const isBoardFixture = window.location.pathname === '/board'
     const isRoomsFixture = window.location.pathname === '/rooms' && requestedFixturePath === '/rooms'
+    const isGuestsFixture = window.location.pathname === '/guests' && requestedFixturePath === '/guests'
     const isCashierFixture = window.location.pathname === '/cashier' && requestedFixturePath === '/cashier'
-    if (!isBoardFixture && !isRoomsFixture && !isCashierFixture && window.location.pathname !== requestedFixturePath) return
+    if (!isBoardFixture && !isRoomsFixture && !isGuestsFixture && !isCashierFixture && window.location.pathname !== requestedFixturePath) return
     if (isRoomsFixture) {
       window.localStorage.setItem('pms-rooms', JSON.stringify([{
         roomId: 'browser-fake-rooms-room',
@@ -388,6 +469,18 @@ try {
       window.localStorage.setItem('room-types-config', JSON.stringify([{
         id: 'browser-fake-rooms-type', code: 'BROWSER_LOCAL', name: fakeRoomTypeName,
       }]))
+      return
+    }
+    if (isGuestsFixture) {
+      const guest = {
+        id: 'browser-fake-guest-directory-profile',
+        firstName: 'Browser Guest Directory',
+        lastName: 'Shadow',
+        fullName: fakeGuestDirectoryName,
+        email: 'browser-guest-directory-shadow@example.test',
+      }
+      window.localStorage.setItem('guests', JSON.stringify([guest]))
+      window.localStorage.setItem('guests-data', JSON.stringify([guest]))
       return
     }
     if (isCashierFixture) {
@@ -484,6 +577,7 @@ try {
   }, {
     fakeRoomNumber: fakeBoardRoomNumber,
     fakeGuestName: fakeBoardGuest,
+    fakeGuestDirectoryName,
     fakeChannel: fakeChannelName,
     fakePropertyName: fakeRoomsPropertyName,
     fakeRoomTypeName: fakeRoomsTypeName,
@@ -909,11 +1003,135 @@ try {
   await page.getByTestId('server-reservations-view').waitFor({ state: 'visible' })
   await page.getByText(boardGuestOne, { exact: false }).waitFor({ state: 'visible' })
   assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'Reservations reload remains free of fake browser reservation and guest data')
+
+  // Guest Directory must fail closed when its authenticated snapshot is unavailable,
+  // recover through Retry, persist an authorized create across reload, and invalidate
+  // from the real named reservation event bridge without mounting guest KV state.
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/guests'))
+  await page.route('**/api/guests', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Guest Directory authoritative snapshot failure.' }),
+    })
+  })
+  await page.goto('/guests', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-guests-error').waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: 'Guest Directory unavailable', exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText('Total Guests', { exact: true }).count(), 0, 'Guest Directory failure renders no zero-value operational statistics')
+  assert.equal(await page.getByRole('button', { name: 'New Guest', exact: true }).count(), 0, 'Guest Directory failure exposes no create affordance')
+  assert.equal(await page.getByText(fakeGuestDirectoryName, { exact: false }).count(), 0, 'Guest Directory failure ignores browser-owned guest data')
+  const injectedGuestStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['guests', 'guests-data'])
+  assert.match(injectedGuestStorage.guests || '', new RegExp(fakeGuestDirectoryName), 'the canonical fake guest fixture existed while Guest Directory ignored it')
+  assert.match(injectedGuestStorage['guests-data'] || '', new RegExp(fakeGuestDirectoryName), 'the compatibility fake guest fixture existed while Guest Directory ignored it')
+  await page.unroute('**/api/guests')
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByTestId('server-guests-view').waitFor({ state: 'visible' })
+  await page.getByText(`${browserGuestCreateInput.firstName} ${browserGuestCreateInput.lastName}`, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeGuestDirectoryName, { exact: false }).count(), 0, 'Guest Directory retry restores only authoritative profiles')
+
+  const createdGuestFirstName = `Reload Guest ${runId}`
+  const createdGuestLastName = 'Proof'
+  await page.getByRole('button', { name: 'New Guest', exact: true }).click()
+  await page.getByRole('heading', { name: 'New guest profile', exact: true }).waitFor({ state: 'visible' })
+  await page.getByLabel('First name', { exact: true }).fill(createdGuestFirstName)
+  await page.getByLabel('Last name', { exact: true }).fill(createdGuestLastName)
+  const createdGuestResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/guests') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Create guest', exact: true }).click()
+  const createdGuestResult = await createdGuestResponse
+  assert.equal(createdGuestResult.status(), 201, 'authorized Guest Directory create persists through the server')
+  const createdGuestAttemptKey = createdGuestResult.request().headers()['x-idempotency-key']
+  await page.getByRole('dialog').getByText(`${createdGuestFirstName} ${createdGuestLastName}`, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(
+    await page.evaluate((attemptKey) => Object.values(window.sessionStorage).some((value) => value.includes(attemptKey)), createdGuestAttemptKey),
+    false,
+    'confirmed Guest Directory creation clears its opaque reload-safe attempt record',
+  )
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-guests-view').waitFor({ state: 'visible' })
+  await page.getByTestId('server-guests-view').getByText(`${createdGuestFirstName} ${createdGuestLastName}`, { exact: true }).first().waitFor({ state: 'visible' })
+
+  let guestDirectoryReads = 0
+  await page.route('**/api/guests', async (route) => {
+    if (route.request().method() === 'GET') guestDirectoryReads += 1
+    await route.continue()
+  })
+  await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    eventType: 'RESERVATION_GUEST_UPDATED',
+    aggregateType: 'reservation',
+    aggregateId: boardReservationOne.data.id,
+  })
+  for (let attempt = 0; attempt < 20 && guestDirectoryReads === 0; attempt += 1) {
+    await page.waitForTimeout(250)
+  }
+  assert.ok(guestDirectoryReads > 0, 'Guest Directory refetches after the real named reservation guest-update event')
+  await page.unroute('**/api/guests')
+
+  let releaseStaleGuestRefresh
+  let resolveStaleGuestRefreshStarted
+  const staleGuestRefreshRelease = new Promise((resolveRelease) => {
+    releaseStaleGuestRefresh = resolveRelease
+  })
+  const staleGuestRefreshStarted = new Promise((resolveStarted) => {
+    resolveStaleGuestRefreshStarted = resolveStarted
+  })
+  let guestRefreshSequence = 0
+  await page.route('**/api/guests', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    guestRefreshSequence += 1
+    if (guestRefreshSequence === 1) {
+      resolveStaleGuestRefreshStarted()
+      await staleGuestRefreshRelease
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Injected superseded Guest Directory failure.' }),
+      })
+      return
+    }
+    await route.continue()
+  })
+  await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    eventType: 'RESERVATION_GUEST_UPDATED',
+    aggregateType: 'reservation',
+    aggregateId: boardReservationOne.data.id,
+  })
+  await boundedSignal(staleGuestRefreshStarted, 'Delayed Guest Directory refresh interception')
+  const newerGuestRefresh = page.waitForResponse((response) =>
+    response.url().endsWith('/api/guests') && response.request().method() === 'GET' && response.status() === 200,
+  )
+  await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    eventType: 'RESERVATION_GUEST_UPDATED',
+    aggregateType: 'reservation',
+    aggregateId: boardReservationTwo.data.id,
+  })
+  await boundedSignal(newerGuestRefresh, 'Newer Guest Directory refresh')
+  releaseStaleGuestRefresh()
+  await page.waitForTimeout(250)
+  await page.getByTestId('server-guests-view').waitFor({ state: 'visible' })
+  assert.equal(await page.getByTestId('server-guests-error').count(), 0, 'a superseded Guest Directory failure cannot overwrite a newer successful snapshot')
+  await page.unroute('**/api/guests')
+
+  assert.equal(await page.getByText(fakeGuestDirectoryName, { exact: false }).count(), 0, 'Guest Directory reload and SSE refetch remain free of both browser guest stores')
   await page.evaluate((keys) => {
     for (const key of keys) window.localStorage.removeItem(key)
     window.sessionStorage.removeItem('inject-local-operational-fixture')
-  }, Object.keys(injectedReservationsStorage))
-  await assertNoOperationalBrowserStorage('server-mode Reservations authority and reload')
+  }, [...new Set([...Object.keys(injectedReservationsStorage), ...Object.keys(injectedGuestStorage)])])
+  await assertNoOperationalBrowserStorage('server-mode Reservations and Guest Directory authority and reload')
   await page.goto('/board', { waitUntil: 'domcontentloaded' })
   await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
 
@@ -1008,6 +1226,7 @@ try {
   assert.equal(await cashierChargeDialog.getByLabel('Unit amount').inputValue(), '12.34', 'ambiguous Cashier charge keeps its exact amount for retry')
   await cashierChargeDialog.getByRole('button', { name: 'Post charge', exact: true }).click()
   await cashierChargeDialog.waitFor({ state: 'hidden' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
   assert.equal(cashierChargeAttempt, 2, 'Cashier charge uses one original attempt and one replay')
   assert.equal(await prisma.charge.count({
     where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, description: ambiguousCashierChargeDescription },
@@ -1018,6 +1237,11 @@ try {
   assert.ok(exactCashierCharge, 'the exact Cashier charge can be read back')
   assert.equal(exactCashierCharge.amountSatang, 1234n, 'Cashier charge persists its exact satang unit amount')
   assert.equal(exactCashierCharge.totalSatang, 2468n, 'Cashier charge persists its exact satang total')
+  assert.equal(
+    await page.evaluate((attemptKey) => Object.values(window.sessionStorage).some((value) => value.includes(attemptKey)), cashierChargeKey),
+    false,
+    'confirmed Cashier charge replay clears its opaque reload-safe attempt record',
+  )
   await page.unroute('**/api/charges')
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
@@ -1070,8 +1294,12 @@ try {
   }), 1, 'the payment committed before its failed read-back exists exactly once')
   const persistedCashierAttemptEvidence = await page.evaluate(() => Object.entries(window.sessionStorage)
     .filter(([key]) => key.startsWith('pms:attempt:v1:')))
-  assert.equal(persistedCashierAttemptEvidence.length, 1, 'the ambiguous payment retains one reload-safe opaque attempt record')
   const serializedCashierAttemptEvidence = JSON.stringify(persistedCashierAttemptEvidence)
+  assert.equal(
+    persistedCashierAttemptEvidence.filter(([, value]) => value.includes(cashierPaymentKey)).length,
+    1,
+    'the ambiguous payment retains exactly one reload-safe opaque attempt record for its key',
+  )
   for (const forbiddenValue of [cashierMutationGuest, cashierMutationReservation.data.folio.id, '10.01']) {
     assert.equal(serializedCashierAttemptEvidence.includes(forbiddenValue), false, 'reload-safe attempt evidence contains no guest, folio, or amount material')
   }
@@ -1085,14 +1313,17 @@ try {
   await cashierPaymentRetryDialog.getByLabel('Payment amount').fill('10.01')
   await cashierPaymentRetryDialog.getByRole('button', { name: 'Record payment', exact: true }).click()
   await cashierPaymentRetryDialog.waitFor({ state: 'hidden' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
   assert.equal(cashierPaymentAttempt, 2, 'Cashier payment uses one committed attempt and one replay after read-back recovery')
   assert.equal(await prisma.payment.count({
     where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, amountSatang: 1001n },
   }), 1, 'Cashier payment replay never creates a duplicate payment')
-  assert.deepEqual(
-    await page.evaluate(() => Object.keys(window.sessionStorage).filter((key) => key.startsWith('pms:attempt:v1:'))),
-    [],
-    'confirmed payment replay clears the opaque reload-safe attempt record',
+  const remainingCashierAttemptEvidence = await page.evaluate(() => Object.entries(window.sessionStorage)
+    .filter(([key]) => key.startsWith('pms:attempt:v1:')))
+  assert.equal(
+    JSON.stringify(remainingCashierAttemptEvidence).includes(cashierPaymentKey),
+    false,
+    'confirmed payment replay clears its opaque reload-safe attempt record',
   )
   await page.unroute('**/api/payments')
   await page.unroute('**/api/cashier/folios')
@@ -1511,14 +1742,18 @@ try {
     })
   })
   await page.goto('/front-desk', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-front-desk-unavailable').waitFor({ state: 'visible' })
   await page.getByText('Live PMS board unavailable:', { exact: false }).waitFor({ state: 'visible' })
   assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'front desk failure does not display browser reservation data')
   assert.equal(await page.getByText(fakeBoardRoomNumber, { exact: false }).count(), 0, 'front desk failure does not display browser room data')
-  await page.getByRole('button', { name: 'Ask about today' }).click()
-  await page.getByText('PMS unavailable', { exact: true }).waitFor({ state: 'visible' })
-  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'assistant failure does not use browser guest context')
-  await page.keyboard.press('Escape')
+  assert.equal(await page.getByText('Arrivals Today', { exact: true }).count(), 0, 'front desk failure renders no false zero-arrival section')
+  assert.equal(await page.getByText('Departures Today', { exact: true }).count(), 0, 'front desk failure renders no false zero-departure section')
+  assert.equal(await page.getByRole('button', { name: 'New Reservation', exact: true }).count(), 0, 'front desk failure exposes no reservation mutation')
+  assert.equal(await page.getByRole('button', { name: 'Ask about today', exact: true }).count(), 0, 'front desk failure exposes no assistant context from an unavailable snapshot')
   await page.unroute('**/api/front-desk/board*')
+  await page.getByRole('button', { name: 'Retry live board', exact: true }).click()
+  await page.getByTestId('server-front-desk-unavailable').waitFor({ state: 'hidden' })
+  await page.getByRole('heading', { name: 'Front Desk Board', exact: true }).waitFor({ state: 'visible' })
   await page.evaluate(() => {
     window.sessionStorage.removeItem('inject-local-operational-fixture')
     window.localStorage.clear()
@@ -1651,6 +1886,148 @@ try {
   await page.getByRole('tab', { name: /Rules/ }).click()
   await page.getByText(ruleName, { exact: false }).waitFor({ state: 'visible' })
 
+  const missingMessageIdempotency = await context.request.post('/api/messages', {
+    data: {
+      channel: 'LINE',
+      type: 'CUSTOM',
+      recipientType: 'GUEST',
+      recipientName: `Missing Key ${runId}`,
+      recipientContact: `line-missing-${runId}`,
+      body: 'A message draft without an idempotency key must fail.',
+    },
+  })
+  assert.equal(missingMessageIdempotency.status(), 400, 'Messaging rejects a missing x-idempotency-key')
+  const mismatchedMessageIdempotency = await context.request.post('/api/messages', {
+    data: {
+      channel: 'LINE',
+      type: 'CUSTOM',
+      recipientType: 'GUEST',
+      recipientName: `Mismatched Key ${runId}`,
+      recipientContact: `line-mismatch-${runId}`,
+      body: 'Conflicting Messaging keys must fail.',
+      idempotencyKey: `message-body:${randomUUID()}`,
+    },
+    headers: { 'x-idempotency-key': `message-header:${randomUUID()}` },
+  })
+  assert.equal(mismatchedMessageIdempotency.status(), 409, 'Messaging rejects conflicting header and body idempotency keys')
+
+  await page.route('**/api/messages', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Messaging authoritative snapshot failure.' }),
+    })
+  })
+  await page.goto('/messaging', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-messaging-unavailable').waitFor({ state: 'visible' })
+  await page.getByText('Injected Messaging authoritative snapshot failure.', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByRole('button', { name: 'New Message', exact: true }).count(), 0, 'Messaging failure exposes no draft control')
+  assert.equal(await page.getByText('Total Sent', { exact: true }).count(), 0, 'Messaging failure renders no zero-value operational metrics')
+  await page.unroute('**/api/messages')
+  await page.getByRole('button', { name: 'Retry messaging', exact: true }).click()
+  await page.getByRole('button', { name: 'New Message', exact: true }).waitFor({ state: 'visible' })
+
+  await page.route('**/api/message-templates', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Messaging template snapshot failure.' }),
+    })
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-messaging-unavailable').waitFor({ state: 'visible' })
+  await page.getByText('Injected Messaging template snapshot failure.', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByRole('button', { name: 'New Message', exact: true }).count(), 0, 'Messaging template failure exposes no draft control')
+  await page.unroute('**/api/message-templates')
+  await page.getByRole('button', { name: 'Retry messaging', exact: true }).click()
+  await page.getByRole('button', { name: 'New Message', exact: true }).waitFor({ state: 'visible' })
+
+  const persistedDraftRecipient = `Messaging Reload ${runId}`
+  await page.getByRole('button', { name: 'New Message', exact: true }).click()
+  await page.getByRole('heading', { name: 'Record New Message', exact: true }).waitFor({ state: 'visible' })
+  await page.getByPlaceholder('Guest full name').fill(persistedDraftRecipient)
+  await page.getByPlaceholder('Guest LINE ID').fill(`line-${runId}`)
+  await page.getByPlaceholder('Write your message here...').fill(`Authoritative persisted draft ${runId}`)
+  const persistedDraftResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/messages') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Save Draft', exact: true }).click()
+  assert.equal((await persistedDraftResponse).status(), 201, 'Messaging saves an audited PMS draft')
+  await page.getByRole('heading', { name: 'Record New Message', exact: true }).waitFor({ state: 'hidden' })
+  await page.getByText(persistedDraftRecipient, { exact: true }).waitFor({ state: 'visible' })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: 'New Message', exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(persistedDraftRecipient, { exact: true }).waitFor({ state: 'visible' })
+
+  const ambiguousDraftRecipient = `Messaging Ambiguous ${runId}`
+  const ambiguousDraftContact = `line-ambiguous-${runId}`
+  const ambiguousDraftBody = `Lost response replay proof ${runId}`
+  let ambiguousDraftKey = ''
+  let replayedDraftKey = ''
+  let resolveAmbiguousDraftStored
+  const ambiguousDraftStored = new Promise((resolveStored) => {
+    resolveAmbiguousDraftStored = resolveStored
+  })
+  let interceptedAmbiguousDraft = false
+  await page.route('**/api/messages', async (route) => {
+    if (route.request().method() !== 'POST' || interceptedAmbiguousDraft) {
+      if (route.request().method() === 'POST') {
+        replayedDraftKey = route.request().headers()['x-idempotency-key'] || ''
+      }
+      await route.continue()
+      return
+    }
+    interceptedAmbiguousDraft = true
+    ambiguousDraftKey = route.request().headers()['x-idempotency-key'] || ''
+    const upstreamResponse = await route.fetch()
+    assert.equal(upstreamResponse.status(), 201, 'ambiguous Messaging request reached the server before the response was lost')
+    resolveAmbiguousDraftStored()
+    await route.abort('failed')
+  })
+  await page.getByRole('button', { name: 'New Message', exact: true }).click()
+  await page.getByPlaceholder('Guest full name').fill(ambiguousDraftRecipient)
+  await page.getByPlaceholder('Guest LINE ID').fill(ambiguousDraftContact)
+  await page.getByPlaceholder('Write your message here...').fill(ambiguousDraftBody)
+  await page.getByRole('button', { name: 'Save Draft', exact: true }).click()
+  await boundedSignal(ambiguousDraftStored, 'Ambiguous Messaging server write')
+  assert.match(ambiguousDraftKey, /^pms-message-draft:/, 'Messaging sends an opaque durable idempotency key')
+  const ambiguousAttemptStorage = await page.evaluate(() => Object.fromEntries(
+    Object.entries(window.sessionStorage).filter(([key]) => key.startsWith('pms:attempt:v1:')),
+  ))
+  const serializedAmbiguousAttempts = JSON.stringify(ambiguousAttemptStorage)
+  assert.equal(serializedAmbiguousAttempts.includes(ambiguousDraftRecipient), false, 'Messaging retry storage excludes recipient names')
+  assert.equal(serializedAmbiguousAttempts.includes(ambiguousDraftContact), false, 'Messaging retry storage excludes recipient contacts')
+  assert.equal(serializedAmbiguousAttempts.includes(ambiguousDraftBody), false, 'Messaging retry storage excludes message bodies')
+
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: 'New Message', exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: 'New Message', exact: true }).click()
+  await page.getByPlaceholder('Guest full name').fill(ambiguousDraftRecipient)
+  await page.getByPlaceholder('Guest LINE ID').fill(ambiguousDraftContact)
+  await page.getByPlaceholder('Write your message here...').fill(ambiguousDraftBody)
+  const replayedDraftResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/messages') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Save Draft', exact: true }).click()
+  assert.equal((await replayedDraftResponse).status(), 201, 'Messaging replay resolves through the original server draft')
+  assert.equal(replayedDraftKey, ambiguousDraftKey, 'Messaging lost-response retry reuses the exact logical idempotency key after reload')
+  await page.getByText(ambiguousDraftRecipient, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(
+    await prisma.message.count({ where: { propertyId: property.id, idempotencyKey: ambiguousDraftKey } }),
+    1,
+    'Messaging lost-response retry creates exactly one durable draft',
+  )
+  await page.unroute('**/api/messages')
+  await assertNoOperationalBrowserStorage('server-mode Messaging authority and retry')
+
   for (const path of ['/settings', '/night-audit', '/system-status', '/internal-comms', '/guest-communications', '/daily-summary', '/data-backup']) {
     await page.goto(path, { waitUntil: 'domcontentloaded' })
     await page.getByText('Loading PMS workspace...', { exact: true }).waitFor({ state: 'hidden' })
@@ -1672,6 +2049,122 @@ try {
     await assertNoOperationalBrowserStorage(path)
   }
 
+  // CASHIER membership may view the authoritative Guest Directory but cannot create
+  // guest profiles. Both UI capability and the backend permission remain enforced.
+  const guestViewerContext = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 800 } })
+  const guestViewerLogin = await guestViewerContext.request.post('/api/auth/login', {
+    data: { identity: guestViewerUsername, password: guestViewerPassword },
+  })
+  assert.equal(guestViewerLogin.status(), 200, `Guest viewer login failed: ${await guestViewerLogin.text()}`)
+  const guestViewerPage = await guestViewerContext.newPage()
+  const guestViewerDirectoryReadTimes = []
+  await guestViewerPage.route('**/api/guests', async (route) => {
+    if (route.request().method() === 'GET') {
+      guestViewerDirectoryReadTimes.push(Date.now())
+    }
+    await route.continue()
+  })
+  const guestViewerSseConnected = guestViewerPage.waitForResponse((response) => response.url().endsWith('/api/events'))
+  await guestViewerPage.goto('/guests', { waitUntil: 'domcontentloaded' })
+  await guestViewerSseConnected
+  await guestViewerPage.getByTestId('server-guests-view').waitFor({ state: 'visible' })
+  assert.equal(await guestViewerPage.getByRole('button', { name: 'New Guest', exact: true }).count(), 0, 'view-only Guest Directory membership sees no create control')
+  const deniedGuestCreate = await guestViewerContext.request.post('/api/guests', {
+    data: { firstName: 'Denied', lastName: `Guest ${runId}` },
+    headers: { 'x-idempotency-key': `denied-guest-create:${randomUUID()}` },
+  })
+  assert.equal(deniedGuestCreate.status(), 403, 'view-only Guest Directory membership cannot create a guest through the API')
+  const expectedGuestViewerEvent = {
+    type: 'GUEST_UPDATED',
+    aggregateType: 'guest',
+    aggregateId: firstBrowserGuestPayload.data.id,
+  }
+  await armDomainEventProbe(guestViewerPage, expectedGuestViewerEvent)
+  const guestViewerEvent = await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    eventType: expectedGuestViewerEvent.type,
+    aggregateType: expectedGuestViewerEvent.aggregateType,
+    aggregateId: expectedGuestViewerEvent.aggregateId,
+  })
+  expectedGuestViewerEvent.id = String(guestViewerEvent.id)
+  const guestViewerEventSeenAt = await waitForDomainEventProbe(guestViewerPage, expectedGuestViewerEvent)
+  for (let attempt = 0; attempt < 20 && !guestViewerDirectoryReadTimes.some((readAt) => readAt >= guestViewerEventSeenAt); attempt += 1) {
+    await guestViewerPage.waitForTimeout(250)
+  }
+  assert.ok(
+    guestViewerDirectoryReadTimes.some((readAt) => readAt >= guestViewerEventSeenAt),
+    'view-only Guest Directory membership starts an authoritative profile refetch after the exact permitted guest event is dispatched',
+  )
+
+  await guestViewerPage.goto('/messaging', { waitUntil: 'domcontentloaded' })
+  await guestViewerPage.getByTestId('messaging-compose-restricted').waitFor({ state: 'visible' })
+  assert.equal(await guestViewerPage.getByRole('button', { name: 'New Message', exact: true }).count(), 0, 'view-only Messaging membership sees no draft control')
+  const deniedMessageDraft = await guestViewerContext.request.post('/api/messages', {
+    data: {
+      channel: 'LINE',
+      type: 'CUSTOM',
+      recipientType: 'GUEST',
+      recipientName: 'Denied Messaging Guest',
+      recipientContact: `line-denied-${runId}`,
+      body: 'This read-only draft must not persist.',
+      idempotencyKey: `denied-message-draft:${randomUUID()}`,
+    },
+    headers: { 'x-idempotency-key': `denied-message-draft-header:${randomUUID()}` },
+  })
+  assert.equal(deniedMessageDraft.status(), 403, 'view-only Messaging membership cannot create a draft through the API')
+  await guestViewerContext.close()
+
+  await prisma.userPropertyMembership.updateMany({
+    where: { userId: limitedUser.id, propertyId: property.id },
+    data: { active: true },
+  })
+  const staffMessagingContext = await browser.newContext({ baseURL: baseUrl })
+  const staffMessagingLogin = await staffMessagingContext.request.post('/api/auth/login', {
+    data: { identity: limitedUsername, password: limitedPassword },
+  })
+  assert.equal(staffMessagingLogin.status(), 200, 'HOUSEKEEPING messaging user authenticates after membership restoration')
+  const staffDraftKey = `staff-message:${randomUUID()}`
+  const permittedStaffDraft = await staffMessagingContext.request.post('/api/messages', {
+    data: {
+      channel: 'LINE',
+      type: 'CUSTOM',
+      recipientType: 'STAFF',
+      recipientName: 'Front Desk Team',
+      recipientContact: `staff-group-${runId}`,
+      body: 'A staff-only operational handoff.',
+      idempotencyKey: staffDraftKey,
+    },
+    headers: { 'x-idempotency-key': staffDraftKey },
+  })
+  assert.equal(permittedStaffDraft.status(), 201, 'send:staff-messages authorizes a staff draft without granting guest-message authority')
+  const deniedHousekeepingGuestKey = `housekeeping-guest-message:${randomUUID()}`
+  const deniedHousekeepingGuestDraft = await staffMessagingContext.request.post('/api/messages', {
+    data: {
+      channel: 'LINE',
+      type: 'CUSTOM',
+      recipientType: 'GUEST',
+      recipientName: 'Guest Recipient',
+      recipientContact: `guest-denied-${runId}`,
+      body: 'HOUSEKEEPING must not gain guest messaging authority.',
+      idempotencyKey: deniedHousekeepingGuestKey,
+    },
+    headers: { 'x-idempotency-key': deniedHousekeepingGuestKey },
+  })
+  assert.equal(deniedHousekeepingGuestDraft.status(), 403, 'send:staff-messages does not authorize a guest draft')
+  const staffSseLastEvent = await prisma.domainEvent.findFirst({ orderBy: { id: 'desc' }, select: { id: true } })
+  const staffMessagingCookies = await staffMessagingContext.cookies(baseUrl)
+  const staffMessagingCookieHeader = staffMessagingCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ')
+  await readSseAccessRevoked({
+    url: baseUrl,
+    cookie: staffMessagingCookieHeader,
+    lastEventId: staffSseLastEvent?.id || 0n,
+    trigger: () => prisma.userPropertyMembership.updateMany({
+      where: { userId: limitedUser.id, propertyId: property.id },
+      data: { active: false },
+    }),
+  })
+  await staffMessagingContext.close()
+
   // CAFE_STAFF may read authoritative folios and post an allowed charge, but it may
   // never collect or record a payment. Its event subscription must still refetch the
   // Cashier snapshot after a property-scoped folio event.
@@ -1682,8 +2175,12 @@ try {
   assert.equal(cafeCashierLogin.status(), 200, `CAFE_STAFF Cashier login failed: ${await cafeCashierLogin.text()}`)
   const cafeCashierPage = await cafeCashierContext.newPage()
   let cafeCashierFolioReads = 0
+  const cafeCashierFolioReadTimes = []
   await cafeCashierPage.route('**/api/cashier/folios*', async (route) => {
-    if (route.request().method() === 'GET') cafeCashierFolioReads += 1
+    if (route.request().method() === 'GET') {
+      cafeCashierFolioReads += 1
+      cafeCashierFolioReadTimes.push(Date.now())
+    }
     await route.continue()
   })
   const cafeSseConnected = cafeCashierPage.waitForResponse((response) => response.url().endsWith('/api/events'))
@@ -1695,20 +2192,52 @@ try {
   assert.equal(await cafeCashierPage.getByRole('button', { name: 'Collect', exact: true }).count(), 0, 'CAFE_STAFF has no payment collection control')
   assert.equal(await cafeCashierPage.getByRole('button', { name: 'Record payment', exact: true }).count(), 0, 'CAFE_STAFF has no payment recording control')
   const cafeReadsBeforeFolioEvent = cafeCashierFolioReads
-  await recordDomainEvent(prisma, {
-    propertyId: property.id,
-    // Use a real named SSE event consumed by DomainEventBridge. An invented event
-    // name would be correctly filtered by the browser because EventSource has no
-    // wildcard listener for named events.
-    eventType: 'CHARGE_CREATED',
+  const expectedCafeChargeEvent = {
+    type: 'CHARGE_CREATED',
     aggregateType: 'charge',
     aggregateId: `cafe-cashier-charge-${runId}`,
+  }
+  await armDomainEventProbe(cafeCashierPage, expectedCafeChargeEvent)
+  const cafeChargeEvent = await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    eventType: expectedCafeChargeEvent.type,
+    aggregateType: expectedCafeChargeEvent.aggregateType,
+    aggregateId: expectedCafeChargeEvent.aggregateId,
   })
+  expectedCafeChargeEvent.id = String(cafeChargeEvent.id)
+  const cafeChargeEventSeenAt = await waitForDomainEventProbe(cafeCashierPage, expectedCafeChargeEvent)
   // Playwright route counters live in Node; wait briefly for the asynchronous SSE listener to refetch.
-  for (let attempt = 0; attempt < 20 && cafeCashierFolioReads <= cafeReadsBeforeFolioEvent; attempt += 1) {
+  for (let attempt = 0; attempt < 20 && !cafeCashierFolioReadTimes.some((readAt) => readAt >= cafeChargeEventSeenAt); attempt += 1) {
     await cafeCashierPage.waitForTimeout(250)
   }
   assert.ok(cafeCashierFolioReads > cafeReadsBeforeFolioEvent, 'CAFE_STAFF Cashier refetches authoritative folios after its permitted SSE event')
+  assert.ok(
+    cafeCashierFolioReadTimes.some((readAt) => readAt >= cafeChargeEventSeenAt),
+    'CAFE_STAFF Cashier refetch starts after the exact permitted charge event is dispatched',
+  )
+  for (const reservationEventType of ['RESERVATION_ROOM_ASSIGNED', 'RESERVATION_GUEST_UPDATED']) {
+    const expectedCafeReservationEvent = {
+      type: reservationEventType,
+      aggregateType: 'reservation',
+      aggregateId: boardReservationOne.data.id,
+    }
+    await armDomainEventProbe(cafeCashierPage, expectedCafeReservationEvent)
+    const cafeReservationEvent = await recordDomainEvent(prisma, {
+      propertyId: property.id,
+      eventType: expectedCafeReservationEvent.type,
+      aggregateType: expectedCafeReservationEvent.aggregateType,
+      aggregateId: expectedCafeReservationEvent.aggregateId,
+    })
+    expectedCafeReservationEvent.id = String(cafeReservationEvent.id)
+    const cafeReservationEventSeenAt = await waitForDomainEventProbe(cafeCashierPage, expectedCafeReservationEvent)
+    for (let attempt = 0; attempt < 20 && !cafeCashierFolioReadTimes.some((readAt) => readAt >= cafeReservationEventSeenAt); attempt += 1) {
+      await cafeCashierPage.waitForTimeout(250)
+    }
+    assert.ok(
+      cafeCashierFolioReadTimes.some((readAt) => readAt >= cafeReservationEventSeenAt),
+      `CAFE_STAFF Cashier refetch starts after the exact ${reservationEventType} invalidation is dispatched`,
+    )
+  }
   const cafeOperationalStorage = await cafeCashierPage.evaluate(() => {
     const forbidden = new Set(['folios', 'cashier-folios', 'accounting-entries', 'auth:current-user'])
     return Object.keys(window.localStorage).filter((key) => forbidden.has(key))

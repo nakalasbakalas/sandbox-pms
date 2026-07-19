@@ -1,9 +1,18 @@
 # Live Environment Proof Register
 
-Latest repository release-candidate refresh: 2026-07-17.
+Latest repository release-candidate refresh: 2026-07-19.
 Latest external provider evidence refresh: 2026-07-07T15:29+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-19 Primary PMS Consolidation Boundary
+
+- Scope: repository and GitHub topology inspection, clean-worktree consolidation planning, local disposable-database validation, and exact-commit CI review. No merge, Render deployment, production database access, provider write, credential use, or live PMS mutation was performed.
+- Merged `main` is `9208621`. PRs #177-#189 form one linear product stack ending at `c3f1dcd`; Lite PRs #172/#173 are not ancestors of that head. PR #179 is a unique side-document branch and its older candidate wording is being reconciled rather than copied as current proof.
+- PR #189 exact commit `c3f1dcd` passed `Fast checks and launch gate` and `PostgreSQL migrations, seed, and guarded E2E` on 2026-07-19. GitHub reported the PR clean, but no independent review exists and the result does not cover later integration corrections.
+- Local-only candidate evidence on 2026-07-19: a newly created disposable PostgreSQL database applied all 26 migrations from empty, completed the guarded E2E seed, and passed the combined PostgreSQL isolation, concurrency, exact-money, reconciliation, lifecycle, and autonomy-shadow gates. The full server-mode Playwright reload/error/SSE suite, source tests, typecheck, lint, server-mode production build, launch check, and high-severity dependency audit also passed. Two independent agent reviews found no remaining P0-P2 security or release blockers. This is engineering evidence only; it is not GitHub approval, staging, restored-production-copy, owner, or provider proof.
+- The final `codex/pms-launch-integration` commit must rerun both jobs before review or merge. Local or prior-stack success cannot substitute for that exact-head evidence.
+- Staging migration/rollback, restored-data reconciliation, credentialed staff workflows, owner approval, active Render migration-only command alignment, current WAF/recovery inspection, Gmail/provider health, OTA certification, and payment-provider proof remain separate open gates.
 
 ## 2026-07-17 Release-Foundation Merge Boundary
 

@@ -4271,6 +4271,7 @@ export async function createGuest(prisma, input, actor, options = {}) {
     }
     const guest = await tx.guest.create({ data: { ...validateGuestInput(input), propertyId: property.id } })
     await createAudit(tx, actor, 'CREATED', 'guest', guest.id)
+    await emitOperationalEvent(tx, property.id, 'GUEST_CREATED', 'guest', guest.id, actor)
     if (createAttempt) {
       await completePmsCreateAttempt(tx, createAttempt.attempt, {
         entityType: 'guest',
@@ -4283,13 +4284,16 @@ export async function createGuest(prisma, input, actor, options = {}) {
 }
 
 export async function updateGuest(prisma, guestId, input, actor) {
-  const property = await getProperty(prisma, actor)
-  const data = validateGuestInput(input)
-  const existing = await prisma.guest.findFirst({ where: { id: guestId, propertyId: property.id } })
-  if (!existing) throw new PmsValidationError('Guest was not found.', 404)
-  const guest = await prisma.guest.update({ where: { id: existing.id }, data })
-  await createAudit(prisma, actor, 'MODIFIED', 'guest', guest.id)
-  return guest
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx, actor)
+    const data = validateGuestInput(input)
+    const existing = await tx.guest.findFirst({ where: { id: guestId, propertyId: property.id } })
+    if (!existing) throw new PmsValidationError('Guest was not found.', 404)
+    const guest = await tx.guest.update({ where: { id: existing.id }, data })
+    await createAudit(tx, actor, 'MODIFIED', 'guest', guest.id)
+    await emitOperationalEvent(tx, property.id, 'GUEST_UPDATED', 'guest', guest.id, actor)
+    return guest
+  })
 }
 
 export async function getTodayData(prisma, actor) {

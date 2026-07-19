@@ -16,6 +16,7 @@ import {
   checkOutReservation,
   getBookingEmailEvent,
   listGuests,
+  updateGuest,
   updateReservationGuest,
   updateHousekeepingStatus,
   updateReservation,
@@ -38,6 +39,7 @@ import {
   listChannelMappings,
   updateChannelMapping,
 } from '../server/channel-mapping-service.mjs'
+import { createMessageDraft } from '../server/messaging-service.mjs'
 
 const e2eDatabaseUrl = assertSafeE2EDatabase()
 process.env.DATABASE_URL = e2eDatabaseUrl
@@ -241,6 +243,27 @@ try {
   assert.equal(contextA.role, 'FRONT_DESK', 'membership role overrides the global ADMIN compatibility role')
   assert.throws(() => requirePermission(contextA.actor, 'manage:users'), /permission/, 'effective membership role prevents global-role privilege escalation')
   assert.equal(contextB.role, 'HOUSEKEEPING')
+
+  const concurrentDraftKey = `message-draft:${randomUUID()}`
+  const concurrentDraftInput = {
+    channel: 'LINE',
+    type: 'CUSTOM',
+    recipientType: 'GUEST',
+    recipientName: `Concurrent Draft ${runId}`,
+    recipientContact: `line-concurrent-${runId}`,
+    body: 'One logical message draft must survive concurrent replay.',
+    idempotencyKey: concurrentDraftKey,
+  }
+  const [firstConcurrentDraft, replayedConcurrentDraft] = await Promise.all([
+    createMessageDraft(prisma, { ...managerContextA, idempotencyKey: concurrentDraftKey }, concurrentDraftInput),
+    createMessageDraft(prisma, { ...managerContextA, idempotencyKey: concurrentDraftKey }, concurrentDraftInput),
+  ])
+  assert.equal(replayedConcurrentDraft.id, firstConcurrentDraft.id, 'concurrent same-key message drafts return the original row')
+  assert.equal(
+    await prisma.message.count({ where: { propertyId: fixtureA.property.id, idempotencyKey: concurrentDraftKey } }),
+    1,
+    'concurrent same-key message drafts create exactly one property-scoped row',
+  )
 
   const channelAContext = { ...managerContextA, idempotencyKey: `ical-a:${randomUUID()}` }
   const channelBContext = { ...managerContextB, idempotencyKey: `ical-b:${randomUUID()}` }
@@ -588,6 +611,10 @@ try {
   assert.equal(replayedGuest.idempotentReplay, true, 'unchanged guest retry is explicitly marked as a replay')
   assert.equal(await prisma.guest.count({ where: { propertyId: fixtureA.property.id, email: guestCreateInputA.email } }), 1, 'duplicate guest creates persist one guest')
   assert.equal(await prisma.auditLog.count({ where: { propertyId: fixtureA.property.id, entityId: createdGuest.id, action: 'CREATED' } }), 1, 'duplicate guest creates persist one audit row')
+  const guestCreateEvents = await prisma.domainEvent.findMany({
+    where: { propertyId: fixtureA.property.id, aggregateType: 'guest', aggregateId: createdGuest.id, eventType: 'GUEST_CREATED' },
+  })
+  assert.equal(guestCreateEvents.length, 1, 'duplicate guest creates persist one property-scoped guest event')
   const guestCreateAttempt = await prisma.pmsCreateAttempt.findUnique({
     where: { propertyId_idempotencyKey: { propertyId: fixtureA.property.id, idempotencyKey: guestCreateKey } },
   })
@@ -615,6 +642,11 @@ try {
   }, actorB, { idempotencyKey: guestCreateKey })
   assert.notEqual(independentlyCreatedGuest.id, createdGuest.id, 'the same guest create key is isolated to the active property')
   assert.equal(await prisma.pmsCreateAttempt.count({ where: { idempotencyKey: guestCreateKey } }), 2, 'guest create keys are composite property scoped')
+  await updateGuest(prisma, createdGuest.id, { ...guestCreateInputA, notes: 'Guest event acceptance update' }, actorA)
+  const guestUpdateEvents = await prisma.domainEvent.findMany({
+    where: { propertyId: fixtureA.property.id, aggregateType: 'guest', aggregateId: createdGuest.id, eventType: 'GUEST_UPDATED' },
+  })
+  assert.equal(guestUpdateEvents.length, 1, 'guest updates persist one property-scoped guest event')
 
   const auditCountBeforeRejectedPatch = await prisma.auditLog.count({ where: { entityId: reservationA.reservation.id } })
   const historyCountBeforeRejectedPatch = await prisma.reservationLog.count({ where: { reservationId: reservationA.reservation.id } })

@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 
 const cashierSource = (await readFile('src/components/views/CashierView.tsx', 'utf8')).replaceAll('\r\n', '\n')
 const appSource = (await readFile('src/App.tsx', 'utf8')).replaceAll('\r\n', '\n')
+const pmsServiceSource = (await readFile('server/pms-service.mjs', 'utf8')).replaceAll('\r\n', '\n')
 const rbacSource = (await readFile('server/rbac.mjs', 'utf8')).replaceAll('\r\n', '\n')
 const authTypeSource = (await readFile('src/types/auth.ts', 'utf8')).replaceAll('\r\n', '\n')
 const serverAuthClientSource = (await readFile('src/lib/server-auth-client.ts', 'utf8')).replaceAll('\r\n', '\n')
@@ -36,6 +37,11 @@ assert.match(cashierSource, /moneySatangToDecimal/, 'server Cashier prints and e
 assert.match(cashierSource, /formatMoneySatang\(satang, currency\)/, 'server Cashier renders the property currency from exact satang')
 assert.doesNotMatch(cashierSource, /[฿à¸¿]/, 'Cashier does not hardcode a property currency symbol')
 assert.match(serverSlice, /refreshServerFolios/, 'server Cashier refetches authoritative folio data after writes and retry')
+assert.match(serverSlice, /\['payment', 'charge', 'folio', 'reservation'\]\.includes\(aggregateType\)/, 'Cashier refetches after authoritative reservation invalidations')
+assert.match(pmsServiceSource, /emitOperationalEvent\([^\n]*'RESERVATION_ROOM_ASSIGNED', 'reservation'/, 'room assignment emits a named reservation SSE event')
+assert.match(pmsServiceSource, /emitOperationalEvent\([^\n]*'RESERVATION_GUEST_UPDATED', 'reservation'/, 'guest edits emit a named reservation SSE event')
+assert.match(appSource, /RESERVATION_ROOM_ASSIGNED:\s*'RESERVATION_MODIFIED'/, 'the SSE bridge subscribes to room-assignment reservation invalidations')
+assert.match(appSource, /RESERVATION_GUEST_UPDATED:\s*'RESERVATION_MODIFIED'/, 'the SSE bridge subscribes to guest-edit reservation invalidations')
 assert.doesNotMatch(serverSlice, /\buseKV\b|\buseRoomSync\b|localStorage|sessionStorage/, 'server Cashier cannot read browser-owned folio, room, or accounting state')
 assert.match(demoSlice, /\buseKV\b/, 'browser-owned folio and accounting state remains confined to demo mode')
 assert.match(demoSlice, /\buseRoomSync\b/, 'browser-owned room state remains confined to demo mode')
@@ -54,7 +60,7 @@ assert.doesNotMatch(clientCafeStaffPermissions, /'process:payment'/, 'client CAF
 assert.match(serverAuthClientSource, /normalized === 'CAFE_STAFF'\) return 'cafe-staff'/, 'server membership CAFE_STAFF is not collapsed to front-desk authority in the browser')
 assert.match(browserSource, /Cashier charge retry reuses the exact logical idempotency key/, 'browser proof covers an ambiguous Cashier charge replay')
 assert.match(browserSource, /Cashier payment retry after refetch failure reuses the exact logical idempotency key/, 'browser proof covers payment read-back failure and replay')
-assert.match(browserSource, /ambiguous payment retains one reload-safe opaque attempt record[\s\S]{0,1800}?page\.reload\(\{ waitUntil: 'domcontentloaded' \}\)/, 'browser proof reloads between an ambiguous payment and its same-key replay')
+assert.match(browserSource, /the ambiguous payment retains exactly one reload-safe opaque attempt record[\s\S]{0,1200}?page\.reload\(\{ waitUntil: 'domcontentloaded' \}\)/, 'browser proof reloads between an ambiguous payment and its same-key replay')
 assert.match(browserSource, /stale Cashier charge against a closed folio is rejected/, 'browser proof covers truthful closed-folio rejection')
 assert.match(browserSource, /Accounting is capability-gated out of the server Cashier/, 'browser proof covers server Accounting capability gating')
 

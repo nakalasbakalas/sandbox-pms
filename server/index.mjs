@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
+import { pipeline } from 'node:stream/promises'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -364,7 +365,7 @@ function sendCalendar(response, contents, fileName) {
   response.end(contents)
 }
 
-function startDomainEventStream(request, response, db, context, actor, url) {
+function startDomainEventStream(request, response, db, context, url) {
   const rawAfter = firstHeaderValue(request.headers['last-event-id']) || url.searchParams.get('after') || '0'
   let after
   try {
@@ -401,15 +402,29 @@ function startDomainEventStream(request, response, db, context, actor, url) {
     if (closed || polling) return
     polling = true
     try {
-      const events = await listDomainEvents(db, { propertyId: context.propertyId, after, limit: 100 })
+      const liveUser = await requireUser(request)
+      const liveContext = await resolveRequestContext(db, liveUser, request)
+      requireOperationalEventPermission(liveContext.actor)
+      if (liveContext.propertyId !== context.propertyId) {
+        const error = new Error('Operational event access changed.')
+        error.statusCode = 403
+        throw error
+      }
+      const events = await listDomainEvents(db, { propertyId: liveContext.propertyId, after, limit: 100 })
       for (const event of events) {
         after = BigInt(event.id)
-        if (!canReadOperationalEvent(actor, event)) continue
+        if (!canReadOperationalEvent(liveContext.actor, event)) continue
         response.write(`id: ${event.id}\n`)
         response.write(`event: ${event.type}\n`)
         response.write(`data: ${JSON.stringify(event)}\n\n`)
       }
-    } catch {
+    } catch (error) {
+      if (error?.statusCode === 401 || error?.statusCode === 403) {
+        if (!closed) response.write('event: access_revoked\ndata: {"reconnect":true}\n\n')
+        cleanup()
+        response.end()
+        return
+      }
       if (!closed) response.write('event: stream_error\ndata: {"retry":true}\n\n')
     } finally {
       polling = false
@@ -588,11 +603,20 @@ async function serveStatic(request, response) {
       return
     }
 
-    createReadStream(filePath).pipe(response)
+    await pipeline(createReadStream(filePath), response)
   } catch (error) {
+    console.error('Static file response failed.', {
+      requestId: request.requestId,
+      name: error instanceof Error ? error.name : 'Error',
+      code: typeof error?.code === 'string' ? error.code : undefined,
+    })
+    if (response.headersSent) {
+      response.destroy()
+      return
+    }
     sendJson(response, 500, {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: 'The requested application asset could not be loaded.',
     })
   }
 }
@@ -989,10 +1013,14 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/messages' && request.method === 'POST') {
-    requirePermission(user, 'send:guest-messages')
+    const body = await readJson(request)
+    const recipientType = String(body?.recipientType || '').trim().toUpperCase()
+    if (recipientType === 'GUEST') requirePermission(user, 'send:guest-messages')
+    else if (recipientType === 'STAFF' || recipientType === 'GROUP') requirePermission(user, 'send:staff-messages')
+    else throw new PmsValidationError('recipientType: Select a supported message recipient type.')
     sendJson(response, 201, {
       ok: true,
-      data: await createMessageDraft(db, context, await readJson(request)),
+      data: await createMessageDraft(db, context, body),
       message: 'Message draft saved. No provider delivery was attempted.',
     })
     return true
@@ -1046,7 +1074,7 @@ async function handleApi(request, response, url) {
       error.statusCode = 503
       throw error
     }
-    startDomainEventStream(request, response, db, context, user, url)
+    startDomainEventStream(request, response, db, context, url)
     return true
   }
 

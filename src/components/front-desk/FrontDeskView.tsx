@@ -13,7 +13,7 @@ import { MoneyDisplay } from '@/components/ui/money-display'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/hooks/use-auth'
 import { useNavigation } from '@/hooks/use-navigation'
-import { useRoomSync } from '@/hooks/use-room-sync'
+import { useRoomSync, type RoomStatusUpdate } from '@/hooks/use-room-sync'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
 import { getBangkokDateKey, nightsBetween } from '@/lib/hotel/business-rules'
 import {
@@ -397,11 +397,91 @@ function inHouseToDeparture(item: InHouseItem): DepartureItem {
   }
 }
 
+type KvArraySetter<T> = (newValue: T[] | ((oldValue?: T[]) => T[])) => void
+
+type FrontDeskStorage = {
+  rooms: BoardRoomCard[]
+  setRooms: KvArraySetter<BoardRoomCard>
+  updateRoomStatus: (update: Omit<RoomStatusUpdate, 'timestamp'>) => void
+  unassignedReservations: UnassignedReservation[]
+  setUnassignedReservations: KvArraySetter<UnassignedReservation>
+  setReservationRecords: KvArraySetter<ReservationRecord>
+  setCanonicalReservationRecords: KvArraySetter<ReservationRecord>
+  setGuestDirectory: KvArraySetter<GuestDirectoryRecord>
+  setCanonicalGuestDirectory: KvArraySetter<GuestDirectoryRecord>
+}
+
+const EMPTY_UNASSIGNED_RESERVATIONS: UnassignedReservation[] = []
+const ignoreKvArrayWrite: KvArraySetter<never> = () => undefined
+const ignoreRoomStatusUpdate = (_update: Omit<RoomStatusUpdate, 'timestamp'>) => undefined
+
 export function FrontDeskView() {
+  return SERVER_API_ENABLED ? <ServerFrontDeskView /> : <DemoFrontDeskView />
+}
+
+function ServerFrontDeskView() {
+  const [rooms, setServerRooms] = useState<BoardRoomCard[]>([])
+  const setRooms = useCallback<KvArraySetter<BoardRoomCard>>((newValue) => {
+    setServerRooms((current) => typeof newValue === 'function' ? newValue(current) : newValue)
+  }, [])
+
+  return (
+    <FrontDeskViewContent
+      rooms={rooms}
+      setRooms={setRooms}
+      updateRoomStatus={ignoreRoomStatusUpdate}
+      unassignedReservations={EMPTY_UNASSIGNED_RESERVATIONS}
+      setUnassignedReservations={ignoreKvArrayWrite as KvArraySetter<UnassignedReservation>}
+      setReservationRecords={ignoreKvArrayWrite as KvArraySetter<ReservationRecord>}
+      setCanonicalReservationRecords={ignoreKvArrayWrite as KvArraySetter<ReservationRecord>}
+      setGuestDirectory={ignoreKvArrayWrite as KvArraySetter<GuestDirectoryRecord>}
+      setCanonicalGuestDirectory={ignoreKvArrayWrite as KvArraySetter<GuestDirectoryRecord>}
+    />
+  )
+}
+
+function DemoFrontDeskView() {
+  const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
+  const [, setReservationRecords] = useKV<ReservationRecord[]>('reservations-data', [])
+  const [, setCanonicalReservationRecords] = useKV<ReservationRecord[]>('reservations', [])
+  const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
+  const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
+  const { rooms, setRooms: setDemoRooms, updateRoomStatus } = useRoomSync({ serverSync: false })
+  const setRooms = useCallback<KvArraySetter<BoardRoomCard>>((newValue) => {
+    setDemoRooms((current) => typeof newValue === 'function' ? newValue(current) : newValue)
+  }, [setDemoRooms])
+
+  return (
+    <FrontDeskViewContent
+      rooms={rooms}
+      setRooms={setRooms}
+      updateRoomStatus={updateRoomStatus}
+      unassignedReservations={unassignedReservations || EMPTY_UNASSIGNED_RESERVATIONS}
+      setUnassignedReservations={setUnassignedReservations}
+      setReservationRecords={setReservationRecords}
+      setCanonicalReservationRecords={setCanonicalReservationRecords}
+      setGuestDirectory={setGuestDirectory}
+      setCanonicalGuestDirectory={setCanonicalGuestDirectory}
+    />
+  )
+}
+
+function FrontDeskViewContent({
+  rooms,
+  setRooms,
+  updateRoomStatus,
+  unassignedReservations,
+  setUnassignedReservations,
+  setReservationRecords,
+  setCanonicalReservationRecords,
+  setGuestDirectory,
+  setCanonicalGuestDirectory,
+}: FrontDeskStorage) {
   const workflowNavigationVersion = useAuthoritativeWorkflowNavigationVersion()
   const pendingAssignmentAttempt = useRef<PendingReservationAttempt | null>(null)
   const pendingCheckInAttempt = useRef<PendingReservationAttempt | null>(null)
   const pendingCheckOutAttempt = useRef<PendingReservationAttempt | null>(null)
+  const boardRefreshGeneration = useRef(0)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedArrival, setSelectedArrival] = useState<ArrivalItem | null>(null)
   const [selectedDeparture, setSelectedDeparture] = useState<DepartureItem | null>(null)
@@ -414,16 +494,10 @@ export function FrontDeskView() {
   const [serverBoard, setServerBoard] = useState<ServerBoard | null>(null)
   const [serverBoardState, setServerBoardState] = useState<'loading' | 'ready' | 'error'>(SERVER_API_ENABLED ? 'loading' : 'ready')
   const [serverBoardError, setServerBoardError] = useState<string | null>(null)
-  const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
-  const [, setReservationRecords] = useKV<ReservationRecord[]>('reservations-data', [])
-  const [, setCanonicalReservationRecords] = useKV<ReservationRecord[]>('reservations', [])
-  const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
-  const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
   const authToken = null
   const { user, hasPermission } = useAuth()
   const { navigate } = useNavigation()
   const { openAssistant } = useFrontDeskAssistant()
-  const { rooms, setRooms, updateRoomStatus } = useRoomSync()
   const canCreateReservation = hasPermission('create:reservation')
   const canEditReservation = hasPermission('edit:reservation')
   const canCheckIn = hasPermission('check-in:guest')
@@ -443,14 +517,17 @@ export function FrontDeskView() {
 
   const refreshServerBoard = useCallback(async () => {
     if (!SERVER_API_ENABLED) return
+    const generation = ++boardRefreshGeneration.current
     setServerBoardState('loading')
     setServerBoardError(null)
     try {
       const board = await pmsApi<{ ok: true; data: ServerBoard }>('/api/front-desk/board', authToken)
+      if (generation !== boardRefreshGeneration.current) return
       setServerBoard(board.data)
       setRooms(mapServerBoardRooms(board.data))
       setServerBoardState('ready')
     } catch (error) {
+      if (generation !== boardRefreshGeneration.current) return
       setServerBoard(null)
       setServerBoardState('error')
       setServerBoardError(error instanceof Error ? error.message : 'Live PMS board is unavailable.')
@@ -460,6 +537,9 @@ export function FrontDeskView() {
 
   useEffect(() => {
     void refreshServerBoard().catch(() => undefined)
+    return () => {
+      boardRefreshGeneration.current += 1
+    }
   }, [refreshServerBoard])
 
   const todayKey = getBangkokDateKey(new Date())
@@ -839,7 +919,7 @@ export function FrontDeskView() {
     const paid = data.payment?.amount || 0
     const remainingBalance = Math.max(0, due - paid)
     const checkedInAt = new Date()
-    setRooms((current) => current.map((room) => room.roomId === assignedRoom.roomId
+    setRooms((current = []) => current.map((room) => room.roomId === assignedRoom.roomId
       ? {
           ...room,
           status: 'OCCUPIED_CLEAN',
@@ -961,7 +1041,7 @@ export function FrontDeskView() {
     const paidNow = data.paymentAmount || 0
     const remainingBalance = Math.max(0, selectedDeparture.balanceDue - paidNow)
     const checkedOutAt = new Date()
-    setRooms((current) => current.map((currentRoom) => currentRoom.roomId === room.roomId
+    setRooms((current = []) => current.map((currentRoom) => currentRoom.roomId === room.roomId
       ? {
           ...currentRoom,
           status: 'VACANT_DIRTY',
@@ -1083,6 +1163,36 @@ export function FrontDeskView() {
     setPrefilledReservation(null)
   }
 
+  if (SERVER_API_ENABLED && serverBoardState !== 'ready') {
+    return (
+      <div className="min-h-full bg-slate-50" data-testid="server-front-desk-unavailable">
+        <div className="border-b bg-white">
+          <div className="mx-auto max-w-[1700px] px-4 py-4 lg:px-6">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase text-blue-700">
+              <Calendar size={15} weight="bold" />
+              Front Desk Today - {todayKey}
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight">Front Desk unavailable</h1>
+          </div>
+        </div>
+        <main className="mx-auto max-w-[1700px] px-4 py-4 lg:px-6">
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900" role="status">
+            <p>
+              {serverBoardState === 'loading'
+                ? 'Loading the authoritative PMS board. No operational totals or actions are shown.'
+                : `Live PMS board unavailable: ${serverBoardError || 'please retry.'}`}
+            </p>
+            {serverBoardState === 'error' && (
+              <Button className="mt-3" size="sm" variant="outline" onClick={() => void refreshServerBoard().catch(() => undefined)}>
+                Retry live board
+              </Button>
+            )}
+          </div>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-full bg-slate-50">
       <div className="border-b bg-white">
@@ -1126,14 +1236,6 @@ export function FrontDeskView() {
       </div>
 
       <main className="mx-auto max-w-[1700px] space-y-4 px-4 py-4 lg:px-6">
-        {SERVER_API_ENABLED && serverBoardState !== 'ready' && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
-            <span>{serverBoardState === 'loading' ? 'Loading the live PMS board. Local browser data is not shown.' : `Live PMS board unavailable: ${serverBoardError || 'please retry.'}`}</span>
-            <Button size="sm" variant="outline" onClick={() => void refreshServerBoard().catch(() => undefined)} disabled={serverBoardState === 'loading'}>
-              {serverBoardState === 'loading' ? 'Loading…' : 'Retry live board'}
-            </Button>
-          </div>
-        )}
         {(!canCreateReservation || !canCheckIn || !canCheckOut || !canEditRoomStatus) && (
           <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700" role="status">
             This board is permission-scoped. Unavailable actions:
