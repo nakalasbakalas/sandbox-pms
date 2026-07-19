@@ -7,6 +7,7 @@ import { resolveRequestContext } from '../server/request-context.mjs'
 import { listDomainEvents, recordDomainEvent } from '../server/domain-events.mjs'
 import {
   createCharge,
+  createGuest,
   createPayment,
   createReservation,
   assignRoom,
@@ -494,6 +495,126 @@ try {
     (error) => error?.statusCode === 404 && /active property/.test(error.message),
     'reservation creation cannot link booking-email evidence from another property',
   )
+
+  // Creation has its own durable property-scoped ledger. This deliberately exercises a
+  // real PostgreSQL advisory lock and unique key rather than relying on a browser retry.
+  const reservationCreateKey = `create-reservation-replay-${runId}`
+  const reservationCreateInputA = {
+    confirmationCode: `CREATE-IDEMP-A-${runId}`,
+    guest: {
+      firstName: 'Create',
+      lastName: `Reservation ${runId}`,
+      email: `create-reservation-a-${runId}@example.test`,
+    },
+    roomTypeCode: fixtureA.roomType.code,
+    checkIn: '2035-06-10',
+    checkOut: '2035-06-12',
+    adults: 1,
+    children: 0,
+    childAges: [],
+    ratePerNight: 1_000,
+    source: 'DIRECT',
+  }
+  const [firstCreatedReservation, concurrentCreatedReservation] = await Promise.all([
+    createReservation(prisma, reservationCreateInputA, actorA, { idempotencyKey: reservationCreateKey }),
+    createReservation(prisma, reservationCreateInputA, actorA, { idempotencyKey: reservationCreateKey }),
+  ])
+  assert.equal(firstCreatedReservation.id, concurrentCreatedReservation.id, 'concurrent duplicate reservation creates return one authoritative reservation')
+  assert.equal(
+    [firstCreatedReservation, concurrentCreatedReservation].filter((reservation) => reservation.idempotentReplay === true).length,
+    1,
+    'exactly one concurrent reservation create is recorded as the idempotent replay',
+  )
+  const replayedCreatedReservation = await createReservation(prisma, reservationCreateInputA, actorA, { idempotencyKey: reservationCreateKey })
+  assert.equal(replayedCreatedReservation.id, firstCreatedReservation.id, 'same reservation create key returns the original reservation')
+  assert.equal(replayedCreatedReservation.idempotentReplay, true, 'later unchanged reservation retry is explicitly marked as a replay')
+  assert.equal(await prisma.reservation.count({ where: { propertyId: fixtureA.property.id, confirmationCode: reservationCreateInputA.confirmationCode } }), 1, 'duplicate reservation creates persist one reservation')
+  assert.equal(await prisma.guest.count({ where: { propertyId: fixtureA.property.id, email: reservationCreateInputA.guest.email } }), 1, 'duplicate reservation creates persist one guest')
+  assert.equal(await prisma.folio.count({ where: { reservationId: firstCreatedReservation.id } }), 1, 'duplicate reservation creates persist one folio')
+  assert.equal(await prisma.charge.count({ where: { folioId: firstCreatedReservation.folio.id } }), 1, 'duplicate reservation creates persist one initial room charge')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: firstCreatedReservation.id, action: 'CREATED' } }), 1, 'duplicate reservation creates persist one reservation history row')
+  assert.equal(await prisma.auditLog.count({ where: { propertyId: fixtureA.property.id, entityId: firstCreatedReservation.id, action: 'CREATED' } }), 1, 'duplicate reservation creates persist one audit row')
+  assert.equal(await prisma.domainEvent.count({ where: { propertyId: fixtureA.property.id, aggregateId: firstCreatedReservation.id, eventType: 'RESERVATION_CREATED' } }), 1, 'duplicate reservation creates persist one domain event')
+  const reservationCreateAttempt = await prisma.pmsCreateAttempt.findUnique({
+    where: { propertyId_idempotencyKey: { propertyId: fixtureA.property.id, idempotencyKey: reservationCreateKey } },
+  })
+  assert.equal(reservationCreateAttempt.operation, 'CREATE_RESERVATION')
+  assert.equal(reservationCreateAttempt.entityType, 'reservation')
+  assert.equal(reservationCreateAttempt.entityId, firstCreatedReservation.id)
+  assert.ok(reservationCreateAttempt.intentFingerprint && reservationCreateAttempt.resultFingerprint, 'reservation create ledger stores one-way intent and result evidence')
+  assert.equal(JSON.stringify(reservationCreateAttempt).includes(reservationCreateInputA.guest.email), false, 'reservation create ledger does not store guest contact data')
+  await assert.rejects(
+    createReservation(prisma, { ...reservationCreateInputA, checkOut: '2035-06-13' }, actorA, { idempotencyKey: reservationCreateKey }),
+    (error) => error?.statusCode === 409 && /different command/.test(error.message),
+    'reservation create keys cannot be reused with a changed stay intent',
+  )
+  await prisma.reservation.update({
+    where: { id: firstCreatedReservation.id },
+    data: { notes: `Superseding create replay ${runId}` },
+  })
+  await assert.rejects(
+    createReservation(prisma, reservationCreateInputA, actorA, { idempotencyKey: reservationCreateKey }),
+    (error) => error?.statusCode === 409 && /superseded by a later change/.test(error.message),
+    'reservation create replay never returns a later mutated reservation as the original outcome',
+  )
+  await assert.rejects(
+    createGuest(prisma, { firstName: 'Wrong', lastName: 'Operation' }, actorA, { idempotencyKey: reservationCreateKey }),
+    (error) => error?.statusCode === 409 && /different command/.test(error.message),
+    'reservation create keys cannot be reused by another create operation',
+  )
+  const reservationCreateInputB = {
+    ...reservationCreateInputA,
+    confirmationCode: `CREATE-IDEMP-B-${runId}`,
+    guest: { ...reservationCreateInputA.guest, email: `create-reservation-b-${runId}@example.test` },
+  }
+  const independentlyCreatedReservation = await createReservation(prisma, reservationCreateInputB, actorB, { idempotencyKey: reservationCreateKey })
+  assert.notEqual(independentlyCreatedReservation.id, firstCreatedReservation.id, 'the same create key is isolated to the active property')
+  assert.equal(
+    await prisma.pmsCreateAttempt.count({ where: { idempotencyKey: reservationCreateKey } }),
+    2,
+    'the reservation create ledger permits the same key once per property',
+  )
+
+  const guestCreateKey = `create-guest-replay-${runId}`
+  const guestCreateInputA = {
+    firstName: 'Create',
+    lastName: `Guest ${runId}`,
+    email: `create-guest-a-${runId}@example.test`,
+    vipStatus: true,
+  }
+  const createdGuest = await createGuest(prisma, guestCreateInputA, actorA, { idempotencyKey: guestCreateKey })
+  const replayedGuest = await createGuest(prisma, guestCreateInputA, actorA, { idempotencyKey: guestCreateKey })
+  assert.equal(replayedGuest.id, createdGuest.id, 'same guest create key returns the original guest')
+  assert.equal(replayedGuest.idempotentReplay, true, 'unchanged guest retry is explicitly marked as a replay')
+  assert.equal(await prisma.guest.count({ where: { propertyId: fixtureA.property.id, email: guestCreateInputA.email } }), 1, 'duplicate guest creates persist one guest')
+  assert.equal(await prisma.auditLog.count({ where: { propertyId: fixtureA.property.id, entityId: createdGuest.id, action: 'CREATED' } }), 1, 'duplicate guest creates persist one audit row')
+  const guestCreateAttempt = await prisma.pmsCreateAttempt.findUnique({
+    where: { propertyId_idempotencyKey: { propertyId: fixtureA.property.id, idempotencyKey: guestCreateKey } },
+  })
+  assert.equal(guestCreateAttempt.operation, 'CREATE_GUEST')
+  assert.equal(guestCreateAttempt.entityType, 'guest')
+  assert.equal(guestCreateAttempt.entityId, createdGuest.id)
+  assert.equal(JSON.stringify(guestCreateAttempt).includes(guestCreateInputA.email), false, 'guest create ledger does not store guest contact data')
+  await assert.rejects(
+    createGuest(prisma, { ...guestCreateInputA, vipStatus: false }, actorA, { idempotencyKey: guestCreateKey }),
+    (error) => error?.statusCode === 409 && /different command/.test(error.message),
+    'guest create keys cannot be reused with changed profile content',
+  )
+  await prisma.guest.update({
+    where: { id: createdGuest.id },
+    data: { notes: `Superseding guest replay ${runId}` },
+  })
+  await assert.rejects(
+    createGuest(prisma, guestCreateInputA, actorA, { idempotencyKey: guestCreateKey }),
+    (error) => error?.statusCode === 409 && /superseded by a later change/.test(error.message),
+    'guest create replay never returns a later mutated profile as the original outcome',
+  )
+  const independentlyCreatedGuest = await createGuest(prisma, {
+    ...guestCreateInputA,
+    email: `create-guest-b-${runId}@example.test`,
+  }, actorB, { idempotencyKey: guestCreateKey })
+  assert.notEqual(independentlyCreatedGuest.id, createdGuest.id, 'the same guest create key is isolated to the active property')
+  assert.equal(await prisma.pmsCreateAttempt.count({ where: { idempotencyKey: guestCreateKey } }), 2, 'guest create keys are composite property scoped')
 
   const auditCountBeforeRejectedPatch = await prisma.auditLog.count({ where: { entityId: reservationA.reservation.id } })
   const historyCountBeforeRejectedPatch = await prisma.reservationLog.count({ where: { reservationId: reservationA.reservation.id } })

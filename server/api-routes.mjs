@@ -11,6 +11,8 @@ function route(path, methods, options = {}) {
     tag: options.tag || 'PMS',
     summary: options.summary || `${methods.join('/')} ${path}`,
     parameters: options.parameters || [],
+    methodParameters: options.methodParameters || {},
+    methodResponseStatuses: options.methodResponseStatuses || {},
     public: options.public === true,
     internal: options.internal === true,
   }
@@ -28,6 +30,17 @@ const requiredIdempotencyKeyParameter = {
   ...optionalIdempotencyKeyParameter,
   required: true,
   description: 'Required property-scoped retry key. Reuse the same value when retrying the same lifecycle command after an uncertain response.',
+}
+
+const requiredCreateIdempotencyKeyParameter = {
+  ...requiredIdempotencyKeyParameter,
+  description: 'Required property-scoped create retry key. Reuse the same value only when retrying the same unchanged create request after an uncertain response.',
+  schema: {
+    type: 'string',
+    minLength: 8,
+    maxLength: 200,
+    pattern: '^[a-zA-Z0-9._:-]+$',
+  },
 }
 
 const optionalReservationVersionParameters = [
@@ -158,7 +171,12 @@ const API_ROUTE_CONTRACTS = [
   route('/api/settings/room-types/{id}', ['PATCH', 'DELETE'], { tag: 'Settings' }),
   route('/api/settings/rooms', ['POST'], { tag: 'Settings' }),
   route('/api/settings/rooms/{id}', ['PATCH', 'DELETE'], { tag: 'Settings' }),
-  route('/api/reservations', ['GET', 'POST'], { tag: 'Reservations' }),
+  route('/api/reservations', ['GET', 'POST'], {
+    tag: 'Reservations',
+    summary: 'List or create property-scoped reservations',
+    methodParameters: { POST: [requiredCreateIdempotencyKeyParameter] },
+    methodResponseStatuses: { POST: [200, 201, 400, 401, 403, 409, 500] },
+  }),
   route('/api/reservations/{id}', ['PATCH'], {
     tag: 'Reservations',
     summary: 'Update a property-scoped reservation; expectedUpdatedAt may be supplied for optimistic concurrency',
@@ -217,7 +235,12 @@ const API_ROUTE_CONTRACTS = [
   route('/api/accounting/v2/trial-balance', ['GET'], { tag: 'Accounting V2' }),
   route('/api/payments', ['POST'], { tag: 'Finance' }),
   route('/api/charges', ['POST'], { tag: 'Finance' }),
-  route('/api/guests', ['GET', 'POST'], { tag: 'Guests' }),
+  route('/api/guests', ['GET', 'POST'], {
+    tag: 'Guests',
+    summary: 'List or create property-scoped guest profiles',
+    methodParameters: { POST: [requiredCreateIdempotencyKeyParameter] },
+    methodResponseStatuses: { POST: [200, 201, 400, 401, 403, 409, 500] },
+  }),
   route('/api/guests/{id}', ['PATCH'], { tag: 'Guests' }),
 ]
 
@@ -230,6 +253,14 @@ export function listApiRouteContracts({ includeInternal = false } = {}) {
       tag: contract.tag,
       summary: contract.summary,
       parameters: contract.parameters.map((parameter) => ({ ...parameter })),
+      methodParameters: Object.fromEntries(Object.entries(contract.methodParameters).map(([method, parameters]) => [
+        method,
+        parameters.map((parameter) => ({ ...parameter })),
+      ])),
+      methodResponseStatuses: Object.fromEntries(Object.entries(contract.methodResponseStatuses).map(([method, statuses]) => [
+        method,
+        [...statuses],
+      ])),
       public: contract.public,
       internal: contract.internal,
     }))
@@ -245,6 +276,14 @@ export function resolveApiRouteContract(pathname) {
     tag: contract.tag,
     summary: contract.summary,
     parameters: contract.parameters.map((parameter) => ({ ...parameter })),
+    methodParameters: Object.fromEntries(Object.entries(contract.methodParameters).map(([method, parameters]) => [
+      method,
+      parameters.map((parameter) => ({ ...parameter })),
+    ])),
+    methodResponseStatuses: Object.fromEntries(Object.entries(contract.methodResponseStatuses).map(([method, statuses]) => [
+      method,
+      [...statuses],
+    ])),
     public: contract.public,
     internal: contract.internal,
   }

@@ -968,10 +968,11 @@ function ReservationDetailDialog({ reservation, open, onClose, onCancel, onCheck
 interface NewReservationDialogProps {
   open: boolean
   onClose: () => void
-  onSubmit: (reservation: ReservationData) => void
+  onSubmit: (reservation: ReservationData) => Promise<void> | void
 }
 
 function NewReservationDialog({ open, onClose, onSubmit }: NewReservationDialogProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [checkIn, setCheckIn] = useState<Date>(addDays(new Date(), 1))
   const [checkOut, setCheckOut] = useState<Date>(addDays(new Date(), 2))
   const [formData, setFormData] = useState({
@@ -991,7 +992,7 @@ function NewReservationDialog({ open, onClose, onSubmit }: NewReservationDialogP
   const totalAmount = nights * formData.ratePerNight
   const depositAmount = Math.floor(totalAmount * 0.3)
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!formData.firstName || !formData.lastName) {
       toast.error('Please fill in guest name')
       return
@@ -1046,22 +1047,28 @@ function NewReservationDialog({ open, onClose, onSubmit }: NewReservationDialogP
       roomNumber: undefined,
     }
 
-    onSubmit(reservation)
-    
-    setFormData({
-      firstName: '',
-      lastName: '',
-      email: '',
-      phone: '',
-      roomType: 'TWIN',
-      adults: 1,
-      children: 0,
-      ratePerNight: 0,
-      source: 'DIRECT',
-      specialRequests: '',
-    })
-    setCheckIn(addDays(new Date(), 1))
-    setCheckOut(addDays(new Date(), 2))
+    setIsSubmitting(true)
+    try {
+      await onSubmit(reservation)
+      setFormData({
+        firstName: '',
+        lastName: '',
+        email: '',
+        phone: '',
+        roomType: 'TWIN',
+        adults: 1,
+        children: 0,
+        ratePerNight: 0,
+        source: 'DIRECT',
+        specialRequests: '',
+      })
+      setCheckIn(addDays(new Date(), 1))
+      setCheckOut(addDays(new Date(), 2))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Reservation could not be created. Retry the unchanged request.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -1263,10 +1270,10 @@ function NewReservationDialog({ open, onClose, onSubmit }: NewReservationDialogP
         </ScrollArea>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSubmit}>
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting}>
             <Plus className="w-4 h-4 mr-2" weight="bold" />
-            Create Reservation
+            {isSubmitting ? 'Creating...' : 'Create Reservation'}
           </Button>
         </DialogFooter>
       </DialogContent>

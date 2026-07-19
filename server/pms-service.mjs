@@ -19,6 +19,12 @@ import { createPasswordHash } from './security.mjs'
 import { recordDomainEvent } from './domain-events.mjs'
 import { chargeIntentFingerprint } from './charge-idempotency.mjs'
 import {
+  assertPmsCreateReplay,
+  claimPmsCreateAttempt,
+  completePmsCreateAttempt,
+  requireCreateIdempotencyKey,
+} from './create-mutation-idempotency.mjs'
+import {
   bahtToSatang,
   dualWriteMoney,
   readMoneySatang,
@@ -2722,8 +2728,32 @@ export async function listGuests(prisma, actor) {
   })
 }
 
-async function createReservationInTransaction(tx, input, actor) {
+async function createReservationInTransaction(tx, input, actor, options = {}) {
     const property = await getProperty(tx, actor)
+    const idempotencyKey = options.requireIdempotency || options.idempotencyKey
+      ? requireCreateIdempotencyKey(options.idempotencyKey)
+      : null
+    const createAttempt = idempotencyKey
+      ? await claimPmsCreateAttempt(tx, {
+        propertyId: property.id,
+        idempotencyKey,
+        operation: 'CREATE_RESERVATION',
+        intent: input,
+      })
+      : null
+    if (createAttempt?.replay) {
+      const existing = createAttempt.attempt.entityId
+        ? await tx.reservation.findFirst({
+          where: { id: createAttempt.attempt.entityId, propertyId: property.id },
+          include: reservationInclude,
+        })
+        : null
+      return assertPmsCreateReplay(createAttempt.attempt, {
+        entityType: 'reservation',
+        entityId: existing?.id,
+        result: existing,
+      })
+    }
     const { checkInKey, checkOutKey } = validateStayInput(input)
     const sourceEmailEventId = await validateSourceEmailEventId(tx, property.id, input.sourceEmailEventId)
 
@@ -2821,14 +2851,22 @@ async function createReservationInTransaction(tx, input, actor) {
     await createAudit(tx, actor, 'CREATED', 'reservation', reservation.id, { confirmationCode: reservation.confirmationCode })
     await emitOperationalEvent(tx, property.id, 'RESERVATION_CREATED', 'reservation', reservation.id, actor)
 
-    return tx.reservation.findUnique({
+    const created = await tx.reservation.findUnique({
       where: { id: reservation.id },
       include: reservationInclude,
     })
+    if (createAttempt) {
+      await completePmsCreateAttempt(tx, createAttempt.attempt, {
+        entityType: 'reservation',
+        entityId: reservation.id,
+        result: created,
+      })
+    }
+    return created
 }
 
-export async function createReservation(prisma, input, actor) {
-  return serializableTransaction(prisma, async (tx) => createReservationInTransaction(tx, input, actor))
+export async function createReservation(prisma, input, actor, options = {}) {
+  return serializableTransaction(prisma, async (tx) => createReservationInTransaction(tx, input, actor, options))
 }
 
 export async function listBookingEmailSources(prisma, actor) {
@@ -4085,11 +4123,41 @@ export async function createCharge(prisma, input, actor) {
   }
 }
 
-export async function createGuest(prisma, input, actor) {
-  const property = await getProperty(prisma, actor)
-  const guest = await prisma.guest.create({ data: { ...validateGuestInput(input), propertyId: property.id } })
-  await createAudit(prisma, actor, 'CREATED', 'guest', guest.id)
-  return guest
+export async function createGuest(prisma, input, actor, options = {}) {
+  return serializableTransaction(prisma, async (tx) => {
+    const property = await getProperty(tx, actor)
+    const idempotencyKey = options.requireIdempotency || options.idempotencyKey
+      ? requireCreateIdempotencyKey(options.idempotencyKey)
+      : null
+    const createAttempt = idempotencyKey
+      ? await claimPmsCreateAttempt(tx, {
+        propertyId: property.id,
+        idempotencyKey,
+        operation: 'CREATE_GUEST',
+        intent: input,
+      })
+      : null
+    if (createAttempt?.replay) {
+      const existing = createAttempt.attempt.entityId
+        ? await tx.guest.findFirst({ where: { id: createAttempt.attempt.entityId, propertyId: property.id } })
+        : null
+      return assertPmsCreateReplay(createAttempt.attempt, {
+        entityType: 'guest',
+        entityId: existing?.id,
+        result: existing,
+      })
+    }
+    const guest = await tx.guest.create({ data: { ...validateGuestInput(input), propertyId: property.id } })
+    await createAudit(tx, actor, 'CREATED', 'guest', guest.id)
+    if (createAttempt) {
+      await completePmsCreateAttempt(tx, createAttempt.attempt, {
+        entityType: 'guest',
+        entityId: guest.id,
+        result: guest,
+      })
+    }
+    return guest
+  })
 }
 
 export async function updateGuest(prisma, guestId, input, actor) {

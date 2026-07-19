@@ -31,7 +31,7 @@ import { useNavigation } from '@/hooks/use-navigation'
 import { useServerBookingBoard } from '@/hooks/use-server-booking-board'
 import { capabilityEnabled, useSystemCapabilities } from '@/hooks/use-system-capabilities'
 import { getBangkokDateKey } from '@/lib/hotel/business-rules'
-import { createPmsIdempotencyKey, isDefinitivePmsApiError, pmsApi } from '@/lib/pms-api-client'
+import { isDefinitivePmsApiError, pmsApi } from '@/lib/pms-api-client'
 import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
 import {
   clearAuthoritativeWorkflowQuery,
@@ -285,31 +285,39 @@ export function ServerBookingBoard() {
   ].filter((link) => link.visible)
 
   const createReservation = async (reservation: NewReservationData) => {
+    const requestBody = {
+      guest: {
+        firstName: reservation.guest.firstName,
+        lastName: reservation.guest.lastName,
+        email: reservation.guest.email || undefined,
+        phone: reservation.guest.phone || undefined,
+        nationality: reservation.guest.nationality || undefined,
+        vipStatus: reservation.guest.vipStatus,
+      },
+      roomTypeCode: reservation.roomTypeCode,
+      assignedRoomId: reservation.assignedRoomId || undefined,
+      checkIn: getBangkokDateKey(reservation.checkIn),
+      checkOut: getBangkokDateKey(reservation.checkOut),
+      adults: reservation.adults,
+      children: reservation.children,
+      childAges: reservation.childAges || [],
+      ratePerNight: reservation.ratePerNight,
+      source: reservation.source,
+      specialRequests: reservation.specialRequests || undefined,
+      notes: reservation.notes || undefined,
+    }
+    const attempt = {
+      operation: 'reservation-create',
+      entityId: 'booking-board-new-reservation',
+      material: requestBody,
+    } satisfies DurableAttemptDescriptor
+    const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
     const response = await pmsApi<{ ok: true; message?: string }>('/api/reservations', null, {
       method: 'POST',
-      headers: { 'x-idempotency-key': createPmsIdempotencyKey('booking-board-reservation') },
-      body: JSON.stringify({
-        guest: {
-          firstName: reservation.guest.firstName,
-          lastName: reservation.guest.lastName,
-          email: reservation.guest.email || undefined,
-          phone: reservation.guest.phone || undefined,
-          nationality: reservation.guest.nationality || undefined,
-          vipStatus: reservation.guest.vipStatus,
-        },
-        roomTypeCode: reservation.roomTypeCode,
-        assignedRoomId: reservation.assignedRoomId || undefined,
-        checkIn: getBangkokDateKey(reservation.checkIn),
-        checkOut: getBangkokDateKey(reservation.checkOut),
-        adults: reservation.adults,
-        children: reservation.children,
-        childAges: reservation.childAges || [],
-        ratePerNight: reservation.ratePerNight,
-        source: reservation.source,
-        specialRequests: reservation.specialRequests || undefined,
-        notes: reservation.notes || undefined,
-      }),
+      headers: { 'x-idempotency-key': idempotencyKey },
+      body: JSON.stringify(requestBody),
     })
+    await durableAttemptKeys.confirmSuccess(attempt)
     toast.success(response.message || 'Reservation created.')
     setNewReservationOpen(false)
     reload()

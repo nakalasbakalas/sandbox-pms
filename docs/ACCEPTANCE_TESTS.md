@@ -304,6 +304,7 @@ Backend fixture acceptance is not staff workflow acceptance. The server-mode hou
 Acceptance requires:
 
 - unassigned and assigned stays are selectable without reading browser-KV data;
+- `POST /api/reservations` and `POST /api/guests` require `x-idempotency-key`; concurrent and later same-intent retries create one property-scoped result and return it with `idempotentReplay: true`, while changed intent/operation and superseded/deleted results return `409` without duplicate evidence;
 - room assignment and room moves call the authenticated server command with a per-attempt idempotency header;
 - room assignment sends a matching reservation update token in body and header; a stale assignment changes no reservation, inventory, attempt, audit, history, or event state;
 - the server persists one property-scoped `ReservationMutationAttempt` per idempotency key; a same-intent replay returns the authoritative reservation without duplicate audit, history, or domain-event evidence, while a changed intent returns `409`;

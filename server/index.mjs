@@ -1724,8 +1724,11 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/reservations' && request.method === 'POST') {
     requirePermission(user, 'create:reservation')
-    const reservation = await createReservation(db, await readJson(request), user)
-    sendJson(response, 201, { ok: true, data: reservation, message: `Reservation ${reservation.confirmationCode} created.` })
+    const reservation = await createReservation(db, await readJson(request), user, {
+      idempotencyKey: context.idempotencyKey,
+      requireIdempotency: true,
+    })
+    sendJson(response, reservation.idempotentReplay ? 200 : 201, { ok: true, data: reservation, message: reservation.idempotentReplay ? `Existing reservation ${reservation.confirmationCode} returned.` : `Reservation ${reservation.confirmationCode} created.` })
     return true
   }
 
@@ -1956,8 +1959,11 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/guests' && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
-    const guest = await createGuest(db, await readJson(request), user)
-    sendJson(response, 201, { ok: true, data: guest, message: 'Guest profile created.' })
+    const guest = await createGuest(db, await readJson(request), user, {
+      idempotencyKey: context.idempotencyKey,
+      requireIdempotency: true,
+    })
+    sendJson(response, guest.idempotentReplay ? 200 : 201, { ok: true, data: guest, message: guest.idempotentReplay ? 'Existing guest profile returned.' : 'Guest profile created.' })
     return true
   }
 

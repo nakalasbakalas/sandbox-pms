@@ -3224,29 +3224,38 @@ export function Board() {
         prefilledData={prefilledReservation}
         onSubmit={async (reservation) => {
           if (SERVER_API_ENABLED) {
+            const requestBody = {
+              guest: {
+                firstName: reservation.guest.firstName,
+                lastName: reservation.guest.lastName,
+                email: reservation.guest.email || undefined,
+                phone: reservation.guest.phone || undefined,
+                nationality: reservation.guest.nationality || undefined,
+              },
+              roomTypeCode: reservation.roomTypeCode,
+              assignedRoomId: reservation.assignedRoomId || undefined,
+              checkIn: reservation.checkIn,
+              checkOut: reservation.checkOut,
+              adults: reservation.adults,
+              children: reservation.children,
+              childAges: reservation.childAges || [],
+              ratePerNight: reservation.ratePerNight,
+              source: reservation.source,
+              specialRequests: reservation.specialRequests || undefined,
+              notes: reservation.notes || undefined,
+            }
+            const attempt = {
+              operation: 'reservation-create',
+              entityId: 'legacy-board-new-reservation',
+              material: requestBody,
+            } as const
+            const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
             const response = await pmsApi<{ ok: true; data?: any; message?: string }>('/api/reservations', authToken, {
               method: 'POST',
-              body: JSON.stringify({
-                guest: {
-                  firstName: reservation.guest.firstName,
-                  lastName: reservation.guest.lastName,
-                  email: reservation.guest.email || undefined,
-                  phone: reservation.guest.phone || undefined,
-                  nationality: reservation.guest.nationality || undefined,
-                },
-                roomTypeCode: reservation.roomTypeCode,
-                assignedRoomId: reservation.assignedRoomId || undefined,
-                checkIn: reservation.checkIn,
-                checkOut: reservation.checkOut,
-                adults: reservation.adults,
-                children: reservation.children,
-                childAges: reservation.childAges || [],
-                ratePerNight: reservation.ratePerNight,
-                source: reservation.source,
-                specialRequests: reservation.specialRequests || undefined,
-                notes: reservation.notes || undefined,
-              }),
+              headers: { 'x-idempotency-key': idempotencyKey },
+              body: JSON.stringify(requestBody),
             })
+            await durableAttemptKeys.confirmSuccess(attempt)
             await refreshServerBoard()
             toast.success(response.message || 'Reservation created.')
             setShowNewReservationDialog(false)

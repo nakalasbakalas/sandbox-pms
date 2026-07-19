@@ -263,5 +263,13 @@ assert.equal(cancelParameters.some((parameter) => parameter.name === 'x-idempote
 assert.equal(cancelParameters.some((parameter) => parameter.name === 'x-reservation-expected-updated-at'), true, 'OpenAPI publishes stale-write protection for cancellation')
 const guestParameters = openApi.paths['/api/reservations/{id}/guest'].patch.parameters
 assert.equal(guestParameters.some((parameter) => parameter.name === 'x-guest-expected-updated-at'), true, 'OpenAPI publishes stale-write protection for reservation guest updates')
+for (const path of ['/api/reservations', '/api/guests']) {
+  assert.equal(openApi.paths[path].get.parameters, undefined, `${path} GET does not require a create retry key`)
+  const createOperation = openApi.paths[path].post
+  assert.equal(createOperation.parameters.find((parameter) => parameter.name === 'x-idempotency-key')?.required, true, `${path} POST requires a create retry key`)
+  assert.ok(createOperation.responses[201], `${path} POST documents first-create success`)
+  assert.ok(createOperation.responses[200], `${path} POST documents idempotent replay success`)
+  assert.ok(createOperation.responses[409], `${path} POST documents create-key conflicts and superseded replay`)
+}
 
 console.log('Front desk board range contract tests passed.')

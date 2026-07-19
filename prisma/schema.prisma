@@ -71,6 +71,7 @@ model Property {
   deadLetterEvents DeadLetterEvent[]
   reservationMutationAttempts ReservationMutationAttempt[]
   channelMutationAttempts ChannelMutationAttempt[]
+  pmsCreateAttempts PmsCreateAttempt[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -259,6 +260,22 @@ model ReservationMutationAttempt {
 
   @@unique([propertyId, idempotencyKey])
   @@index([reservationId, createdAt])
+}
+
+model PmsCreateAttempt {
+  id                String   @id @default(cuid())
+  propertyId        String
+  property          Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  idempotencyKey    String
+  operation         String
+  intentFingerprint String
+  entityType        String?
+  entityId          String?
+  resultFingerprint String?
+  createdAt         DateTime @default(now())
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, operation, createdAt])
 }
 
 model RoomDateInventory {

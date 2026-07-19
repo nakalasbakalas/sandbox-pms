@@ -1002,31 +1002,40 @@ export function FrontDeskView() {
       return
     }
     if (SERVER_API_ENABLED) {
+      const requestBody = {
+        guest: {
+          firstName: reservation.guest.firstName,
+          lastName: reservation.guest.lastName,
+          email: reservation.guest.email || undefined,
+          phone: reservation.guest.phone || undefined,
+          nationality: reservation.guest.nationality || undefined,
+          vipStatus: reservation.guest.vipStatus,
+        },
+        roomTypeCode: reservation.roomTypeCode,
+        assignedRoomId: reservation.assignedRoomId || undefined,
+        checkIn: getBangkokDateKey(reservation.checkIn),
+        checkOut: getBangkokDateKey(reservation.checkOut),
+        adults: reservation.adults,
+        children: reservation.children,
+        childAges: reservation.childAges || [],
+        ratePerNight: reservation.ratePerNight,
+        source: reservation.source,
+        specialRequests: reservation.specialRequests || undefined,
+        notes: reservation.notes || undefined,
+      }
+      const attempt = {
+        operation: 'reservation-create',
+        entityId: 'front-desk-new-reservation',
+        material: requestBody,
+      } satisfies DurableAttemptDescriptor
       try {
+        const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
         const response = await pmsApi<{ ok: true; message?: string; data?: any }>('/api/reservations', authToken, {
           method: 'POST',
-          body: JSON.stringify({
-            guest: {
-              firstName: reservation.guest.firstName,
-              lastName: reservation.guest.lastName,
-              email: reservation.guest.email || undefined,
-              phone: reservation.guest.phone || undefined,
-              nationality: reservation.guest.nationality || undefined,
-              vipStatus: reservation.guest.vipStatus,
-            },
-            roomTypeCode: reservation.roomTypeCode,
-            assignedRoomId: reservation.assignedRoomId || undefined,
-            checkIn: getBangkokDateKey(reservation.checkIn),
-            checkOut: getBangkokDateKey(reservation.checkOut),
-            adults: reservation.adults,
-            children: reservation.children,
-            childAges: reservation.childAges || [],
-            ratePerNight: reservation.ratePerNight,
-            source: reservation.source,
-            specialRequests: reservation.specialRequests || undefined,
-            notes: reservation.notes || undefined,
-          }),
+          headers: { 'x-idempotency-key': idempotencyKey },
+          body: JSON.stringify(requestBody),
         })
+        await durableAttemptKeys.confirmSuccess(attempt)
         await refreshServerBoard()
         toast.success(response.message || 'Reservation created.')
         setNewReservationOpen(false)

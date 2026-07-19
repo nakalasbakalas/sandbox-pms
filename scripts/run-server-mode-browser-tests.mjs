@@ -443,6 +443,37 @@ try {
   assert.equal(sanitizedServerDraft?.data?.adminUser?.confirmPassword, '', 'server onboarding draft removes the confirmation field value')
   await credentialContext.close()
 
+  const missingReservationCreateKey = await context.request.post('/api/reservations', { data: {} })
+  assert.equal(missingReservationCreateKey.status(), 400, 'staff reservation create rejects a missing idempotency key before applying input')
+  const missingGuestCreateKey = await context.request.post('/api/guests', { data: {} })
+  assert.equal(missingGuestCreateKey.status(), 400, 'staff guest create rejects a missing idempotency key before applying input')
+
+  const browserGuestCreateKey = `browser-guest-create:${randomUUID()}`
+  const browserGuestCreateInput = {
+    firstName: 'Browser Guest',
+    lastName: runId,
+    email: `browser-guest-create-${runId}@example.test`,
+  }
+  const firstBrowserGuestCreate = await context.request.post('/api/guests', {
+    data: browserGuestCreateInput,
+    headers: { 'x-idempotency-key': browserGuestCreateKey },
+  })
+  assert.equal(firstBrowserGuestCreate.status(), 201, 'the guest API reports first-create success')
+  const firstBrowserGuestPayload = await firstBrowserGuestCreate.json()
+  const replayedBrowserGuestCreate = await context.request.post('/api/guests', {
+    data: browserGuestCreateInput,
+    headers: { 'x-idempotency-key': browserGuestCreateKey },
+  })
+  assert.equal(replayedBrowserGuestCreate.status(), 200, 'the guest API reports same-intent replay success')
+  const replayedBrowserGuestPayload = await replayedBrowserGuestCreate.json()
+  assert.equal(replayedBrowserGuestPayload.data.id, firstBrowserGuestPayload.data.id, 'the guest API replay returns the original profile')
+  assert.equal(replayedBrowserGuestPayload.data.idempotentReplay, true, 'the guest API marks the replay explicitly')
+  const conflictingBrowserGuestCreate = await context.request.post('/api/guests', {
+    data: { ...browserGuestCreateInput, lastName: `${runId}-changed` },
+    headers: { 'x-idempotency-key': browserGuestCreateKey },
+  })
+  assert.equal(conflictingBrowserGuestCreate.status(), 409, 'the guest API rejects reuse of a create key for changed input')
+
   const boardReservationOne = await apiJson(context.request, 'POST', '/api/reservations', {
     confirmationCode: `BOARD-A-${runId}`,
     guest: {
@@ -459,7 +490,7 @@ try {
     childAges: [],
     ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
     source: 'DIRECT',
-  })
+  }, { 'x-idempotency-key': `browser-board-a:${randomUUID()}` })
   const boardReservationTwo = await apiJson(context.request, 'POST', '/api/reservations', {
     confirmationCode: `BOARD-B-${runId}`,
     guest: {
@@ -476,7 +507,7 @@ try {
     childAges: [],
     ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
     source: 'DIRECT',
-  })
+  }, { 'x-idempotency-key': `browser-board-b:${randomUUID()}` })
   assert.notEqual(boardReservationOne.data.id, boardReservationTwo.data.id, 'same-room board stays persist as distinct reservations')
   assert.equal(boardReservationOne.data.assignedRoomId, boardRoom.id, 'first board stay is assigned to the dedicated server room')
   assert.equal(boardReservationTwo.data.assignedRoomId, boardRoom.id, 'second board stay is assigned to the dedicated server room')
@@ -536,7 +567,7 @@ try {
     childAges: [],
     ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
     source: 'DIRECT',
-  })
+  }, { 'x-idempotency-key': `browser-board-c:${randomUUID()}` })
   assert.equal(boardReservationThree.data.assignedRoomId, null, 'third board stay begins in the authoritative unassigned queue')
 
   const housekeeping = await apiJson(context.request, 'POST', '/api/housekeeping/tasks', {
@@ -651,6 +682,68 @@ try {
   assert.equal(await page.getByText(boardGuestTwo, { exact: true }).count(), 1, 'the second same-room stay renders as one distinct segment')
   assert.equal(await page.getByRole('alert').count(), 0, 'retry replaces the truthful error with authoritative board data')
   await assertNoOperationalBrowserStorage('server-mode booking board after retry')
+
+  // Simulate the visible Booking Board form losing an otherwise successful create response.
+  // The form must keep its input and logical key, replay the original server result on the
+  // operator's retry, and still show the persisted stay after a full reload.
+  const ambiguousCreateFirstName = 'Browser Create'
+  const ambiguousCreateLastName = runId
+  const ambiguousCreateEmail = `browser-create-${runId}@example.test`
+  let ambiguousCreateKey = null
+  let ambiguousCreateRetryKey = null
+  let lostCreateUpstream = null
+  let replayedCreateUpstream = null
+  let interceptedCreateCount = 0
+  await page.route('**/api/reservations', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue()
+      return
+    }
+    interceptedCreateCount += 1
+    const requestKey = route.request().headers()['x-idempotency-key'] || null
+    const upstream = await route.fetch()
+    if (interceptedCreateCount === 1) {
+      ambiguousCreateKey = requestKey
+      assert.ok(ambiguousCreateKey, 'the visible Booking Board form sends a create idempotency key')
+      assert.equal(upstream.status(), 201, 'the visible reservation create reaches the authoritative PMS before its response is lost')
+      lostCreateUpstream = await upstream.json()
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Injected ambiguous reservation create response.' }),
+      })
+      return
+    }
+    ambiguousCreateRetryKey = requestKey
+    assert.equal(ambiguousCreateRetryKey, ambiguousCreateKey, 'the visible form retry reuses the exact logical create key')
+    assert.equal(upstream.status(), 200, 'the visible form retry receives the authoritative replay response')
+    replayedCreateUpstream = await upstream.json()
+    await route.fulfill({ response: upstream })
+  })
+  await page.getByRole('button', { name: 'New reservation', exact: false }).click()
+  const createDialog = page.getByRole('dialog', { name: 'New Reservation' })
+  await createDialog.getByLabel('First Name *').fill(ambiguousCreateFirstName)
+  await createDialog.getByLabel('Last Name *').fill(ambiguousCreateLastName)
+  await createDialog.getByLabel('Email').fill(ambiguousCreateEmail)
+  await createDialog.getByRole('button', { name: 'Create Reservation', exact: true }).click()
+  await createDialog.getByRole('button', { name: 'Create Reservation', exact: true }).waitFor({ state: 'visible' })
+  assert.ok(lostCreateUpstream?.data?.id, 'the lost create response contains the authoritative reservation identifier')
+  assert.equal(await createDialog.getByLabel('First Name *').inputValue(), ambiguousCreateFirstName, 'an ambiguous create keeps the first name for a truthful retry')
+  assert.equal(await createDialog.getByLabel('Last Name *').inputValue(), ambiguousCreateLastName, 'an ambiguous create keeps the last name for a truthful retry')
+  assert.equal(await createDialog.getByLabel('Email').inputValue(), ambiguousCreateEmail, 'an ambiguous create keeps the contact field for a truthful retry')
+  await createDialog.getByRole('button', { name: 'Create Reservation', exact: true }).click()
+  await createDialog.waitFor({ state: 'hidden' })
+  assert.equal(replayedCreateUpstream?.data?.id, lostCreateUpstream.data.id, 'the visible retry returns the same reservation')
+  assert.equal(replayedCreateUpstream?.data?.idempotentReplay, true, 'the visible retry is explicitly identified as a replay')
+  assert.equal(await prisma.reservation.count({ where: { id: lostCreateUpstream.data.id, propertyId: property.id } }), 1, 'ambiguous browser create persists one reservation')
+  assert.equal(await prisma.guest.count({ where: { propertyId: property.id, email: ambiguousCreateEmail } }), 1, 'ambiguous browser create persists one guest')
+  assert.equal(await prisma.folio.count({ where: { reservationId: lostCreateUpstream.data.id } }), 1, 'ambiguous browser create persists one folio')
+  assert.equal(await prisma.charge.count({ where: { folioId: lostCreateUpstream.data.folio.id } }), 1, 'ambiguous browser create persists one initial charge')
+  await page.unroute('**/api/reservations')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+  await page.getByText(`${ambiguousCreateFirstName} ${ambiguousCreateLastName}`, { exact: false }).waitFor({ state: 'visible' })
+  await assertNoOperationalBrowserStorage('ambiguous server-mode create retry and reload')
 
   // Board handoffs must open authoritative staff workspaces without applying a mutation.
   await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()

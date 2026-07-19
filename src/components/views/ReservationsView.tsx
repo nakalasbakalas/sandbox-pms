@@ -708,29 +708,38 @@ export function ReservationsView() {
       return
     }
     if (SERVER_API_ENABLED) {
+      const requestBody = {
+        guest: {
+          firstName: reservation.guest.firstName,
+          lastName: reservation.guest.lastName,
+          email: reservation.guest.email,
+          phone: reservation.guest.phone,
+          nationality: reservation.guest.nationality,
+          vipStatus: reservation.guest.vipStatus,
+        },
+        roomTypeCode: reservation.roomTypeCode,
+        checkIn: getBangkokDateKey(reservation.checkIn),
+        checkOut: getBangkokDateKey(reservation.checkOut),
+        adults: reservation.adults,
+        children: reservation.children,
+        childAges: reservation.childAges ?? [],
+        ratePerNight: reservation.ratePerNight,
+        source: reservation.source,
+        specialRequests: reservation.specialRequests,
+        notes: reservation.notes,
+      }
+      const attempt = {
+        operation: 'reservation-create',
+        entityId: 'reservations-new-reservation',
+        material: requestBody,
+      } satisfies DurableAttemptDescriptor
+      const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
       const payload = await pmsApi<{ ok: true; data: any; message?: string }>('/api/reservations', authToken, {
         method: 'POST',
-        body: JSON.stringify({
-          guest: {
-            firstName: reservation.guest.firstName,
-            lastName: reservation.guest.lastName,
-            email: reservation.guest.email,
-            phone: reservation.guest.phone,
-            nationality: reservation.guest.nationality,
-            vipStatus: reservation.guest.vipStatus,
-          },
-          roomTypeCode: reservation.roomTypeCode,
-          checkIn: getBangkokDateKey(reservation.checkIn),
-          checkOut: getBangkokDateKey(reservation.checkOut),
-          adults: reservation.adults,
-          children: reservation.children,
-          childAges: reservation.childAges ?? [],
-          ratePerNight: reservation.ratePerNight,
-          source: reservation.source,
-          specialRequests: reservation.specialRequests,
-          notes: reservation.notes,
-        }),
+        headers: { 'x-idempotency-key': idempotencyKey },
+        body: JSON.stringify(requestBody),
       })
+      await durableAttemptKeys.confirmSuccess(attempt)
       const serverReservation = reservationFromServer(payload.data)
       setReservations((current) => [...current.filter((item) => item.id !== serverReservation.id), serverReservation])
       toast.success(payload.message || `Reservation ${serverReservation.confirmationNumber} created.`)

@@ -19,6 +19,7 @@ import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { nightsBetween } from '@/lib/hotel/business-rules'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
 import { toast } from 'sonner'
 import { useNavigation } from '@/hooks/use-navigation'
 
@@ -281,19 +282,28 @@ export function GuestsView() {
     setNewGuestError(null)
     try {
       if (SERVER_API_ENABLED) {
+        const requestBody = {
+          firstName: newGuest.firstName,
+          lastName: newGuest.lastName,
+          email: newGuest.email || undefined,
+          phone: newGuest.phone || undefined,
+          nationality: newGuest.nationality || undefined,
+          idNumber: newGuest.idNumber || undefined,
+          notes: newGuest.notes || undefined,
+          vipStatus: newGuest.vipStatus,
+        }
+        const attempt = {
+          operation: 'guest-create',
+          entityId: 'guests-new-guest',
+          material: requestBody,
+        } satisfies DurableAttemptDescriptor
+        const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
         const payload = await pmsApi<{ ok: true; data: any }>('/api/guests', authToken, {
           method: 'POST',
-          body: JSON.stringify({
-            firstName: newGuest.firstName,
-            lastName: newGuest.lastName,
-            email: newGuest.email || undefined,
-            phone: newGuest.phone || undefined,
-            nationality: newGuest.nationality || undefined,
-            idNumber: newGuest.idNumber || undefined,
-            notes: newGuest.notes || undefined,
-            vipStatus: newGuest.vipStatus,
-          }),
+          headers: { 'x-idempotency-key': idempotencyKey },
+          body: JSON.stringify(requestBody),
         })
+        await durableAttemptKeys.confirmSuccess(attempt)
         await refreshServerGuests()
         setSelectedGuest(guestFromServer({ ...payload.data, reservations: [] }))
       } else {
