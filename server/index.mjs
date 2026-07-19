@@ -1030,7 +1030,7 @@ async function handleApi(request, response, url) {
     requirePermission(user, 'manage:channels')
     sendJson(response, 200, {
       ok: true,
-      data: await deleteChannelMapping(db, context, channelMappingParams.id, { reason: url.searchParams.get('reason') }),
+      data: await deleteChannelMapping(db, context, channelMappingParams.id, await readJson(request)),
       message: 'Channel mapping deleted.',
     })
     return true
@@ -1655,7 +1655,13 @@ async function handleApi(request, response, url) {
 
   if (params && request.method === 'DELETE') {
     requirePermission(user, 'manage:channels')
-    const feed = await deactivateIcalFeedChannel(db, context, params.provider, requestBaseOrigin(request))
+    const feed = await deactivateIcalFeedChannel(
+      db,
+      context,
+      params.provider,
+      requestBaseOrigin(request),
+      await readJson(request),
+    )
     sendJson(response, 200, { ok: true, data: feed, message: `${feed.name} iCal feed disabled.` })
     return true
   }

@@ -366,6 +366,18 @@ An invalid or missing read-authority value falls back to `legacy_float`. That fa
 
 ## iCal Export Token Migration And Rotation
 
+The server-mode Channel Manager is an authority boundary, not a channel manager proof screen:
+
+1. Load `/channels` and confirm it reports manual/review-gated iCal and dry-run/unproven OTA capability evidence.
+2. If any channel, mapping, room-setup, or capability request fails, stop. The screen must show `Channel Manager unavailable`, block writes, and must not display browser fixtures.
+3. Channel configuration, export-token rotation, mapping changes, and channel removal require `manage:channels`, a valid `x-idempotency-key`, and an operational reason containing no URL, credential, email address, or phone number. Retain the same key for an unchanged uncertain retry; changed intent returns `409`. A `view:channels` user is read-only.
+4. Do not paste or store an inbound provider iCal URL. The PMS supports hosted outbound date-block feeds only until an approved secret-reference service exists. Migration `20260719100000_remove_raw_ical_import_urls` must remove legacy `config.importUrl` values during deploy.
+5. Initial issue and rotation require `x-idempotency-key`. Retain the same key when retrying an uncertain request: the same intent replays the original URL without a second audit event while that token is still current or in grace. Changed intent, disabled channels, and expired/superseded token attempts return `409`. A new export URL is visible only on issue/rotation. Prior hashed tokens remain valid for 15 minutes; update the provider, verify the new feed, then allow the grace window to expire.
+6. Configuration/removal reasons are JSON-body fields and must contain no credentials, URLs, email addresses, or phone numbers.
+7. Apply migration `20260719103000_channel_mutation_idempotency` before deploying this API/UI pair. Run `npm.cmd run test:channels-server-authority` after changing channel UI, iCal configuration, mapping validation, idempotency, or capability wording.
+
+Rate push, rate parity, real-time inventory, provider sync logs/performance, and browser iCal reservation imports are demo-only. Do not use them as server, staging, or provider evidence.
+
 Migration `20260717141000_ical_token_hash_backfill` requires PostgreSQL `pgcrypto`, hashes the exact UTF-8 token bytes with SHA-256, stores the unpadded base64url digest, and removes the raw `Channel.config.exportToken` field in the same update.
 
 1. Apply it first to an empty database and a restored sanitized staging copy through `npx.cmd prisma migrate deploy`.

@@ -228,6 +228,17 @@ Empty-database migration success, a sanitized restored-staging-copy migration, a
 
 ## iCal Token Storage And Disclosure
 
+- `/channels` in server mode reads configured feeds, mappings, room types/rooms, and capability evidence only from authenticated APIs; seeded browser fixtures never appear.
+- Failure of any required Channels API produces an explicit unavailable state, blocks writes, and offers an authoritative retry without local fallback.
+- `view:channels` can inspect server state but cannot use configuration, rotation, removal, or mapping mutation controls; `manage:channels` remains enforced by the backend.
+- Private provider import URLs are rejected and never persist in `Channel.config`; the deploy migration removes legacy values and disables inbound iCal sync.
+- Normal iCal list/configuration responses never include a previously issued export bearer URL; only initial issue or explicit rotation may return a URL. Issue/rotation requires a property/provider-scoped idempotency key: same intent returns the exact original URL without duplicate evidence only while the token is current or in grace. Changed intent, retry after disable, and retry after a superseding rotation's grace expiry return `409`.
+- iCal and mapping inputs reject unknown fields. Configure, rotate, mapping, and disable actions reject URL/credential/contact-shaped JSON-body reasons, sanitize the reason again at persistence, and create property-scoped audit/domain-event evidence with `providerWrite: false`.
+- Concurrent first-time setup serializes to one channel. Configure/rotate and disable share the same property/provider lock so a later disable remains authoritative.
+- Configuration, disable, mapping create/update/pause/activate/delete, and token issue/rotation all require property-scoped idempotency. An unchanged retry returns the original public result with no new audit/domain event; reuse for changed intent returns `409`.
+- Rate push, rate parity, real-time inventory, provider logs/performance, and browser reservation imports are absent from the operational server-mode Channels workspace.
+- `npm.cmd run test:channels-server-authority` covers property isolation, forged mapping IDs, secret non-disclosure, reason/audit evidence, capability wording, and demo/server separation.
+
 Acceptance requires:
 
 - a fixed token vector produces the same SHA-256 unpadded base64url digest in the Node service and PostgreSQL migration expression;
@@ -235,7 +246,7 @@ Acceptance requires:
 - the migration aborts if an object channel config still contains a raw token;
 - normal channel lists and ordinary configuration updates never return `exportFeedUrl`;
 - initial issue and explicit rotation may return one full URL, while a later list cannot recover it;
-- the previous token stops authorizing a feed after rotation; and
+- the previous token authorizes only during the bounded rotation recovery window; and
 - no migration query, log, audit row, status DTO, screenshot, or test output exposes a raw token.
 
 Focused migration/service regression evidence comes from `scripts/run-ical-property-scope-tests.mjs`. Applying the migration to an empty database is CI engineering evidence; a restored staging-copy migration and postcondition proof remain separate staging evidence.

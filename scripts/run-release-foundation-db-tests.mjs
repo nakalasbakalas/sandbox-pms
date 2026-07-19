@@ -1,4 +1,4 @@
-/* global console, process */
+/* global console, process, setTimeout */
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { assertSafeE2EDatabase, redactDatabaseUrl } from './db-safety.mjs'
@@ -26,6 +26,17 @@ import {
 } from '../server/housekeeping-service.mjs'
 import { closeNightAuditBusinessDate, listNightAuditRuns } from '../server/night-audit-service.mjs'
 import { createPublicHold, createPublicQuote } from '../server/direct-booking-service.mjs'
+import {
+  configureIcalFeedChannel,
+  deactivateIcalFeedChannel,
+  listIcalFeedChannels,
+} from '../server/ical-feed.mjs'
+import {
+  createChannelMapping,
+  deleteChannelMapping,
+  listChannelMappings,
+  updateChannelMapping,
+} from '../server/channel-mapping-service.mjs'
 
 const e2eDatabaseUrl = assertSafeE2EDatabase()
 process.env.DATABASE_URL = e2eDatabaseUrl
@@ -229,6 +240,164 @@ try {
   assert.equal(contextA.role, 'FRONT_DESK', 'membership role overrides the global ADMIN compatibility role')
   assert.throws(() => requirePermission(contextA.actor, 'manage:users'), /permission/, 'effective membership role prevents global-role privilege escalation')
   assert.equal(contextB.role, 'HOUSEKEEPING')
+
+  const channelAContext = { ...managerContextA, idempotencyKey: `ical-a:${randomUUID()}` }
+  const channelBContext = { ...managerContextB, idempotencyKey: `ical-b:${randomUUID()}` }
+  const channelA = await configureIcalFeedChannel(prisma, channelAContext, {
+    provider: 'booking-com',
+    exportFileName: `gate-a-${runId}.ics`,
+    reason: 'Create the guarded first-property iCal fixture.',
+  }, 'https://pms.example.test')
+  const channelB = await configureIcalFeedChannel(prisma, channelBContext, {
+    provider: 'agoda',
+    exportFileName: `gate-b-${runId}.ics`,
+    reason: 'Create the guarded second-property iCal fixture.',
+  }, 'https://pms.example.test')
+  const listedChannelsA = await listIcalFeedChannels(prisma, managerContextA, 'https://pms.example.test')
+  const listedChannelsB = await listIcalFeedChannels(prisma, managerContextB, 'https://pms.example.test')
+  assert.deepEqual(listedChannelsA.map((channel) => channel.id), [channelA.id], 'iCal list is isolated to property A')
+  assert.deepEqual(listedChannelsB.map((channel) => channel.id), [channelB.id], 'iCal list is isolated to property B')
+  const storedChannelA = await prisma.channel.findUnique({ where: { id: channelA.id } })
+  assert.equal(JSON.stringify(storedChannelA.config).includes('importUrl'), false, 'Channel.config stores no raw provider import URL')
+  assert.equal(listedChannelsA[0].exportFeedUrl, undefined, 'normal iCal reads do not replay an issued export bearer')
+  const channelAIssueAttempt = await prisma.channelMutationAttempt.findUnique({
+    where: {
+      propertyId_idempotencyKey: {
+        propertyId: fixtureA.property.id,
+        idempotencyKey: channelAContext.idempotencyKey,
+      },
+    },
+  })
+  assert.ok(channelAIssueAttempt, 'token issue is claimed in the global channel mutation ledger')
+  assert.equal(JSON.stringify(channelAIssueAttempt.result).includes('/ical/'), false, 'the mutation ledger stores no raw export bearer URL')
+  const concurrentExpediaContext = { ...managerContextA, idempotencyKey: `ical-expedia:${randomUUID()}` }
+  const concurrentChannelResults = await Promise.all([
+    configureIcalFeedChannel(prisma, concurrentExpediaContext, {
+      provider: 'expedia',
+      exportFileName: `concurrent-${runId}.ics`,
+      reason: 'Prove serialized first-time channel setup.',
+    }, 'https://pms.example.test'),
+    configureIcalFeedChannel(prisma, concurrentExpediaContext, {
+      provider: 'expedia',
+      exportFileName: `concurrent-${runId}.ics`,
+      reason: 'Prove serialized first-time channel setup.',
+    }, 'https://pms.example.test'),
+  ])
+  assert.equal(new Set(concurrentChannelResults.map((channel) => channel.id)).size, 1, 'concurrent first-time channel setup returns one channel')
+  assert.equal(
+    await prisma.channel.count({ where: { propertyId: fixtureA.property.id, provider: 'EXPEDIA' } }),
+    1,
+    'the provider advisory lock prevents duplicate property/provider channels',
+  )
+  assert.equal(
+    concurrentChannelResults.filter((channel) => channel.idempotentReplay === true).length,
+    1,
+    'one concurrent duplicate issuance replays the deterministic token operation',
+  )
+
+  let releaseProviderLock
+  let signalProviderLockAcquired
+  const providerLockAcquired = new Promise((resolve) => { signalProviderLockAcquired = resolve })
+  const holdProviderLock = new Promise((resolve) => { releaseProviderLock = resolve })
+  const providerLockBlocker = prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      `ical-channel:${fixtureA.property.id}:BOOKING_COM`,
+    )
+    signalProviderLockAcquired()
+    await holdProviderLock
+  })
+  await providerLockAcquired
+  const racedConfigure = configureIcalFeedChannel(
+    prisma,
+    { ...managerContextA, idempotencyKey: `ical-race:${randomUUID()}` },
+    {
+      provider: 'booking-com',
+      exportFileName: `race-${runId}.ics`,
+      rotateToken: true,
+      reason: 'Rotate the feed before the queued disable operation.',
+    },
+    'https://pms.example.test',
+  )
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  const racedDisable = deactivateIcalFeedChannel(
+    prisma,
+    { ...managerContextA, idempotencyKey: `ical-disable-race:${randomUUID()}` },
+    'booking-com',
+    'https://pms.example.test',
+    { reason: 'Disable the feed after the queued rotation operation.' },
+  )
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  releaseProviderLock()
+  await providerLockBlocker
+  await Promise.all([racedConfigure, racedDisable])
+  assert.equal(
+    (await prisma.channel.findUnique({ where: { id: channelA.id } })).active,
+    false,
+    'configure and disable share one provider lock, so the later disable remains authoritative',
+  )
+
+  const mappingAContext = { ...managerContextA, idempotencyKey: `mapping-a:${randomUUID()}` }
+  const mappingAInput = {
+    channelId: channelA.id,
+    externalRoomTypeId: `EXT-A-${runId}`,
+    externalRoomTypeName: 'External Gate A',
+    roomTypeId: fixtureA.roomType.id,
+    roomIds: [fixtureA.room.id],
+    active: true,
+    reason: 'Create the guarded first-property channel mapping.',
+  }
+  await assert.rejects(
+    createChannelMapping(prisma, channelAContext, mappingAInput),
+    (error) => error?.statusCode === 409,
+    'a token-issuance key cannot be reused for a mapping mutation',
+  )
+  const mappingA = await createChannelMapping(prisma, mappingAContext, mappingAInput)
+  const mappingAAuditCount = await prisma.auditLog.count({ where: { propertyId: fixtureA.property.id, entityId: mappingA.id } })
+  assert.deepEqual(await createChannelMapping(prisma, mappingAContext, mappingAInput), mappingA, 'mapping create retries return the original row')
+  assert.equal(
+    await prisma.auditLog.count({ where: { propertyId: fixtureA.property.id, entityId: mappingA.id } }),
+    mappingAAuditCount,
+    'mapping create retries do not duplicate audit evidence',
+  )
+  const mappingB = await createChannelMapping(prisma, { ...managerContextB, idempotencyKey: `mapping-b:${randomUUID()}` }, {
+    channelId: channelB.id,
+    externalRoomTypeId: `EXT-B-${runId}`,
+    externalRoomTypeName: 'External Gate B',
+    roomTypeId: fixtureB.roomType.id,
+    roomIds: [fixtureB.room.id],
+    active: true,
+    reason: 'Create the guarded second-property channel mapping.',
+  })
+  assert.deepEqual((await listChannelMappings(prisma, managerContextA)).map((mapping) => mapping.id), [mappingA.id])
+  assert.deepEqual((await listChannelMappings(prisma, managerContextB)).map((mapping) => mapping.id), [mappingB.id])
+  await assert.rejects(
+    updateChannelMapping(prisma, { ...managerContextB, idempotencyKey: `mapping-forged-update:${randomUUID()}` }, mappingA.id, {
+      active: false,
+      reason: 'Attempt to update another property mapping.',
+    }),
+    (error) => error?.statusCode === 404,
+    'a forged foreign mapping update is rejected',
+  )
+  await assert.rejects(
+    deleteChannelMapping(prisma, { ...managerContextB, idempotencyKey: `mapping-forged-delete:${randomUUID()}` }, mappingA.id, {
+      reason: 'Attempt to delete another property mapping.',
+    }),
+    (error) => error?.statusCode === 404,
+    'a forged foreign mapping deletion is rejected',
+  )
+  const channelAudit = await prisma.auditLog.findMany({
+    where: { entityId: { in: [channelA.id, mappingA.id] } },
+  })
+  assert.ok(channelAudit.length >= 2)
+  assert.ok(channelAudit.every((row) => row.propertyId === fixtureA.property.id), 'channel audit evidence is owned by property A')
+  assert.equal(JSON.stringify(channelAudit).includes('importUrl'), false, 'channel audit evidence excludes private URL fields')
+  const channelEvents = await prisma.domainEvent.findMany({
+    where: { aggregateId: { in: [channelA.id, mappingA.id] } },
+  })
+  assert.ok(channelEvents.length >= 2)
+  assert.ok(channelEvents.every((event) => event.propertyId === fixtureA.property.id), 'channel domain events are owned by property A')
+  assert.ok(channelEvents.every((event) => event.metadata?.providerWrite === false), 'channel evidence never claims a provider write')
 
   const noMembershipProperty = await prisma.property.create({
     data: {

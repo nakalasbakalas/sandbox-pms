@@ -70,6 +70,7 @@ model Property {
   reconciliationIssues ReconciliationIssue[]
   deadLetterEvents DeadLetterEvent[]
   reservationMutationAttempts ReservationMutationAttempt[]
+  channelMutationAttempts ChannelMutationAttempt[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -1312,6 +1313,20 @@ model ChannelMapping {
   
   @@unique([channelId, roomTypeId])
   @@index([channelId])
+}
+
+model ChannelMutationAttempt {
+  id                String   @id @default(cuid())
+  propertyId        String
+  property          Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  idempotencyKey    String
+  operation         String
+  intentFingerprint String
+  result            Json?
+  createdAt         DateTime @default(now())
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, operation, createdAt])
 }
 
 model ChannelSyncLog {

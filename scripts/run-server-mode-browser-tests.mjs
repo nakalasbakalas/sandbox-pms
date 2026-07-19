@@ -20,6 +20,8 @@ const username = `server-browser-${runId}`
 const password = `Server-Browser-${runId}-Pass!`
 const limitedUsername = `server-browser-limited-${runId}`
 const limitedPassword = `Server-Browser-Limited-${runId}-Pass!`
+const channelViewerUsername = `server-browser-channel-viewer-${runId}`
+const channelViewerPassword = `Server-Browser-Channel-Viewer-${runId}-Pass!`
 const taskTitle = `Server reload task ${runId}`
 const ruleName = `Server reload rate ${runId}`
 const boardRoomNumber = `B-${runId.slice(0, 8)}`
@@ -29,6 +31,8 @@ const boardGuestTwo = `Board Bravo ${runId}`
 const boardGuestThree = `Board Charlie ${runId}`
 const fakeBoardRoomNumber = `LOCAL-${runId}`
 const fakeBoardGuest = `Browser Shadow ${runId}`
+const fakeChannelName = `Browser Fake Channel ${runId}`
+const persistedChannelMappingName = `Server Channel Mapping ${runId}`
 
 function dateKeyWithOffset(offset) {
   const date = new Date()
@@ -124,11 +128,13 @@ async function waitForHttp(url, server) {
   throw new Error(`PMS server did not become ready.\n${server.output()}`)
 }
 
-async function apiJson(request, method, path, data) {
+async function apiJson(request, method, path, data, extraHeaders = {}) {
   const response = await request.fetch(path, {
     method,
     ...(data === undefined ? {} : { data }),
-    headers: data === undefined ? undefined : { 'content-type': 'application/json' },
+    headers: data === undefined && Object.keys(extraHeaders).length === 0
+      ? undefined
+      : { ...(data === undefined ? {} : { 'content-type': 'application/json' }), ...extraHeaders },
   })
   const payload = await response.json().catch(() => ({}))
   assert.equal(response.ok(), true, `${method} ${path} failed (${response.status()}): ${payload.error || JSON.stringify(payload)}`)
@@ -225,6 +231,18 @@ const limitedUser = await prisma.user.create({
   },
 })
 
+await prisma.user.create({
+  data: {
+    username: channelViewerUsername,
+    email: `${channelViewerUsername}@example.test`,
+    passwordHash: await createPasswordHash(channelViewerPassword),
+    firstName: 'Channel',
+    lastName: 'Viewer',
+    role: 'ADMIN',
+    propertyMemberships: { create: { propertyId: property.id, role: 'MANAGER', active: true } },
+  },
+})
+
 const foreignProperty = await prisma.property.create({
   data: {
     code: `SSE_B_${runId}`,
@@ -301,11 +319,43 @@ try {
   await authRaceContext.close()
 
   const context = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1440, height: 1000 } })
-  await context.addInitScript(({ fakeRoomNumber, fakeGuestName }) => {
+  await context.addInitScript(({ fakeRoomNumber, fakeGuestName, fakeChannel }) => {
     window.localStorage.clear()
     const requestedFixturePath = window.sessionStorage.getItem('inject-local-operational-fixture')
     const isBoardFixture = window.location.pathname === '/board'
     if (!isBoardFixture && window.location.pathname !== requestedFixturePath) return
+    if (window.location.pathname === '/channels') {
+      window.localStorage.setItem('channels', JSON.stringify([{
+        id: 'browser-fake-channel',
+        name: fakeChannel,
+        provider: 'BOOKING_COM',
+        connected: true,
+        enabled: true,
+        status: 'ACTIVE',
+      }]))
+      window.localStorage.setItem('channel-reservations', JSON.stringify([{
+        id: 'browser-fake-channel-reservation',
+        channelId: 'browser-fake-channel',
+        guestName: fakeGuestName,
+        status: 'PENDING',
+      }]))
+      window.localStorage.setItem('channel-sync-logs', JSON.stringify([{
+        id: 'browser-fake-channel-log',
+        channelId: 'browser-fake-channel',
+        message: fakeChannel,
+        status: 'SUCCESS',
+      }]))
+      window.localStorage.setItem('channel-room-mappings', JSON.stringify([{
+        id: 'browser-fake-mapping',
+        channelId: 'browser-fake-channel',
+        externalRoomTypeName: fakeChannel,
+      }]))
+      window.localStorage.setItem('room-types-config', JSON.stringify([{
+        id: 'browser-fake-room-type',
+        name: fakeChannel,
+      }]))
+      return
+    }
     if (isBoardFixture && window.sessionStorage.getItem('board-local-fixture-injected') === 'true') return
     if (isBoardFixture) window.sessionStorage.setItem('board-local-fixture-injected', 'true')
     window.localStorage.setItem('pms-rooms', JSON.stringify([{
@@ -342,7 +392,7 @@ try {
       lastName: 'Shadow',
       fullName: fakeGuestName,
     }]))
-  }, { fakeRoomNumber: fakeBoardRoomNumber, fakeGuestName: fakeBoardGuest })
+  }, { fakeRoomNumber: fakeBoardRoomNumber, fakeGuestName: fakeBoardGuest, fakeChannel: fakeChannelName })
   const login = await context.request.post('/api/auth/login', { data: { identity: username, password } })
   assert.equal(login.status(), 200, `server login failed: ${await login.text()}`)
 
@@ -511,6 +561,38 @@ try {
     active: true,
     reason: 'Prove server-mode rate persistence.',
   })
+
+  const configuredChannel = await apiJson(
+    context.request,
+    'POST',
+    '/api/channels/ical/booking-com',
+    {
+      exportFileName: `browser-gate-${runId}.ics`,
+      reason: 'Create the server-mode browser channel fixture.',
+    },
+    { 'x-idempotency-key': `browser-ical:${randomUUID()}` },
+  )
+  assert.equal(configuredChannel.data.importUrl, undefined, 'normal API configuration response has no private provider URL field')
+  const existingChannelMappings = await apiJson(context.request, 'GET', '/api/channels/mappings')
+  const existingChannelMapping = existingChannelMappings.data.find((mapping) =>
+    mapping.channelId === configuredChannel.data.id && mapping.roomTypeId === roomType.id,
+  )
+  const persistedChannelMapping = await apiJson(
+    context.request,
+    existingChannelMapping ? 'PATCH' : 'POST',
+    existingChannelMapping ? `/api/channels/mappings/${encodeURIComponent(existingChannelMapping.id)}` : '/api/channels/mappings',
+    {
+      channelId: configuredChannel.data.id,
+      externalRoomTypeId: `BROWSER-${runId}`,
+      externalRoomTypeName: persistedChannelMappingName,
+      roomTypeId: roomType.id,
+      roomIds: [room.id],
+      active: true,
+      reason: 'Create or refresh the server-mode browser mapping fixture.',
+    },
+    { 'x-idempotency-key': `browser-mapping:${randomUUID()}` },
+  )
+  assert.ok(persistedChannelMapping.data.id)
 
   const page = await context.newPage()
   page.setDefaultTimeout(30_000)
@@ -924,6 +1006,68 @@ try {
     window.sessionStorage.removeItem('inject-local-operational-fixture')
     window.localStorage.clear()
   })
+
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/channels'))
+  await page.route('**/api/channels/ical*', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected authoritative Channels failure.' }),
+    })
+  })
+  await page.goto('/channels', { waitUntil: 'domcontentloaded' })
+  await page.getByText('Channel Manager unavailable', { exact: true }).waitFor({ state: 'visible' }).catch(async (error) => {
+    throw new Error(`Channels fail-closed screen did not render.\n${await page.locator('body').innerText()}\n${error.message}`)
+  })
+  await page.getByText('Injected authoritative Channels failure.', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeChannelName, { exact: false }).count(), 0, 'Channels failure does not display browser channel fixtures')
+  assert.equal(await page.getByRole('tab', { name: /Rate Push|Real-Time Sync|Performance/ }).count(), 0, 'server Channels exposes no simulated provider tabs')
+  const injectedChannelStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['channels', 'channel-reservations', 'channel-sync-logs', 'channel-room-mappings', 'room-types-config'])
+  assert.match(injectedChannelStorage.channels || '', new RegExp(fakeChannelName), 'the fake channel fixture existed while server Channels ignored it')
+  await page.unroute('**/api/channels/ical*')
+  await page.getByRole('button', { name: 'Retry authoritative load', exact: true }).click()
+  await page.getByRole('heading', { name: 'Channel Manager', exact: true }).waitFor({ state: 'visible' })
+  await page.getByText('Booking Inbox / adapter only', { exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('tab', { name: 'Room mapping', exact: true }).click()
+  await page.getByText(persistedChannelMappingName, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeChannelName, { exact: false }).count(), 0, 'authoritative retry still ignores browser channel fixtures')
+  assert.equal(await page.getByText('Rate push, real-time inventory sync, provider performance, sync logs, and browser reservation imports are unavailable', { exact: false }).count(), 1)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('tab', { name: 'Room mapping', exact: true }).click()
+  await page.getByText(persistedChannelMappingName, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeChannelName, { exact: false }).count(), 0, 'persisted server mapping survives reload without browser fallback')
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+  }, Object.keys(injectedChannelStorage))
+  await assertNoOperationalBrowserStorage('server-mode Channels authority and reload')
+
+  const channelViewerContext = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 800 } })
+  const channelViewerLogin = await channelViewerContext.request.post('/api/auth/login', {
+    data: { identity: channelViewerUsername, password: channelViewerPassword },
+  })
+  assert.equal(channelViewerLogin.status(), 200, 'view-only channel manager authenticates')
+  const deniedChannelWrite = await channelViewerContext.request.post('/api/channels/ical/agoda', {
+    data: {
+      exportFileName: `denied-${runId}.ics`,
+      reason: 'Prove server channel mutation permission denial.',
+    },
+  })
+  assert.equal(deniedChannelWrite.status(), 403, 'view-only channel manager cannot configure iCal through the API')
+  const deniedMappingWrite = await channelViewerContext.request.patch(`/api/channels/mappings/${persistedChannelMapping.data.id}`, {
+    data: {
+      active: false,
+      reason: 'Prove channel mapping permission denial.',
+    },
+  })
+  assert.equal(deniedMappingWrite.status(), 403, 'view-only channel manager cannot mutate channel mappings through the API')
+  const channelViewerPage = await channelViewerContext.newPage()
+  await channelViewerPage.goto('/channels', { waitUntil: 'domcontentloaded' })
+  await channelViewerPage.getByText('Your role has read-only channel access', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await channelViewerPage.getByRole('button', { name: 'Configure iCal', exact: true }).first().isDisabled(), true, 'view-only channel manager sees disabled configuration controls')
+  await channelViewerContext.close()
 
   await page.goto('/housekeeping', { waitUntil: 'domcontentloaded' })
   await page.getByText(taskTitle, { exact: false }).waitFor({ state: 'visible' })

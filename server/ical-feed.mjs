@@ -1,4 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { z } from 'zod'
+import { beginChannelMutation, completeChannelMutation } from './channel-mutation-idempotency.mjs'
+import { recordDomainEvent } from './domain-events.mjs'
+import { operationalReasonForEvidence, operationalReasonSchema } from './operational-reason.mjs'
+import { deriveServerScopedSecret } from './security.mjs'
 
 const ACTIVE_FEED_STATUSES = ['PENDING', 'CONFIRMED', 'HOLD', 'CHECKED_IN']
 const ICAL_PROVIDERS = ['BOOKING_COM', 'AGODA', 'EXPEDIA', 'AIRBNB', 'ICAL']
@@ -98,34 +103,87 @@ function feedFileNameForChannel(channel) {
   const config = cleanJsonObject(channel?.config)
   return safeFeedFileName(config.exportFileName, `${providerSlug(channel?.provider)}-sandbox-hotel-blocks.ics`)
 }
+const configureIcalSchema = z.object({
+  provider: z.string().trim().min(1).max(80),
+  exportFileName: z.string().trim().max(200).optional(),
+  rotateToken: z.boolean().optional().default(false),
+  reason: operationalReasonSchema,
+}).strict()
+const deactivateIcalSchema = z.object({ reason: operationalReasonSchema }).strict()
 
 function publicChannelPayload(channel, origin, issuedToken = null) {
   const config = cleanJsonObject(channel.config)
-  return {
+  return Object.fromEntries(Object.entries({
     id: channel.id,
     provider: channel.provider,
     name: channel.name,
-    importUrl: config.importUrl || undefined,
     exportFileName: feedFileNameForChannel(channel),
     exportFeedUrl: issuedToken && origin ? buildIcalFeedUrl(origin, issuedToken) : undefined,
     exportTokenConfigured: Boolean(tokenHashFromChannel(channel)),
     lastPublishedAt: config.lastPublishedAt || undefined,
     exportTokenIssuedAt: config.exportTokenIssuedAt || undefined,
-  }
-}
-
-async function migrateLegacyRawToken(prisma, channel) {
-  const config = cleanJsonObject(channel?.config)
-  if (!config.exportToken) return channel
-  const sanitizedConfig = sanitizedTokenConfig(config)
-  await prisma.channel.update({ where: { id: channel.id }, data: { config: sanitizedConfig } })
-  return { ...channel, config: sanitizedConfig }
+    exportTokenGraceUntil: Array.isArray(config.graceExportTokenHashes)
+      ? config.graceExportTokenHashes.map((item) => item?.validUntil).filter(Boolean).sort().at(-1)
+      : undefined,
+  }).filter(([, value]) => value !== undefined))
 }
 
 function propertyIdFromContext(context) {
   const propertyId = String(context?.propertyId || '').trim()
   if (!propertyId) throw new IcalFeedError('Authenticated property context is required.', 403)
   return propertyId
+}
+
+function channelAcceptsTokenHash(channel, requestedHash, now = new Date()) {
+  if (!channel?.active) return false
+  if (tokenHashMatches(tokenHashFromChannel(channel), requestedHash)) return true
+  const config = cleanJsonObject(channel.config)
+  const graceHashes = Array.isArray(config.graceExportTokenHashes) ? config.graceExportTokenHashes : []
+  return graceHashes.some((candidate) => (
+    candidate &&
+    typeof candidate.hash === 'string' &&
+    typeof candidate.validUntil === 'string' &&
+    new Date(candidate.validUntil) > now &&
+    tokenHashMatches(candidate.hash, requestedHash)
+  ))
+}
+
+function actorIdFromContext(context) {
+  const actorId = String(context?.actor?.id || context?.actorId || '').trim()
+  if (!actorId) throw new IcalFeedError('Authenticated actor context is required.', 403)
+  return actorId
+}
+
+function idempotencyKeyFromContext(context) {
+  const key = String(context?.idempotencyKey || '').trim()
+  if (!/^[a-zA-Z0-9._:-]{16,200}$/.test(key)) {
+    throw new IcalFeedError('A valid x-idempotency-key is required for iCal channel mutations.', 400)
+  }
+  return key
+}
+
+function derivedIcalFeedToken(propertyId, provider, idempotencyKey) {
+  return deriveServerScopedSecret(`sandbox-ical-token-v1\0${propertyId}\0${provider}\0${idempotencyKey}`)
+}
+
+async function lockIcalProvider(tx, propertyId, provider) {
+  if (typeof tx.$executeRawUnsafe === 'function') {
+    await tx.$executeRawUnsafe(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      `ical-channel:${propertyId}:${provider}`,
+    )
+  } else if (typeof tx.$queryRawUnsafe === 'function') {
+    await tx.$queryRawUnsafe('SELECT true AS locked')
+  }
+}
+
+function parseInput(schema, input) {
+  const result = schema.safeParse(input ?? {})
+  if (!result.success) {
+    const issue = result.error.issues[0]
+    throw new IcalFeedError(`${issue.path?.length ? `${issue.path.join('.')}: ` : ''}${issue.message}`)
+  }
+  return result.data
 }
 
 export function normalizeIcalProvider(value) {
@@ -215,110 +273,231 @@ export async function buildIcalFeedForChannel(prisma, channel, now = new Date())
 export async function listIcalFeedChannels(prisma, context, origin) {
   const propertyId = propertyIdFromContext(context)
   const channels = await prisma.channel.findMany({
-    where: { propertyId, provider: { in: ICAL_PROVIDERS } },
+    where: { propertyId, provider: { in: ICAL_PROVIDERS }, active: true },
     include: { mappings: true },
     orderBy: [{ name: 'asc' }],
   })
-  const sanitizedChannels = await Promise.all(channels.map((channel) => migrateLegacyRawToken(prisma, channel)))
-  return sanitizedChannels.map((channel) => publicChannelPayload(channel, origin))
+  return channels.map((channel) => publicChannelPayload(channel, origin))
 }
 
 export async function configureIcalFeedChannel(prisma, context, input, origin) {
-  const provider = normalizeIcalProvider(input.provider)
+  const parsed = parseInput(configureIcalSchema, input)
+  const provider = normalizeIcalProvider(parsed.provider)
   const propertyId = propertyIdFromContext(context)
-  const property = await prisma.property.findUnique({ where: { id: propertyId } })
-  if (!property) {
-    throw new IcalFeedError('Property setup has not been completed yet.', 503)
-  }
+  const actorId = actorIdFromContext(context)
 
-  const existing = await prisma.channel.findFirst({
-    where: { propertyId: property.id, provider },
-    include: { mappings: true },
-  })
-  const previousConfig = sanitizedTokenConfig(existing?.config)
-  const shouldIssueToken = input.rotateToken || !previousConfig.exportTokenHash
-  const issuedToken = shouldIssueToken ? createIcalFeedToken() : null
-  const now = new Date().toISOString()
-  const importUrl = String(input.importUrl || '').trim()
-  const config = {
-    ...previousConfig,
-    connectionMode: 'ICAL',
-    exportTokenHash: issuedToken ? hashIcalFeedToken(issuedToken) : previousConfig.exportTokenHash,
-    exportFileName: safeFeedFileName(input.exportFileName, `${providerSlug(provider)}-sandbox-hotel-blocks.ics`),
-    exportTokenIssuedAt: shouldIssueToken ? now : previousConfig.exportTokenIssuedAt || now,
-    lastPublishedAt: now,
-  }
-
-  if (importUrl) {
-    config.importUrl = importUrl
-  } else {
-    delete config.importUrl
-  }
-
-  const data = {
-    propertyId: property.id,
-    provider,
-    name: existing?.name || labelForProvider(provider),
-    hotelId: existing?.hotelId || null,
-    credentialRef: null,
-    credentialStatus: {
-      state: 'not_required',
-      provider: 'ical',
-      secretStored: false,
-    },
-    active: true,
-    sandboxMode: false,
-    syncEnabled: Boolean(importUrl),
-    config,
-    lastSync: new Date(),
-    lastSyncStatus: 'ICAL_FEED_PUBLISHED',
-  }
-
-  const channel = existing
-    ? await prisma.channel.update({ where: { id: existing.id }, data, include: { mappings: true } })
-    : await prisma.channel.create({ data, include: { mappings: true } })
-
-  return publicChannelPayload(channel, origin, issuedToken)
-}
-
-export async function deactivateIcalFeedChannel(prisma, context, providerValue, origin) {
-  const provider = normalizeIcalProvider(providerValue)
-  const propertyId = propertyIdFromContext(context)
-  const property = await prisma.property.findUnique({ where: { id: propertyId } })
-  if (!property) {
-    throw new IcalFeedError('Property setup has not been completed yet.', 503)
-  }
-
-  const existing = await prisma.channel.findFirst({
-    where: { propertyId: property.id, provider },
-    include: { mappings: true },
-  })
-
-  if (!existing) {
-    return {
-      provider,
-      name: labelForProvider(provider),
-      exportFileName: safeFeedFileName('', `${providerSlug(provider)}-sandbox-hotel-blocks.ics`),
+  return prisma.$transaction(async (tx) => {
+    await lockIcalProvider(tx, propertyId, provider)
+    const property = await tx.property.findUnique({ where: { id: propertyId } })
+    if (!property) {
+      throw new IcalFeedError('Property setup has not been completed yet.', 503)
     }
-  }
 
-  const config = {
-    ...sanitizedTokenConfig(existing.config),
-    lastDisabledAt: new Date().toISOString(),
-  }
+    const existing = await tx.channel.findFirst({
+      where: { propertyId: property.id, provider },
+      include: { mappings: true },
+    })
+    const previousConfig = sanitizedTokenConfig(existing?.config)
+    const shouldIssueToken = parsed.rotateToken || !previousConfig.exportTokenHash
+    const requestedFileName = safeFeedFileName(
+      parsed.exportFileName ?? previousConfig.exportFileName,
+      `${providerSlug(provider)}-sandbox-hotel-blocks.ics`,
+    )
+    const mutationAttempt = await beginChannelMutation(tx, context, 'CONFIGURE_ICAL_CHANNEL', parsed)
+    const issueIdempotencyKey = idempotencyKeyFromContext(context)
+    if (mutationAttempt.replay) {
+      const stored = cleanJsonObject(mutationAttempt.result)
+      const payload = cleanJsonObject(stored.payload)
+      if (!payload.id || payload.provider !== provider) {
+        throw new IcalFeedError('The prior channel mutation result cannot be replayed safely.', 409)
+      }
+      const replayToken = stored.issuedToken
+        ? derivedIcalFeedToken(propertyId, provider, issueIdempotencyKey)
+        : null
+      if (replayToken && !channelAcceptsTokenHash(existing, hashIcalFeedToken(replayToken))) {
+        throw new IcalFeedError('The prior iCal token operation was superseded and cannot be replayed safely.', 409)
+      }
+      return {
+        ...payload,
+        ...(replayToken ? { exportFeedUrl: buildIcalFeedUrl(origin, replayToken) } : {}),
+        idempotentReplay: true,
+      }
+    }
 
-  const channel = await prisma.channel.update({
-    where: { id: existing.id },
-    data: {
-      active: false,
+    const issuedToken = shouldIssueToken
+      ? derivedIcalFeedToken(propertyId, provider, issueIdempotencyKey)
+      : null
+    const nowDate = new Date()
+    const now = nowDate.toISOString()
+    const currentTokenHash = previousConfig.exportTokenHash
+    const existingGraceHashes = Array.isArray(previousConfig.graceExportTokenHashes)
+      ? previousConfig.graceExportTokenHashes.filter((item) => (
+        item &&
+        typeof item.hash === 'string' &&
+        typeof item.validUntil === 'string' &&
+        new Date(item.validUntil) > nowDate
+      ))
+      : []
+    const graceExportTokenHashes = issuedToken && currentTokenHash
+      ? [
+          ...existingGraceHashes,
+          { hash: currentTokenHash, validUntil: new Date(nowDate.getTime() + 15 * 60 * 1_000).toISOString() },
+        ].slice(-4)
+      : existingGraceHashes.slice(-4)
+    const config = {
+      ...previousConfig,
+      connectionMode: 'ICAL',
+      exportTokenHash: issuedToken ? hashIcalFeedToken(issuedToken) : previousConfig.exportTokenHash,
+      graceExportTokenHashes,
+      exportFileName: requestedFileName,
+      exportTokenIssuedAt: shouldIssueToken ? now : previousConfig.exportTokenIssuedAt || now,
+      lastPublishedAt: now,
+    }
+
+    delete config.importUrl
+
+    const data = {
+      propertyId: property.id,
+      provider,
+      name: existing?.name || labelForProvider(provider),
+      hotelId: existing?.hotelId || null,
+      credentialRef: null,
+      credentialStatus: {
+        state: 'not_required',
+        provider: 'ical',
+        secretStored: false,
+      },
+      active: true,
+      sandboxMode: false,
       syncEnabled: false,
       config,
-      lastSyncStatus: 'ICAL_FEED_DISABLED',
-    },
-    include: { mappings: true },
-  })
+      lastSync: new Date(),
+      lastSyncStatus: 'ICAL_FEED_PUBLISHED',
+    }
 
-  return publicChannelPayload(channel, origin)
+    const channel = existing
+      ? await tx.channel.update({ where: { id: existing.id }, data, include: { mappings: true } })
+      : await tx.channel.create({ data, include: { mappings: true } })
+    const action = parsed.rotateToken ? 'ICAL_EXPORT_TOKEN_ROTATED' : 'ICAL_CHANNEL_CONFIGURED'
+    const evidence = {
+      provider,
+      reason: operationalReasonForEvidence(parsed.reason),
+      exportTokenConfigured: Boolean(config.exportTokenHash),
+      exportTokenGraceUntil: graceExportTokenHashes.map((item) => item.validUntil).sort().at(-1) || null,
+      providerWrite: false,
+    }
+    await tx.auditLog.create({ data: {
+      propertyId,
+      userId: actorId,
+      action,
+      entityType: 'channel',
+      entityId: channel.id,
+      changes: evidence,
+    } })
+    await recordDomainEvent(tx, {
+      propertyId,
+      eventType: action,
+      aggregateType: 'channel',
+      aggregateId: channel.id,
+      actorUserId: actorId,
+      metadata: evidence,
+    })
+    const result = publicChannelPayload(channel, origin, issuedToken)
+    const storedPayload = { ...result }
+    delete storedPayload.exportFeedUrl
+    await completeChannelMutation(tx, mutationAttempt, {
+      payload: storedPayload,
+      issuedToken: Boolean(issuedToken),
+    })
+    return result
+  })
+}
+
+export async function deactivateIcalFeedChannel(prisma, context, providerValue, origin, input = {}) {
+  const provider = normalizeIcalProvider(providerValue)
+  const propertyId = propertyIdFromContext(context)
+  const actorId = actorIdFromContext(context)
+  const parsed = parseInput(deactivateIcalSchema, input)
+
+  return prisma.$transaction(async (tx) => {
+    await lockIcalProvider(tx, propertyId, provider)
+    const property = await tx.property.findUnique({ where: { id: propertyId } })
+    if (!property) {
+      throw new IcalFeedError('Property setup has not been completed yet.', 503)
+    }
+    const mutationAttempt = await beginChannelMutation(
+      tx,
+      context,
+      'DISABLE_ICAL_CHANNEL',
+      { provider, reason: parsed.reason },
+    )
+    if (mutationAttempt.replay) return mutationAttempt.result
+
+    const existing = await tx.channel.findFirst({
+      where: { propertyId: property.id, provider },
+      include: { mappings: true },
+    })
+    const entityId = existing?.id || `${propertyId}:${provider}`
+    const evidence = { provider, reason: operationalReasonForEvidence(parsed.reason), providerWrite: false }
+
+    if (!existing) {
+      await tx.auditLog.create({ data: {
+        propertyId,
+        userId: actorId,
+        action: 'ICAL_CHANNEL_DISABLE_NOOP',
+        entityType: 'channel',
+        entityId,
+        changes: evidence,
+      } })
+      await recordDomainEvent(tx, {
+        propertyId,
+        eventType: 'ICAL_CHANNEL_DISABLE_NOOP',
+        aggregateType: 'channel',
+        aggregateId: entityId,
+        actorUserId: actorId,
+        metadata: evidence,
+      })
+      const result = {
+        provider,
+        name: labelForProvider(provider),
+        exportFileName: safeFeedFileName('', `${providerSlug(provider)}-sandbox-hotel-blocks.ics`),
+      }
+      return completeChannelMutation(tx, mutationAttempt, result)
+    }
+
+    const config = {
+      ...sanitizedTokenConfig(existing.config),
+      lastDisabledAt: new Date().toISOString(),
+    }
+
+    const channel = await tx.channel.update({
+      where: { id: existing.id },
+      data: {
+        active: false,
+        syncEnabled: false,
+        config,
+        lastSyncStatus: 'ICAL_FEED_DISABLED',
+      },
+      include: { mappings: true },
+    })
+    await tx.auditLog.create({ data: {
+      propertyId,
+      userId: actorId,
+      action: 'ICAL_CHANNEL_DISABLED',
+      entityType: 'channel',
+      entityId: channel.id,
+      changes: evidence,
+    } })
+    await recordDomainEvent(tx, {
+      propertyId,
+      eventType: 'ICAL_CHANNEL_DISABLED',
+      aggregateType: 'channel',
+      aggregateId: channel.id,
+      actorUserId: actorId,
+      metadata: evidence,
+    })
+    return completeChannelMutation(tx, mutationAttempt, publicChannelPayload(channel, origin))
+  })
 }
 
 export async function getIcalFeedByToken(prisma, token, now = new Date()) {
@@ -332,13 +511,13 @@ export async function getIcalFeedByToken(prisma, token, now = new Date()) {
     include: { mappings: true },
   })
   const requestedHash = hashIcalFeedToken(cleanToken)
-  const channel = channels.find((item) => tokenHashMatches(tokenHashFromChannel(item), requestedHash))
+  const channel = channels.find((item) => channelAcceptsTokenHash(item, requestedHash, now))
   if (!channel) {
     throw new IcalFeedError('iCal feed was not found.', 404)
   }
 
 
-  const sanitizedChannel = await migrateLegacyRawToken(prisma, channel)
+  const sanitizedChannel = { ...channel, config: sanitizedTokenConfig(channel.config) }
 
   return {
     fileName: feedFileNameForChannel(sanitizedChannel),
