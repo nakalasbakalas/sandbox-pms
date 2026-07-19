@@ -1,0 +1,61 @@
+/* global console */
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+
+const cashierSource = (await readFile('src/components/views/CashierView.tsx', 'utf8')).replaceAll('\r\n', '\n')
+const appSource = (await readFile('src/App.tsx', 'utf8')).replaceAll('\r\n', '\n')
+const rbacSource = (await readFile('server/rbac.mjs', 'utf8')).replaceAll('\r\n', '\n')
+const authTypeSource = (await readFile('src/types/auth.ts', 'utf8')).replaceAll('\r\n', '\n')
+const serverAuthClientSource = (await readFile('src/lib/server-auth-client.ts', 'utf8')).replaceAll('\r\n', '\n')
+const browserSource = (await readFile('scripts/run-server-mode-browser-tests.mjs', 'utf8')).replaceAll('\r\n', '\n')
+
+const serverStart = cashierSource.indexOf('function ServerCashierView()')
+const demoStart = cashierSource.indexOf('function DemoCashierView()')
+assert.ok(serverStart >= 0 && demoStart >= 0 && serverStart !== demoStart, 'Cashier keeps distinct server and demo components')
+const serverSlice = serverStart < demoStart
+  ? cashierSource.slice(serverStart, demoStart)
+  : cashierSource.slice(serverStart)
+const demoSlice = demoStart < serverStart
+  ? cashierSource.slice(demoStart, serverStart)
+  : cashierSource.slice(demoStart)
+
+assert.match(cashierSource, /SERVER_API_ENABLED/, 'Cashier explicitly distinguishes server mode from demo mode')
+assert.match(cashierSource, /server-cashier-view/, 'the successful server Cashier surface has a stable authority test id')
+assert.match(cashierSource, /server-cashier-error/, 'the failed server Cashier surface has a stable authority test id')
+assert.match(cashierSource, /Cashier unavailable/, 'Cashier fails closed with a truthful authoritative-data error')
+assert.match(cashierSource, /Retry/, 'Cashier exposes a visible retry after an authoritative fetch failure')
+assert.match(serverSlice, /\/api\/cashier\/folios/, 'server Cashier reads authoritative folios from the authenticated Cashier API')
+assert.match(cashierSource, /serverCashierFoliosResponseSchema\.parse\(payload\.data\)/, 'server Cashier validates the untrusted response before rendering it')
+assert.match(cashierSource, /status:\s*z\.enum\(\['OPEN', 'CLOSED', 'REFUNDED'\]\)/, 'server Cashier accepts only persisted folio statuses')
+assert.match(cashierSource, /\/api\/payments/, 'server Cashier records payments only through the PMS API')
+assert.match(cashierSource, /\/api\/charges/, 'server Cashier posts charges only through the PMS API')
+assert.match(cashierSource, /amountSatang:\s*amountSatang!/, 'server Cashier writes base-10 satang rather than browser float money')
+assert.match(cashierSource, /parseMoneySatang\(amountSatang\)\s*>\s*parseMoneySatang\(paymentFolio\.balanceSatang\)/, 'server Cashier compares payment and balance with BigInt')
+assert.match(cashierSource, /durableAttemptKeys\.getOrCreate/, 'server Cashier retains an opaque in-memory idempotency key for uncertain writes')
+assert.match(cashierSource, /moneySatangToDecimal/, 'server Cashier prints and exports exact decimal values from satang')
+assert.match(cashierSource, /formatMoneySatang\(satang, currency\)/, 'server Cashier renders the property currency from exact satang')
+assert.doesNotMatch(cashierSource, /[฿à¸¿]/, 'Cashier does not hardcode a property currency symbol')
+assert.match(serverSlice, /refreshServerFolios/, 'server Cashier refetches authoritative folio data after writes and retry')
+assert.doesNotMatch(serverSlice, /\buseKV\b|\buseRoomSync\b|localStorage|sessionStorage/, 'server Cashier cannot read browser-owned folio, room, or accounting state')
+assert.match(demoSlice, /\buseKV\b/, 'browser-owned folio and accounting state remains confined to demo mode')
+assert.match(demoSlice, /\buseRoomSync\b/, 'browser-owned room state remains confined to demo mode')
+assert.match(cashierSource, /hasPermission\('process:payment'\)/, 'Cashier derives payment UI authority from the effective membership permission')
+assert.match(cashierSource, /hasPermission\('post:charges'\)/, 'Cashier derives charge UI authority from the effective membership permission')
+assert.match(appSource, /cashier: \['view:cashier'\]/, 'the client route requires cashier-view permission')
+assert.match(rbacSource, /cashier: \['view:cashier'\]/, 'the server route registry requires cashier-view permission')
+const cafeStaffPermissions = rbacSource.match(/CAFE_STAFF:\s*\[([\s\S]*?)\]/)?.[1] || ''
+assert.match(cafeStaffPermissions, /'view:cashier'/, 'CAFE_STAFF can open the Cashier read surface')
+assert.match(cafeStaffPermissions, /'post:charges'/, 'CAFE_STAFF can post permitted charges')
+assert.doesNotMatch(cafeStaffPermissions, /'process:payment'/, 'CAFE_STAFF cannot process payments')
+const clientCafeStaffPermissions = authTypeSource.match(/'cafe-staff':\s*\[([\s\S]*?)\]/)?.[1] || ''
+assert.match(clientCafeStaffPermissions, /'view:cashier'/, 'client CAFE_STAFF can open the Cashier read surface')
+assert.match(clientCafeStaffPermissions, /'post:charges'/, 'client CAFE_STAFF can render its permitted charge control')
+assert.doesNotMatch(clientCafeStaffPermissions, /'process:payment'/, 'client CAFE_STAFF cannot render payment controls')
+assert.match(serverAuthClientSource, /normalized === 'CAFE_STAFF'\) return 'cafe-staff'/, 'server membership CAFE_STAFF is not collapsed to front-desk authority in the browser')
+assert.match(browserSource, /Cashier charge retry reuses the exact logical idempotency key/, 'browser proof covers an ambiguous Cashier charge replay')
+assert.match(browserSource, /Cashier payment retry after refetch failure reuses the exact logical idempotency key/, 'browser proof covers payment read-back failure and replay')
+assert.match(browserSource, /ambiguous payment retains one reload-safe opaque attempt record[\s\S]{0,1800}?page\.reload\(\{ waitUntil: 'domcontentloaded' \}\)/, 'browser proof reloads between an ambiguous payment and its same-key replay')
+assert.match(browserSource, /stale Cashier charge against a closed folio is rejected/, 'browser proof covers truthful closed-folio rejection')
+assert.match(browserSource, /Accounting is capability-gated out of the server Cashier/, 'browser proof covers server Accounting capability gating')
+
+console.log('Cashier server-authority source guards passed.')

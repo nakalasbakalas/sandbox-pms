@@ -82,6 +82,7 @@ const API_ROUTE_CONTRACTS = [
   route('/api/openapi.json', ['GET'], { tag: 'System', summary: 'Authenticated API contract' }),
   route('/api/system/capabilities', ['GET'], { tag: 'System', summary: 'Operational capability registry' }),
   route('/api/events', ['GET'], { tag: 'System', summary: 'Property-scoped operational event stream' }),
+  route('/api/cashier/folios', ['GET'], { tag: 'Finance', summary: 'Property-scoped exact-satang cashier folio projection' }),
   route('/api/messages', ['GET', 'POST'], { tag: 'Messaging', summary: 'Property-scoped message drafts' }),
   route('/api/message-templates', ['GET', 'POST'], { tag: 'Messaging', summary: 'Property-scoped message templates' }),
   route('/api/public/v1/availability', ['GET'], { tag: 'Public Booking', public: true }),

@@ -22,6 +22,8 @@ const limitedUsername = `server-browser-limited-${runId}`
 const limitedPassword = `Server-Browser-Limited-${runId}-Pass!`
 const channelViewerUsername = `server-browser-channel-viewer-${runId}`
 const channelViewerPassword = `Server-Browser-Channel-Viewer-${runId}-Pass!`
+const cafeCashierUsername = `server-browser-cafe-cashier-${runId}`
+const cafeCashierPassword = `Server-Browser-Cafe-Cashier-${runId}-Pass!`
 const taskTitle = `Server reload task ${runId}`
 const ruleName = `Server reload rate ${runId}`
 const boardRoomNumber = `B-${runId.slice(0, 8)}`
@@ -29,12 +31,15 @@ const boardMoveRoomNumber = `M-${runId.slice(0, 8)}`
 const boardGuestOne = `Board Alpha ${runId}`
 const boardGuestTwo = `Board Bravo ${runId}`
 const boardGuestThree = `Board Charlie ${runId}`
+const cashierMutationGuest = `Cashier Mutation ${runId}`
 const fakeBoardRoomNumber = `LOCAL-${runId}`
 const fakeBoardGuest = `Browser Shadow ${runId}`
 const fakeChannelName = `Browser Fake Channel ${runId}`
 const fakeRoomsPropertyName = `Browser Rooms Property ${runId}`
 const fakeRoomsTypeName = `Browser Rooms Type ${runId}`
 const fakeRoomsRoomNumber = `ROOMS-LOCAL-${runId.slice(0, 8)}`
+const fakeCashierGuest = `Browser Cashier Shadow ${runId}`
+const fakeCashierFolioNumber = `LOCAL-FOLIO-${runId.slice(0, 8)}`
 const inspectedRoomTypeCode = `FAMILY_${runId.toUpperCase()}`
 const inspectedRoomTypeName = `Family Suite ${runId}`
 const inspectedRoomNumber = `I-${runId.slice(0, 8)}`
@@ -246,6 +251,18 @@ await prisma.user.create({
   },
 })
 
+await prisma.user.create({
+  data: {
+    username: cafeCashierUsername,
+    email: `${cafeCashierUsername}@example.test`,
+    passwordHash: await createPasswordHash(cafeCashierPassword),
+    firstName: 'Cafe',
+    lastName: 'Cashier',
+    role: 'ADMIN',
+    propertyMemberships: { create: { propertyId: property.id, role: 'CAFE_STAFF', active: true } },
+  },
+})
+
 const limitedUser = await prisma.user.create({
   data: {
     username: limitedUsername,
@@ -346,12 +363,13 @@ try {
   await authRaceContext.close()
 
   const context = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1440, height: 1000 } })
-  await context.addInitScript(({ fakeRoomNumber, fakeGuestName, fakeChannel, fakePropertyName, fakeRoomTypeName, fakeRoomsNumber }) => {
+  await context.addInitScript(({ fakeRoomNumber, fakeGuestName, fakeChannel, fakePropertyName, fakeRoomTypeName, fakeRoomsNumber, fakeCashierGuestName, fakeCashierFolio }) => {
     window.localStorage.clear()
     const requestedFixturePath = window.sessionStorage.getItem('inject-local-operational-fixture')
     const isBoardFixture = window.location.pathname === '/board'
     const isRoomsFixture = window.location.pathname === '/rooms' && requestedFixturePath === '/rooms'
-    if (!isBoardFixture && !isRoomsFixture && window.location.pathname !== requestedFixturePath) return
+    const isCashierFixture = window.location.pathname === '/cashier' && requestedFixturePath === '/cashier'
+    if (!isBoardFixture && !isRoomsFixture && !isCashierFixture && window.location.pathname !== requestedFixturePath) return
     if (isRoomsFixture) {
       window.localStorage.setItem('pms-rooms', JSON.stringify([{
         roomId: 'browser-fake-rooms-room',
@@ -369,6 +387,29 @@ try {
       }]))
       window.localStorage.setItem('room-types-config', JSON.stringify([{
         id: 'browser-fake-rooms-type', code: 'BROWSER_LOCAL', name: fakeRoomTypeName,
+      }]))
+      return
+    }
+    if (isCashierFixture) {
+      const folio = {
+        id: 'browser-fake-cashier-folio',
+        folioNumber: fakeCashierFolio,
+        guestName: fakeCashierGuestName,
+        roomNumber: 'LOCAL-CASHIER-ROOM',
+        status: 'OPEN',
+        currency: 'THB',
+        subtotal: 999,
+        tax: 0,
+        total: 999,
+        paid: 0,
+        balance: 999,
+        charges: [],
+        payments: [],
+      }
+      window.localStorage.setItem('cashier-folios', JSON.stringify([folio]))
+      window.localStorage.setItem('folios', JSON.stringify([folio]))
+      window.localStorage.setItem('accounting-entries', JSON.stringify([{
+        id: 'browser-fake-cashier-entry', folioId: folio.id, amount: 999, description: fakeCashierGuestName,
       }]))
       return
     }
@@ -447,6 +488,8 @@ try {
     fakePropertyName: fakeRoomsPropertyName,
     fakeRoomTypeName: fakeRoomsTypeName,
     fakeRoomsNumber: fakeRoomsRoomNumber,
+    fakeCashierGuestName: fakeCashierGuest,
+    fakeCashierFolio: fakeCashierFolioNumber,
   })
   const login = await context.request.post('/api/auth/login', { data: { identity: username, password } })
   assert.equal(login.status(), 200, `server login failed: ${await login.text()}`)
@@ -632,6 +675,24 @@ try {
     source: 'DIRECT',
   }, { 'x-idempotency-key': `browser-board-c:${randomUUID()}` })
   assert.equal(boardReservationThree.data.assignedRoomId, null, 'third board stay begins in the authoritative unassigned queue')
+
+  const cashierMutationReservation = await apiJson(context.request, 'POST', '/api/reservations', {
+    confirmationCode: `CASHIER-MUTATION-${runId}`,
+    guest: {
+      firstName: 'Cashier Mutation',
+      lastName: runId,
+      email: `cashier-mutation-${runId}@example.test`,
+    },
+    roomTypeCode: roomType.code,
+    checkIn: dateKeyWithOffset(10),
+    checkOut: dateKeyWithOffset(12),
+    adults: 1,
+    children: 0,
+    childAges: [],
+    ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
+    source: 'DIRECT',
+  }, { 'x-idempotency-key': `browser-cashier-mutation:${randomUUID()}` })
+  assert.ok(cashierMutationReservation.data.folio.id, 'Cashier mutation fixture has an authoritative folio')
 
   const housekeeping = await apiJson(context.request, 'POST', '/api/housekeeping/tasks', {
     roomId: room.id,
@@ -856,6 +917,223 @@ try {
   await page.goto('/board', { waitUntil: 'domcontentloaded' })
   await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
 
+  // Cashier is a financial authority surface. A failed folio snapshot must close the
+  // entire workspace rather than render cached browser folios, zero-value operational
+  // statistics, or payment/charge controls. Retry and reload then prove the same
+  // persisted server folio is used.
+  await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/cashier'))
+  await page.route('**/api/cashier/folios', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected Cashier authoritative folio snapshot failure.' }),
+    })
+  })
+  await page.goto('/cashier', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-error').waitFor({ state: 'visible' })
+  await page.getByRole('heading', { name: 'Cashier unavailable', exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(boardGuestOne, { exact: false }).count(), 0, 'a failed Cashier snapshot does not retain server folios')
+  assert.equal(await page.getByText(fakeCashierGuest, { exact: false }).count(), 0, 'Cashier ignores fake browser folios during an authority failure')
+  assert.equal(await page.getByText(fakeCashierFolioNumber, { exact: false }).count(), 0, 'Cashier does not render a fake browser folio number during an authority failure')
+  for (const control of ['Post Charge', 'Add Payment', 'Record Payment']) {
+    assert.equal(await page.getByRole('button', { name: control, exact: true }).count(), 0, `Cashier exposes no ${control} control without an authoritative folio snapshot`)
+  }
+  for (const statistic of ['Open Folios', 'Outstanding', 'Revenue', 'Collected']) {
+    assert.equal(await page.getByText(statistic, { exact: true }).count(), 0, `Cashier does not render a zero-value ${statistic} dashboard during an authority failure`)
+  }
+  const injectedCashierStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['cashier-folios', 'folios', 'accounting-entries'])
+  assert.match(injectedCashierStorage['cashier-folios'] || '', new RegExp(fakeCashierGuest), 'the fake Cashier fixture existed while the server workspace ignored it')
+  assert.match(injectedCashierStorage.folios || '', new RegExp(fakeCashierFolioNumber), 'the fake browser folio existed while the server workspace ignored it')
+  await page.unroute('**/api/cashier/folios')
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeCashierGuest, { exact: false }).count(), 0, 'Cashier retry remains free of fake browser folio data')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(fakeCashierGuest, { exact: false }).count(), 0, 'Cashier reload remains free of fake browser folio data')
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem('inject-local-operational-fixture')
+  }, Object.keys(injectedCashierStorage))
+  await assertNoOperationalBrowserStorage('server-mode Cashier authority and reload')
+
+  // Cashier writes must retain one logical idempotency key across an ambiguous
+  // response, refetch authoritative state after success, and never turn a rejected
+  // or stale folio write into a UI-only success.
+  await page.getByText(cashierMutationGuest, { exact: true }).first().click()
+  await page.getByRole('button', { name: 'Add Charge', exact: true }).click()
+  const ambiguousCashierChargeDescription = `Cashier ambiguous charge ${runId}`
+  const cashierChargeDialog = page.getByRole('dialog', { name: 'Post charge' })
+  await cashierChargeDialog.getByLabel('Description').fill(ambiguousCashierChargeDescription)
+  await cashierChargeDialog.getByLabel('Unit amount').fill('12.34')
+  await cashierChargeDialog.getByLabel('Quantity').fill('2')
+  let cashierChargeAttempt = 0
+  let cashierChargeKey = null
+  let cashierChargeRetryKey = null
+  await page.route('**/api/charges', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue()
+      return
+    }
+    cashierChargeAttempt += 1
+    const requestKey = route.request().headers()['x-idempotency-key'] || null
+    const upstream = await route.fetch()
+    if (cashierChargeAttempt === 1) {
+      cashierChargeKey = requestKey
+      assert.ok(cashierChargeKey, 'Cashier charge sends an idempotency key')
+      assert.equal(upstream.status(), 201, 'Cashier charge reaches the authoritative PMS before its response is lost')
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Injected ambiguous Cashier charge response.' }),
+      })
+      return
+    }
+    cashierChargeRetryKey = requestKey
+    assert.equal(cashierChargeRetryKey, cashierChargeKey, 'Cashier charge retry reuses the exact logical idempotency key')
+    assert.equal(upstream.status(), 200, 'Cashier charge retry receives the authoritative replay')
+    await route.fulfill({ response: upstream })
+  })
+  await cashierChargeDialog.getByRole('button', { name: 'Post charge', exact: true }).click()
+  await cashierChargeDialog.getByText('Injected ambiguous Cashier charge response.', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await cashierChargeDialog.getByLabel('Description').inputValue(), ambiguousCashierChargeDescription, 'ambiguous Cashier charge keeps its description for retry')
+  assert.equal(await cashierChargeDialog.getByLabel('Unit amount').inputValue(), '12.34', 'ambiguous Cashier charge keeps its exact amount for retry')
+  await cashierChargeDialog.getByRole('button', { name: 'Post charge', exact: true }).click()
+  await cashierChargeDialog.waitFor({ state: 'hidden' })
+  assert.equal(cashierChargeAttempt, 2, 'Cashier charge uses one original attempt and one replay')
+  assert.equal(await prisma.charge.count({
+    where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, description: ambiguousCashierChargeDescription },
+  }), 1, 'ambiguous Cashier charge persists exactly one append-only row')
+  const exactCashierCharge = await prisma.charge.findFirst({
+    where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, description: ambiguousCashierChargeDescription },
+  })
+  assert.ok(exactCashierCharge, 'the exact Cashier charge can be read back')
+  assert.equal(exactCashierCharge.amountSatang, 1234n, 'Cashier charge persists its exact satang unit amount')
+  assert.equal(exactCashierCharge.totalSatang, 2468n, 'Cashier charge persists its exact satang total')
+  await page.unroute('**/api/charges')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByText(cashierMutationGuest, { exact: true }).first().click()
+  await page.getByText(ambiguousCashierChargeDescription, { exact: true }).waitFor({ state: 'visible' })
+
+  let cashierRefreshFailureActive = false
+  await page.route('**/api/cashier/folios', async (route) => {
+    if (route.request().method() === 'GET' && cashierRefreshFailureActive) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'Injected post-payment Cashier refresh failure.' }),
+      })
+      return
+    }
+    await route.continue()
+  })
+  let cashierPaymentAttempt = 0
+  let cashierPaymentKey = null
+  let cashierPaymentRetryKey = null
+  await page.route('**/api/payments', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue()
+      return
+    }
+    cashierPaymentAttempt += 1
+    const requestKey = route.request().headers()['x-idempotency-key'] || null
+    const upstream = await route.fetch()
+    if (cashierPaymentAttempt === 1) {
+      cashierPaymentKey = requestKey
+      assert.ok(cashierPaymentKey, 'Cashier payment sends an idempotency key')
+      assert.equal(upstream.status(), 201, 'Cashier payment is committed before the authoritative refetch fails')
+      cashierRefreshFailureActive = true
+    } else {
+      cashierPaymentRetryKey = requestKey
+      assert.equal(cashierPaymentRetryKey, cashierPaymentKey, 'Cashier payment retry after refetch failure reuses the exact logical idempotency key')
+      assert.equal(upstream.status(), 200, 'Cashier payment retry receives the authoritative replay')
+    }
+    await route.fulfill({ response: upstream })
+  })
+  await page.getByRole('button', { name: 'Collect Payment', exact: true }).click()
+  const cashierPaymentDialog = page.getByRole('dialog', { name: 'Collect payment' })
+  await cashierPaymentDialog.getByLabel('Payment amount').fill('10.01')
+  await cashierPaymentDialog.getByRole('button', { name: 'Record payment', exact: true }).click()
+  await page.getByTestId('server-cashier-error').waitFor({ state: 'visible' })
+  assert.equal(await page.getByText('Payment recorded for', { exact: false }).count(), 0, 'a committed payment with a failed read-back does not claim UI success')
+  assert.equal(await prisma.payment.count({
+    where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, amountSatang: 1001n },
+  }), 1, 'the payment committed before its failed read-back exists exactly once')
+  const persistedCashierAttemptEvidence = await page.evaluate(() => Object.entries(window.sessionStorage)
+    .filter(([key]) => key.startsWith('pms:attempt:v1:')))
+  assert.equal(persistedCashierAttemptEvidence.length, 1, 'the ambiguous payment retains one reload-safe opaque attempt record')
+  const serializedCashierAttemptEvidence = JSON.stringify(persistedCashierAttemptEvidence)
+  for (const forbiddenValue of [cashierMutationGuest, cashierMutationReservation.data.folio.id, '10.01']) {
+    assert.equal(serializedCashierAttemptEvidence.includes(forbiddenValue), false, 'reload-safe attempt evidence contains no guest, folio, or amount material')
+  }
+  cashierRefreshFailureActive = false
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByText(cashierMutationGuest, { exact: true }).first().click()
+  await page.getByRole('button', { name: 'Collect Payment', exact: true }).click()
+  const cashierPaymentRetryDialog = page.getByRole('dialog', { name: 'Collect payment' })
+  await cashierPaymentRetryDialog.waitFor({ state: 'visible' })
+  await cashierPaymentRetryDialog.getByLabel('Payment amount').fill('10.01')
+  await cashierPaymentRetryDialog.getByRole('button', { name: 'Record payment', exact: true }).click()
+  await cashierPaymentRetryDialog.waitFor({ state: 'hidden' })
+  assert.equal(cashierPaymentAttempt, 2, 'Cashier payment uses one committed attempt and one replay after read-back recovery')
+  assert.equal(await prisma.payment.count({
+    where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, amountSatang: 1001n },
+  }), 1, 'Cashier payment replay never creates a duplicate payment')
+  assert.deepEqual(
+    await page.evaluate(() => Object.keys(window.sessionStorage).filter((key) => key.startsWith('pms:attempt:v1:'))),
+    [],
+    'confirmed payment replay clears the opaque reload-safe attempt record',
+  )
+  await page.unroute('**/api/payments')
+  await page.unroute('**/api/cashier/folios')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByText(cashierMutationGuest, { exact: true }).first().click()
+  await page.getByText('CASH', { exact: true }).last().waitFor({ state: 'visible' })
+
+  // Model a stale open-folio screen after another actor closes the folio. The
+  // backend must reject the charge and the dialog must display that rejection.
+  await prisma.folio.update({
+    where: { id: cashierMutationReservation.data.folio.id },
+    data: { status: 'CLOSED' },
+  })
+  await page.getByRole('button', { name: 'Add Charge', exact: true }).click()
+  const closedFolioChargeDialog = page.getByRole('dialog', { name: 'Post charge' })
+  const rejectedClosedCharge = `Rejected closed folio ${runId}`
+  await closedFolioChargeDialog.getByLabel('Description').fill(rejectedClosedCharge)
+  await closedFolioChargeDialog.getByLabel('Unit amount').fill('1.23')
+  const closedChargeResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/charges') && response.request().method() === 'POST',
+  )
+  await closedFolioChargeDialog.getByRole('button', { name: 'Post charge', exact: true }).click()
+  assert.equal((await closedChargeResponse).status(), 400, 'stale Cashier charge against a closed folio is rejected')
+  await closedFolioChargeDialog.getByText('Charges can only be posted to an open folio.', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await prisma.charge.count({
+    where: { propertyId: property.id, folioId: cashierMutationReservation.data.folio.id, description: rejectedClosedCharge },
+  }), 0, 'rejected closed-folio charge creates no financial row')
+  await closedFolioChargeDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await page.getByRole('tab', { name: 'Closed', exact: true }).click()
+  await page.getByText(cashierMutationGuest, { exact: true }).first().click()
+  assert.equal(await page.getByRole('button', { name: 'Add Charge', exact: true }).count(), 0, 'reloaded closed folio exposes no charge control')
+  assert.equal(await page.getByRole('button', { name: 'Collect Payment', exact: true }).count(), 0, 'reloaded closed folio exposes no payment control')
+  await page.keyboard.press('Escape')
+  await assertNoOperationalBrowserStorage('Cashier idempotency, read-back, rejection, and reload proof')
+
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+
   // Simulate the visible Booking Board form losing an otherwise successful create response.
   // The form must keep its input and logical key, replay the original server result on the
   // operator's retry, and still show the persisted stay after a full reload.
@@ -878,8 +1156,12 @@ try {
     if (interceptedCreateCount === 1) {
       ambiguousCreateKey = requestKey
       assert.ok(ambiguousCreateKey, 'the visible Booking Board form sends a create idempotency key')
-      assert.equal(upstream.status(), 201, 'the visible reservation create reaches the authoritative PMS before its response is lost')
       lostCreateUpstream = await upstream.json()
+      assert.equal(
+        upstream.status(),
+        201,
+        `the visible reservation create reaches the authoritative PMS before its response is lost: ${JSON.stringify(lostCreateUpstream)}`,
+      )
       await route.fulfill({
         status: 503,
         contentType: 'application/json',
@@ -898,6 +1180,8 @@ try {
   await createDialog.getByLabel('First Name *').fill(ambiguousCreateFirstName)
   await createDialog.getByLabel('Last Name *').fill(ambiguousCreateLastName)
   await createDialog.getByLabel('Email').fill(ambiguousCreateEmail)
+  await createDialog.getByLabel('Room Type').click()
+  await page.getByRole('option', { name: roomType.name, exact: true }).click()
   await createDialog.getByRole('button', { name: 'Create Reservation', exact: true }).click()
   await createDialog.getByRole('button', { name: 'Create Reservation', exact: true }).waitFor({ state: 'visible' })
   assert.ok(lostCreateUpstream?.data?.id, 'the lost create response contains the authoritative reservation identifier')
@@ -1021,6 +1305,12 @@ try {
     postExtraButton.click(),
   ])
   assert.equal(postExtraResult.status(), 201, 'command drawer posts a new extra through the server')
+  await page.waitForFunction(() => {
+    const description = document.querySelector('[aria-label="Extra description"]')
+    const amount = document.querySelector('[aria-label="Extra amount in baht"]')
+    const quantity = document.querySelector('[aria-label="Extra quantity"]')
+    return description?.value === '' && amount?.value === '' && quantity?.value === '1'
+  })
   assert.equal(await page.getByLabel('Extra description', { exact: true }).inputValue(), '', 'confirmed charge clears the description to prevent an accidental duplicate post')
   assert.equal(await page.getByLabel('Extra amount in baht', { exact: true }).inputValue(), '', 'confirmed charge clears the amount to prevent an accidental duplicate post')
   assert.equal(await page.getByLabel('Extra quantity', { exact: true }).inputValue(), '1', 'confirmed charge resets quantity after success')
@@ -1382,11 +1672,54 @@ try {
     await assertNoOperationalBrowserStorage(path)
   }
 
+  // CAFE_STAFF may read authoritative folios and post an allowed charge, but it may
+  // never collect or record a payment. Its event subscription must still refetch the
+  // Cashier snapshot after a property-scoped folio event.
+  const cafeCashierContext = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 800 } })
+  const cafeCashierLogin = await cafeCashierContext.request.post('/api/auth/login', {
+    data: { identity: cafeCashierUsername, password: cafeCashierPassword },
+  })
+  assert.equal(cafeCashierLogin.status(), 200, `CAFE_STAFF Cashier login failed: ${await cafeCashierLogin.text()}`)
+  const cafeCashierPage = await cafeCashierContext.newPage()
+  let cafeCashierFolioReads = 0
+  await cafeCashierPage.route('**/api/cashier/folios*', async (route) => {
+    if (route.request().method() === 'GET') cafeCashierFolioReads += 1
+    await route.continue()
+  })
+  const cafeSseConnected = cafeCashierPage.waitForResponse((response) => response.url().endsWith('/api/events'))
+  await cafeCashierPage.goto('/cashier', { waitUntil: 'domcontentloaded' })
+  await cafeSseConnected
+  await cafeCashierPage.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  await cafeCashierPage.getByText(`Board Updated ${runId}`, { exact: true }).waitFor({ state: 'visible' })
+  await cafeCashierPage.getByRole('button', { name: 'Post Charge', exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await cafeCashierPage.getByRole('button', { name: 'Collect', exact: true }).count(), 0, 'CAFE_STAFF has no payment collection control')
+  assert.equal(await cafeCashierPage.getByRole('button', { name: 'Record payment', exact: true }).count(), 0, 'CAFE_STAFF has no payment recording control')
+  const cafeReadsBeforeFolioEvent = cafeCashierFolioReads
+  await recordDomainEvent(prisma, {
+    propertyId: property.id,
+    // Use a real named SSE event consumed by DomainEventBridge. An invented event
+    // name would be correctly filtered by the browser because EventSource has no
+    // wildcard listener for named events.
+    eventType: 'CHARGE_CREATED',
+    aggregateType: 'charge',
+    aggregateId: `cafe-cashier-charge-${runId}`,
+  })
+  // Playwright route counters live in Node; wait briefly for the asynchronous SSE listener to refetch.
+  for (let attempt = 0; attempt < 20 && cafeCashierFolioReads <= cafeReadsBeforeFolioEvent; attempt += 1) {
+    await cafeCashierPage.waitForTimeout(250)
+  }
+  assert.ok(cafeCashierFolioReads > cafeReadsBeforeFolioEvent, 'CAFE_STAFF Cashier refetches authoritative folios after its permitted SSE event')
+  const cafeOperationalStorage = await cafeCashierPage.evaluate(() => {
+    const forbidden = new Set(['folios', 'cashier-folios', 'accounting-entries', 'auth:current-user'])
+    return Object.keys(window.localStorage).filter((key) => forbidden.has(key))
+  })
+  assert.deepEqual(cafeOperationalStorage, [], 'CAFE_STAFF Cashier keeps folio, accounting, and identity state out of browser storage')
+  await cafeCashierContext.close()
+
   await page.goto('/cashier', { waitUntil: 'domcontentloaded' })
-  await page.getByRole('tab', { name: 'Accounting', exact: true }).click()
-  await page.getByText('Accounting dashboard unavailable in server mode', { exact: true }).waitFor({ state: 'visible' })
-  await page.getByRole('tab', { name: 'Reconciliation', exact: true }).click()
-  await page.getByText('Cash reconciliation unavailable in server mode', { exact: true }).waitFor({ state: 'visible' })
+  await page.getByTestId('server-cashier-view').waitFor({ state: 'visible' })
+  assert.equal(await page.getByRole('tab', { name: 'Accounting', exact: true }).count(), 0, 'Accounting is capability-gated out of the server Cashier')
+  assert.equal(await page.getByRole('tab', { name: 'Reconciliation', exact: true }).count(), 0, 'Cash reconciliation is capability-gated out of the server Cashier')
   await assertNoOperationalBrowserStorage('server-mode accounting capability gate')
 
   await page.keyboard.press('Control+K')

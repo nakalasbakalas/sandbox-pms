@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'manager' | 'front-desk' | 'housekeeping' | 'cashier'
+export type UserRole = 'admin' | 'manager' | 'front-desk' | 'housekeeping' | 'cashier' | 'cafe-staff'
 
 export interface User {
   id: string
@@ -166,6 +166,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'send:staff-messages',
     'view:ops',
   ],
+  'cafe-staff': [
+    'view:cashier',
+    'post:charges',
+  ],
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -174,4 +178,5 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   'front-desk': 'Front Desk',
   housekeeping: 'Housekeeping',
   cashier: 'Cashier',
+  'cafe-staff': 'Cafe Staff',
 }

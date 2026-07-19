@@ -27,6 +27,7 @@ function mapRole(role: string): UserRole {
   if (normalized === 'MANAGER') return 'manager'
   if (normalized === 'HOUSEKEEPING') return 'housekeeping'
   if (normalized === 'CASHIER') return 'cashier'
+  if (normalized === 'CAFE_STAFF') return 'cafe-staff'
   return 'front-desk'
 }
 

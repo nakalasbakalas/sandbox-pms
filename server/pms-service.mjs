@@ -27,6 +27,7 @@ import {
 import {
   bahtToSatang,
   dualWriteMoney,
+  parseSatang,
   readMoneySatang,
   resolveMoneyInput,
   satangToApiString,
@@ -2320,6 +2321,127 @@ export async function listReservations(prisma, actor) {
     include: reservationInclude,
     orderBy: [{ checkIn: 'asc' }, { createdAt: 'desc' }],
   })
+}
+
+function cashierSatangString(value, label) {
+  if (value === null || value === undefined || value === '') {
+    throw new PmsValidationError(`Cashier data is missing exact satang for ${label}.`, 503)
+  }
+  try {
+    return satangToApiString(parseSatang(value, label))
+  } catch {
+    throw new PmsValidationError(`Cashier data has invalid exact satang for ${label}.`, 503)
+  }
+}
+
+function cashierGuestName(guest) {
+  const value = [guest?.firstName, guest?.lastName]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(' ')
+  return value || 'Guest'
+}
+
+function cashierFolioProjection(folio) {
+  return {
+    id: folio.id,
+    reservationId: folio.reservationId,
+    guestName: cashierGuestName(folio.reservation?.guest),
+    roomNumber: String(folio.reservation?.assignedRoom?.number || 'Unassigned'),
+    checkIn: folio.reservation?.checkIn,
+    checkOut: folio.reservation?.checkOut || null,
+    status: folio.status,
+    charges: folio.charges.map((charge) => ({
+      id: charge.id,
+      postedAt: charge.createdAt,
+      category: charge.category,
+      description: charge.description,
+      quantity: charge.quantity,
+      unitPriceSatang: cashierSatangString(charge.amountSatang, `charge ${charge.id} unit price`),
+      totalSatang: cashierSatangString(charge.totalSatang, `charge ${charge.id} total`),
+      postedBy: charge.createdBy,
+    })),
+    payments: folio.payments.map((payment) => ({
+      id: payment.id,
+      postedAt: payment.createdAt,
+      method: payment.method,
+      amountSatang: cashierSatangString(payment.amountSatang, `payment ${payment.id} amount`),
+      reference: payment.reference || null,
+      receivedBy: payment.processedBy,
+    })),
+    subtotalSatang: cashierSatangString(folio.subtotalSatang, `folio ${folio.id} subtotal`),
+    taxSatang: cashierSatangString(folio.taxSatang, `folio ${folio.id} tax`),
+    totalSatang: cashierSatangString(folio.totalSatang, `folio ${folio.id} total`),
+    paidSatang: cashierSatangString(folio.paidSatang, `folio ${folio.id} paid`),
+    balanceSatang: cashierSatangString(folio.balanceSatang, `folio ${folio.id} balance`),
+    createdAt: folio.createdAt,
+    updatedAt: folio.updatedAt,
+  }
+}
+
+// This intentionally has its own allowlisted projection. Do not substitute the
+// broader reservation include here: it carries booking-email relations and guest
+// contact data that a Cashier workspace never needs.
+export async function listCashierFolios(prisma, actor) {
+  const property = await getProperty(prisma, actor)
+  const folios = await prisma.folio.findMany({
+    where: { reservation: { propertyId: property.id } },
+    select: {
+      id: true,
+      reservationId: true,
+      status: true,
+      subtotalSatang: true,
+      taxSatang: true,
+      totalSatang: true,
+      paidSatang: true,
+      balanceSatang: true,
+      createdAt: true,
+      updatedAt: true,
+      reservation: {
+        select: {
+          checkIn: true,
+          checkOut: true,
+          guest: { select: { firstName: true, lastName: true } },
+          assignedRoom: { select: { number: true } },
+        },
+      },
+      charges: {
+        where: { void: false },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          createdAt: true,
+          category: true,
+          description: true,
+          quantity: true,
+          amountSatang: true,
+          totalSatang: true,
+          createdBy: true,
+        },
+      },
+      payments: {
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          createdAt: true,
+          method: true,
+          amountSatang: true,
+          reference: true,
+          processedBy: true,
+        },
+      },
+    },
+    orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+  })
+
+  return {
+    property: {
+      id: property.id,
+      name: property.name,
+      currency: property.currency,
+    },
+    folios: folios.map(cashierFolioProjection),
+  }
 }
 
 export async function updateReservation(prisma, reservationId, input, actor, options = {}) {

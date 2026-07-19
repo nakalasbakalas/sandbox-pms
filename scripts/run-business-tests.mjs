@@ -476,7 +476,9 @@ const bookingEmailWorkflow = await importTypeScriptModule(resolve('src/lib/booki
 const opsNotificationDisplay = await importTypeScriptModule(resolve('src/lib/ops-notification-display.ts'))
 const ical = await importTypeScriptModule(resolve('src/lib/ical.ts'))
 const durableAttemptKeySource = await readFile(resolve('src/lib/durable-attempt-key.ts'), 'utf8')
-assert.equal(/(?:localStorage|sessionStorage)/.test(durableAttemptKeySource), false, 'server-mode attempt keys never use browser persistence')
+assert.match(durableAttemptKeySource, /window\.sessionStorage/, 'opaque uncertain-write attempt evidence survives a same-tab reload')
+assert.doesNotMatch(durableAttemptKeySource, /localStorage/, 'attempt evidence is never retained beyond the browser tab')
+assert.match(durableAttemptKeySource, /JSON\.stringify\(\{ version: 1, fingerprint, key \}/, 'browser attempt evidence contains only version, fingerprint, and opaque key')
 const cashierAttemptSource = await readFile(resolve('src/components/views/CashierView.tsx'), 'utf8')
 assert.match(
   cashierAttemptSource,

@@ -71,6 +71,51 @@ class MemoryAttemptStorage implements AttemptStorage {
   }
 }
 
+// Server-mode financial and lifecycle retries must survive a full page reload,
+// but the browser must never become the owner of the underlying operation. This
+// store contains only a hashed operation/entity slot, an intent fingerprint, and
+// an opaque idempotency key. It never stores the material request or raw entity id.
+class SessionAttemptStorage implements AttemptStorage {
+  private readonly fallback = new MemoryAttemptStorage()
+
+  constructor(private readonly storage: Storage) {}
+
+  getItem(key: string) {
+    try {
+      return this.storage.getItem(key) ?? this.fallback.getItem(key)
+    } catch {
+      return this.fallback.getItem(key)
+    }
+  }
+
+  setItem(key: string, value: string) {
+    this.fallback.setItem(key, value)
+    try {
+      this.storage.setItem(key, value)
+    } catch {
+      // Restricted browser contexts retain the same-tab in-memory fallback.
+    }
+  }
+
+  removeItem(key: string) {
+    this.fallback.removeItem(key)
+    try {
+      this.storage.removeItem(key)
+    } catch {
+      // The fallback has still been cleared.
+    }
+  }
+}
+
+function defaultAttemptStorage(): AttemptStorage {
+  if (typeof window === 'undefined') return new MemoryAttemptStorage()
+  try {
+    return new SessionAttemptStorage(window.sessionStorage)
+  } catch {
+    return new MemoryAttemptStorage()
+  }
+}
+
 function defaultRandomId() {
   return globalThis.crypto?.randomUUID?.()
     || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
@@ -137,7 +182,7 @@ export class DurableAttemptKeyManager {
   private readonly pending = new Map<string, Promise<string>>()
 
   constructor(options: DurableAttemptKeyManagerOptions = {}) {
-    this.storage = options.storage || new MemoryAttemptStorage()
+    this.storage = options.storage || defaultAttemptStorage()
     this.randomId = options.randomId || defaultRandomId
   }
 

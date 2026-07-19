@@ -167,8 +167,8 @@ Acceptance requires:
 - reuse of a charge key with a different normalized intent returns `409`; and
 - the same charge idempotency key can be used independently by two properties without cross-property replay;
 - one serialization conflict is retried without double-posting.
-- server-mode financial surfaces reuse one opaque in-memory attempt key for unchanged uncertain retries, rotate it when material input changes, clear it after confirmed success, and never write the attempt/key to `localStorage` or `sessionStorage`;
-- a full page reload is not asserted to recover an uncertain financial attempt key, so reload recovery must reconcile the authoritative folio before another write.
+- server-mode financial surfaces reuse one opaque attempt key for unchanged uncertain retries across a full same-tab reload, rotate it when material input changes, clear it after confirmed success, and store only a hashed slot, fingerprint, and opaque key in `sessionStorage` with no request material, raw entity identifier, PII, amount, reference, or credential and no `localStorage`;
+- after an uncertain financial outcome, a full same-tab reload recovers the same opaque key for only the unchanged intent, while the operator still reconciles the authoritative folio before retrying.
 - server mode never writes authenticated user identity or legacy auth tokens to browser storage;
 - a delayed failed `/api/auth/me` response cannot clear a newer successful interactive login or override logout;
 - server onboarding persists no password or confirmation value and removes legacy credential-bearing draft keys; and
@@ -314,7 +314,7 @@ Acceptance requires:
 - cancel and no-show require `cancel:reservation`, an operational reason, an idempotency key, and a matching reservation update token; future no-show and checked-in/terminal lifecycle changes are rejected;
 - same-intent lifecycle replay creates no duplicate history, audit, or domain event, while changed intent, stale state, forged property identifiers, and superseded outcomes return a truthful error;
 - check-in/check-out require a lifecycle idempotency key; the same key is isolated per property, cannot authorize another reservation or intent within one property, and a replay after a later lifecycle mutation returns `409` without new evidence;
-- ambiguous network and `5xx` outcomes retain the exact in-memory idempotency key, request body, and stale token; retrying the unchanged assignment produces one audit, history, and domain event;
+- ambiguous network and `5xx` outcomes retain the exact in-memory request/stale token plus a reload-safe opaque idempotency record with no command material; retrying the unchanged assignment produces one audit, history, and domain event;
 - reservation-scoped guest/VIP editing requires both `edit:reservation` and `view:guests`, supports explicit contact-field clearing, rejects stale guest state, and stores only changed field names in evidence;
 - folio extras require `post:charges`, an open folio, the `legacyFolioCharges` capability, and exact base-10 satang input; an unchanged ambiguous retry reuses the original charge key;
 - a housekeeping Board response omits contact/profile PII, channel references, reservation notes, folio identifiers, and financial values while retaining the minimum guest identity/VIP state required for operations;
@@ -345,6 +345,26 @@ Acceptance requires:
 - an initial reservation-list or Board-snapshot failure renders a persistent unavailable state with Retry, no server or browser rows, and no create affordance;
 - Retry replaces the unavailable state with the authoritative server list and room/readiness snapshot; a full reload shows that same persisted state; and
 - the server-mode route and backend registry both require `view:reservations`, while browser storage remains free of operational reservation/guest state after the proof.
+
+The browser proof is disposable-DB engineering evidence only. It does not replace staff workflow, restored-staging, provider, or owner acceptance.
+
+## Server Cashier Authority
+
+Run:
+
+```powershell
+npm.cmd run test:cashier-server-authority
+npm.cmd run test:e2e:server
+```
+
+Acceptance requires:
+
+- server-mode `/cashier` reads authenticated folios from `GET /api/cashier/folios` only and never projects browser-KV folios, cashier folios, or accounting entries;
+- an initial folio-snapshot failure renders a persistent Cashier unavailable state with Retry, no server or browser folios, no zero-value operational dashboard, and no payment or charge affordance;
+- Retry replaces the unavailable state with the authoritative persisted folio and a full reload shows that same server state; and
+- an ambiguous charge response reuses the same idempotency key and creates one exact-satang row, a committed payment whose read-back fails cannot claim UI success and safely replays with the same key after a full reload, and a stale charge against a closed folio remains visibly rejected with no financial row;
+- payment and charge writes remain separately property-scoped, permissioned, and idempotent; the Cashier authority proof does not enable the legacy Accounting Dashboard or Cash Reconciliation workflow in server mode; and
+- a `CAFE_STAFF` session receives permitted property-scoped folio refreshes, sees authoritative folios and the permitted Post Charge control, but sees no Collect or Record payment control and cannot gain payment authority from browser state.
 
 The browser proof is disposable-DB engineering evidence only. It does not replace staff workflow, restored-staging, provider, or owner acceptance.
 

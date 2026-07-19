@@ -67,6 +67,7 @@ import {
   reverseAccountingPayment,
 } from './accounting-service.mjs'
 import { canViewRoute, requirePermission } from './rbac.mjs'
+import { canReadOperationalEvent, requireOperationalEventPermission } from './event-access.mjs'
 import { clearSessionCookie, createSessionToken, readSessionCookie, sessionCookie, verifySessionToken } from './security.mjs'
 import { envEnabled, requireSetupPermission, setupTokenRequired } from './setup-permission.mjs'
 import {
@@ -155,6 +156,7 @@ import {
   getTodayData,
   listBookingEmailEvents,
   listBookingEmailSources,
+  listCashierFolios,
   listGuests,
   listReservations,
   listRooms,
@@ -362,7 +364,7 @@ function sendCalendar(response, contents, fileName) {
   response.end(contents)
 }
 
-function startDomainEventStream(request, response, db, context, url) {
+function startDomainEventStream(request, response, db, context, actor, url) {
   const rawAfter = firstHeaderValue(request.headers['last-event-id']) || url.searchParams.get('after') || '0'
   let after
   try {
@@ -402,6 +404,7 @@ function startDomainEventStream(request, response, db, context, url) {
       const events = await listDomainEvents(db, { propertyId: context.propertyId, after, limit: 100 })
       for (const event of events) {
         after = BigInt(event.id)
+        if (!canReadOperationalEvent(actor, event)) continue
         response.write(`id: ${event.id}\n`)
         response.write(`event: ${event.type}\n`)
         response.write(`data: ${JSON.stringify(event)}\n\n`)
@@ -1037,13 +1040,13 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/events' && request.method === 'GET') {
-    requirePermission(user, 'view:board')
+    requireOperationalEventPermission(user)
     if (String(process.env.SSE_ENABLED ?? 'true').toLowerCase() === 'false') {
       const error = new Error('Operational event streaming is disabled.')
       error.statusCode = 503
       throw error
     }
-    startDomainEventStream(request, response, db, context, url)
+    startDomainEventStream(request, response, db, context, user, url)
     return true
   }
 
@@ -1719,6 +1722,12 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/reservations' && request.method === 'GET') {
     requirePermission(user, 'view:reservations')
     sendJson(response, 200, { ok: true, data: await listReservations(db, user) })
+    return true
+  }
+
+  if (url.pathname === '/api/cashier/folios' && request.method === 'GET') {
+    requirePermission(user, 'view:cashier')
+    sendJson(response, 200, { ok: true, data: await listCashierFolios(db, user) })
     return true
   }
 

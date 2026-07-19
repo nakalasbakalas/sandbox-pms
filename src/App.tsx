@@ -359,7 +359,7 @@ const legacyEventTypes: Record<string, DataSyncEvent['type']> = {
 
 function DomainEventBridge() {
   const { hasAnyPermission } = useAuth()
-  const canSubscribe = SERVER_API_ENABLED && hasAnyPermission(['view:board'])
+  const canSubscribe = SERVER_API_ENABLED && hasAnyPermission(['view:board', 'view:cashier'])
 
   useEffect(() => {
     if (!canSubscribe) return
