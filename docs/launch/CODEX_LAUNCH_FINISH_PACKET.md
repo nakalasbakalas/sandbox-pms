@@ -4,7 +4,7 @@ Last updated: 2026-07-19
 
 Release status must use the four levels in `RELEASE_EVIDENCE_MODEL.md`: engineering-ready, staging-proven, owner-approved, and provider-proven. Do not infer one from another. The current posture is owner-accepted pilot / launch-hardening, not full production sign-off.
 
-Merged `main` is `9208621`. The linear product stack through `c3f1dcd` passed both required GitHub checks on PR #189, but PRs #177-#189 are stacked and have no independent GitHub review. `codex/pms-launch-integration` is the single main-target consolidation candidate; its later corrections must rerun both checks at the final exact commit. The release-foundation Blueprint specifies migration-only predeploy; confirm the active Render service command before deployment because historical live evidence records migration plus `prod-safe` seed.
+Merged `main` is `9208621`. PR #190 is the single main-target consolidation candidate; integration commit `cb34b057fc829914408225802fe25fa235b0b8c5` passed both required GitHub checks in run `29679511970`, but no independent GitHub approval exists and any later head must retain both checks. The release-foundation Blueprint specifies migration-only predeploy; confirm the active Render service command before deployment because historical live evidence records migration plus `prod-safe` seed.
 
 Use this as the first instruction packet for the next Codex run in `nakalasbakalas/sandbox-pms`. It is scoped to prevent another long, overloaded session. The repo already has launch-hardening evidence through 2026-06-15, but current launch sign-off still depends on proof-heavy operational work and a fresh green gate in the current checkout.
 

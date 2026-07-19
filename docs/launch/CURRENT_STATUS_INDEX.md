@@ -6,7 +6,7 @@ Verdict: **owner-accepted pilot / launch-hardening; full production sign-off rem
 
 | Evidence level | Current status |
 | --- | --- |
-| Engineering-ready | Merged `main` commit `9208621` remains the primary source. The product-stack head `c3f1dcd` passed both required CI jobs, but the final integration branch contains later corrections and is not engineering-ready until both jobs pass at its final exact commit and independent review is recorded. |
+| Engineering-ready | PR #190 integration commit `cb34b057fc829914408225802fe25fa235b0b8c5` passed both required CI jobs in run `29679511970`; merged `main` commit `9208621` remains the primary source until independent GitHub review and merge. Any later PR head must retain both checks. |
 | Staging-proven | Open; local disposable database evidence is not staging proof. |
 | Owner-approved | Open for the current candidate; historical approval remains attached to deploy `dep-d966aj9kh4rs73d9h10g`. |
 | Provider-proven | Partial per capability. Historical 2026-07-07 Cloudflare WAF/rate-limit and Render recovery evidence is preserved, but it is not current-candidate proof and must not be generalized into OTA, payment, secret-rotation, or credentialed RBAC proof. |
@@ -17,7 +17,7 @@ The committed release-foundation Blueprint is migration-only at predeploy (`npm 
 
 - Canonical merged source: `origin/main`, commit `9208621`. No feature worktree is canonical until the integration candidate is reviewed and merged.
 - PRs #177-#189 form one linear product stack ending at `c3f1dcd`; PR #179 is a unique side-document branch and is being reconciled rather than blindly cherry-picked.
-- PR #189 exact commit `c3f1dcd` passed both required CI jobs. That proof does not transfer to later integration commits.
+- PR #190 integration commit `cb34b057fc829914408225802fe25fa235b0b8c5` passed both required CI jobs in run `29679511970`. Independent GitHub review remains open, and that proof does not transfer to later functional commits.
 - WAF/evidence salvage remains on `codex/local-waf-proof-salvage` at `a6e43fd`.
 - PR151 audit edits are preserved on `codex/pr151-salvage` at `307cf13`.
 - Lite PRs #172/#173 remain isolated and are not part of primary main.
@@ -27,7 +27,7 @@ The committed release-foundation Blueprint is migration-only at predeploy (`npm 
 
 | Slice | Status | Evidence |
 | --- | --- | --- |
-| 2026-07-19 primary PMS consolidation | In progress; validated stack head `c3f1dcd` is being consolidated into one main-target candidate, with exact-head CI, independent review, staging drills, owner approval, and provider freshness still open | This index; [live environment register](../live-environment-proof.md) |
+| 2026-07-19 primary PMS consolidation | PR #190 integration commit `cb34b057` is CI-green; independent review, merge, staging drills, owner approval, and provider freshness remain open | This index; [live environment register](../live-environment-proof.md) |
 | 2026-07-07 Cloudflare WAF and Render recovery proof | Historical provider proof; exact WAF rules and recovery metadata recorded without secret values, but freshness remains open for the current candidate | [2026-07-07-cloudflare-waf-zone-proof.md](evidence/2026-07-07-cloudflare-waf-zone-proof.md); [live environment register](../live-environment-proof.md) |
 | 2026-07-07 owner completion deploy and issue closure | Completed by owner-directed accepted-risk closure; `d18ea06` deployed live, post-deploy checks passed, external proof gaps carried as owner-managed risk | [2026-07-07-owner-completion-deploy-and-issue-closure.md](evidence/2026-07-07-owner-completion-deploy-and-issue-closure.md) |
 | 2026-07-06 owner/provider/manual decisions | Partial; owner answers recorded, expert proof boundaries set, and three-failure account lockout implemented; production proof remains open | [2026-07-06-owner-provider-manual-decisions.md](evidence/2026-07-06-owner-provider-manual-decisions.md) |
