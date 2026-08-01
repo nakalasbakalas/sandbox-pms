@@ -13,6 +13,11 @@ import type { RoomTypeSetup, RoomSetup } from '@/types/onboarding'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { SERVER_API_ENABLED, pmsApi } from '@/lib/pms-api-client'
 
+const DEFAULT_ROOM_BASE_RATES = {
+  twin: 750,
+  double: 850,
+}
+
 type RoomFormData = {
   id?: string
   roomTypeId: string
@@ -80,7 +85,7 @@ export function RoomTypeManagement() {
     name: '',
     baseOccupancy: 2,
     maxOccupancy: 2,
-    baseRate: 2000,
+    baseRate: DEFAULT_ROOM_BASE_RATES.twin,
     extraGuestFee: 300,
     childFreeAge: 5,
     childFeeAge: 11,
@@ -123,7 +128,7 @@ export function RoomTypeManagement() {
       name: '',
       baseOccupancy: 2,
       maxOccupancy: 2,
-      baseRate: 2000,
+      baseRate: DEFAULT_ROOM_BASE_RATES.twin,
       extraGuestFee: 300,
       childFreeAge: 5,
       childFeeAge: 11,

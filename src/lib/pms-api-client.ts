@@ -66,6 +66,51 @@ export function isBookingEmailApiNotConfigured(error: unknown) {
   return /not found|not configured|not implemented/i.test(message)
 }
 
+interface RatePushPayload {
+  roomTypeId: string
+  channelId: string
+  platform?: string
+  date: string
+  rate: number
+  currency?: string
+  message?: string
+  dryRun?: boolean
+}
+
+interface RatePushResultData {
+  roomTypeId: string
+  channelId: string
+  date: string
+  rate: {
+    amount: number
+    currency: string
+  }
+  platform: string
+  workerMode: string
+  signed: boolean
+  dryRun: boolean
+  taskId: string
+  payload: {
+    taskId: string
+    taskType: string
+    platform: string
+    hotelId: string
+    roomType: string
+    dateStart: string
+    dateEnd: string
+    rate?: {
+      amount: number
+      currency: string
+    }
+  }
+  result: {
+    status: string
+    summary?: string
+    errorMessage?: string
+    errorCode?: string
+  }
+}
+
 export const bookingEmailApi = {
   status(authToken?: string | null) {
     return pmsApi<{ ok: true; data: BookingEmailStatus }>('/api/booking-email/status', authToken)
@@ -123,6 +168,19 @@ export const bookingEmailApi = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
+  },
+}
+
+export const ratePushApi = {
+  push(authToken: string | null | undefined, payload: RatePushPayload) {
+    return pmsApi<{ ok: true; data: RatePushResultData }>(
+      '/api/rates/push',
+      authToken,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    )
   },
 }
 

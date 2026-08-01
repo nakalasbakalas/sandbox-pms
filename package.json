@@ -12,6 +12,7 @@
         "typecheck": "tsc -b --noEmit",
         "build": "npm run typecheck && vite build",
         "start": "node server/index.mjs",
+        "start:ota-worker": "node server/ota-worker-server.mjs",
         "lint": "eslint .",
         "test": "node scripts/run-money-tests.mjs && node scripts/run-property-context-tests.mjs && node scripts/run-accounting-v2-tests.mjs && node scripts/run-direct-booking-tests.mjs && node scripts/run-rate-service-tests.mjs && node scripts/run-settings-service-tests.mjs && node scripts/run-operations-foundation-tests.mjs && node scripts/run-messaging-service-tests.mjs && node scripts/run-messaging-server-authority-source-tests.mjs && node scripts/run-channel-mapping-service-tests.mjs && node scripts/run-ical-property-scope-tests.mjs && node scripts/run-channels-server-authority-source-tests.mjs && node scripts/run-rooms-server-authority-source-tests.mjs && node scripts/run-reservations-server-authority-source-tests.mjs && node scripts/run-guests-server-authority-source-tests.mjs && node scripts/run-cashier-projection-service-tests.mjs && node scripts/run-cashier-server-authority-source-tests.mjs && node scripts/run-ops-analyzer-tests.mjs && node scripts/run-provider-adapter-tests.mjs && node scripts/run-front-desk-board-tests.mjs && node scripts/run-reservation-command-service-tests.mjs && node scripts/run-reservation-lifecycle-safety-tests.mjs && node scripts/run-booking-board-ui-source-tests.mjs && node scripts/run-front-desk-permission-source-tests.mjs && node scripts/run-server-mode-kv-source-tests.mjs && node scripts/run-onboarding-secret-storage-tests.mjs && node scripts/run-server-auth-authority-tests.mjs && node scripts/run-cashier-accounting-mode-tests.mjs && node scripts/run-autonomy-policy-tests.mjs && node scripts/run-autonomy-infrastructure-tests.mjs && node scripts/run-autonomy-source-guards.mjs && node scripts/run-business-tests.mjs && node scripts/run-channel-sync-tests.mjs",
         "test:e2e": "node scripts/run-e2e-tests.mjs",
@@ -66,6 +67,8 @@
         "render:gmail-oauth:status": "node scripts/configure-render-gmail-oauth.mjs --status",
         "availability:queue": "node scripts/availability-queue.mjs",
         "channel-sync:policy": "node scripts/availability-queue.mjs policy",
+        "rates:preload:nakhon-2027": "node scripts/generate-demand-calendar-overrides.mjs --source \"C:/Users/nakal/Downloads/nakhon_si_thammarat_2027_hotel_demand_calendar.xlsx\" --sheet \"365 Calendar\" --version 1.0.0",
+        "rates:push:dry-run": "node scripts/prove-rate-push-dryrun.mjs",
         "rooms:import": "node scripts/import-rooms.mjs",
         "rooms:proof": "node scripts/prove-room-inventory.mjs",
         "render:validate": "render blueprints validate",
@@ -131,6 +134,7 @@
         "react-resizable-panels": "^2.1.7",
         "recharts": "^2.15.1",
         "sonner": "^2.0.1",
+        "read-excel-file": "^9.3.5",
         "tailwind-merge": "^3.0.2",
         "three": "^0.175.0",
         "tw-animate-css": "^1.2.4",
@@ -158,13 +162,13 @@
         "vite": "^7.3.5"
     },
     "overrides": {
-        "body-parser": "1.20.5",
+        "body-parser": "1.20.6",
         "esbuild": "0.28.1",
-        "js-yaml": "4.2.0",
+        "js-yaml": "4.3.1",
         "lodash": "4.18.1",
         "path-to-regexp": "8.4.2",
         "picomatch": "4.0.4",
-        "postcss": "8.5.15",
+        "postcss": "8.5.25",
         "qs": "6.15.2"
     },
     "workspaces": {

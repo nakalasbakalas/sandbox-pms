@@ -106,6 +106,21 @@ Last reviewed: 2026-07-18
 
 ## Validation Evidence
 
+## 2027 Nakhon Si Thammarat Demand Calendar Preload State
+
+- Source workbook: `C:/Users/nakal/Downloads/nakhon_si_thammarat_2027_hotel_demand_calendar.xlsx`, sheet `365 Calendar` (expected 365 rows).
+- Default source multipliers are enforced in script as: low `0.9`, normal `1.0`, high `1.15`, peak `1.35`, compression `1.6`.
+- Expected tier mix check is implemented and enforced at preload time: low `42`, normal `162`, high `106`, peak `41`, compression `14`.
+- Rate baselines are canonicalized to `twin=750` and `double=850` in onboarding defaults (`use-onboarding.ts`), seed data (`prisma/seed.ts`), and server-side room updates (`server/pms-service.mjs`), with no baseline `2000` fallback path.
+- Non-normal demand tiers in the generated preload are now converted to room-type overrides with integer math: `Math.round(baseRate * multiplier)`.
+- `scripts/generate-demand-calendar-overrides.mjs` generates a versioned manifest + CSV + backup and tags overrides with `sourceStatus` (default `PROJECTED`) using demand row metadata and `sourceVersion`.
+- `sourceStatus` is intentionally treated as non-final by default:
+  - `sourceStatus=PROJECTED` rows are present in local `rate-overrides` for planning/review.
+  - only confirmed rows are intended for strict enforcement paths.
+- `RatesView` currently defaults to `CONFIRMED` override filtering; `BulkRateUpload` accepts `.xlsx` + metadata columns and preserves `Source Status`.
+- `use-rate-push` now resolves by `sourceStatus` by default, and validates payload constraints (`roomTypeId` exists + integer THB rate) before channel push attempts.
+- Command entry point remains `npm.cmd run rates:preload:nakhon-2027` (configured in `package.json`) and is expected to be followed by UI import in `BulkRateUpload`.
+
 Recent committed Hotel Ops validation has included:
 
 - `npm.cmd test`

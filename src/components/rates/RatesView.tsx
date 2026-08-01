@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -68,7 +68,14 @@ interface RateOverride {
   date: string
   rate: number
   reason: string
+  sourceStatus?: 'CONFIRMED' | 'PROJECTED'
+  demandTier?: string
+  rateMultiplier?: number
+  reviewRepriceDate?: string
+  sourceVersion?: string
 }
+
+type OverrideStatusFilter = 'CONFIRMED' | 'PROJECTED' | 'ALL'
 
 export function RatesView() {
   return SERVER_API_ENABLED ? <ServerRatesView /> : <DemoRatesView />
@@ -97,6 +104,7 @@ function DemoRatesView() {
   const [overrideDate, setOverrideDate] = useState<Date>()
   const [overrideRate, setOverrideRate] = useState('')
   const [overrideReason, setOverrideReason] = useState('')
+  const [overrideStatusFilter, setOverrideStatusFilter] = useState<OverrideStatusFilter>('CONFIRMED')
 
   const selectedRoom = roomTypes.find(rt => rt.id === selectedRoomType)
   const roomRules = rateRules.filter(r => r.roomTypeId === selectedRoomType && r.enabled)
@@ -107,17 +115,43 @@ function DemoRatesView() {
     }
   }, [roomTypes, selectedRoomType])
 
+  const getOverrideSourceStatus = (status?: string): 'CONFIRMED' | 'PROJECTED' => {
+    return status === 'PROJECTED' ? 'PROJECTED' : 'CONFIRMED'
+  }
+
+  const doesOverrideMatchFilter = (override: RateOverride, filter: OverrideStatusFilter) => {
+    return filter === 'ALL' || getOverrideSourceStatus(override.sourceStatus) === filter
+  }
+
+  const getOverrideForDate = (roomTypeId: string, date: Date, filter: OverrideStatusFilter) => {
+    const dateKey = format(date, 'yyyy-MM-dd')
+    const candidates = rateOverrides.filter((override) => {
+      return (
+        override.roomTypeId === roomTypeId &&
+        format(new Date(override.date), 'yyyy-MM-dd') === dateKey &&
+        doesOverrideMatchFilter(override, filter)
+      )
+    })
+    if (candidates.length === 0) return undefined
+
+    const statusRank = (override: RateOverride) => (
+      getOverrideSourceStatus(override.sourceStatus) === 'CONFIRMED' ? 2 : 1
+    )
+    return candidates.sort((a, b) => statusRank(b) - statusRank(a))[0]
+  }
+
   const calculateRate = (baseRate: number, date: Date): { rate: number, breakdown: string[] } => {
     const breakdown: string[] = [`Base: ฿${baseRate}`]
     let rate = baseRate
+    const selectedOverride = getOverrideForDate(selectedRoomType, date, overrideStatusFilter)
 
-    const override = rateOverrides.find(o => 
-      o.roomTypeId === selectedRoomType && 
-      format(new Date(o.date), 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd')
-    )
-
-    if (override) {
-      return { rate: override.rate, breakdown: [`Override: ฿${override.rate} (${override.reason})`] }
+    if (selectedOverride) {
+      return {
+        rate: selectedOverride.rate,
+        breakdown: [
+          `Override (${selectedOverride.sourceStatus || 'CONFIRMED'}): ฿${selectedOverride.rate} (${selectedOverride.reason})`
+        ],
+      }
     }
 
     const applicableRules = roomRules
@@ -219,7 +253,8 @@ function DemoRatesView() {
       roomTypeId: selectedRoomType,
       date: format(overrideDate, 'yyyy-MM-dd'),
       rate,
-      reason: overrideReason
+      reason: overrideReason,
+      sourceStatus: 'CONFIRMED',
     }
 
     setRateOverrides(current => [...current, newOverride])
@@ -381,10 +416,7 @@ function DemoRatesView() {
                   {weekDays.map((day, index) => {
                     const { rate, breakdown } = selectedRoom ? calculateRate(selectedRoom.baseRate, day) : { rate: 0, breakdown: [] }
                     const isToday = format(day, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
-                    const hasOverride = rateOverrides.some(o => 
-                      o.roomTypeId === selectedRoomType && 
-                      format(new Date(o.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
-                    )
+                    const hasOverride = Boolean(getOverrideForDate(selectedRoomType, day, overrideStatusFilter))
 
                     return (
                       <div key={index} className={cn(
@@ -501,15 +533,33 @@ function DemoRatesView() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">Rate Overrides</CardTitle>
-                <Button size="sm" onClick={() => setShowAddOverrideDialog(true)}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={overrideStatusFilter}
+                    onValueChange={(value: OverrideStatusFilter) => setOverrideStatusFilter(value)}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="CONFIRMED">Confirmed only</SelectItem>
+                      <SelectItem value="PROJECTED">Projected only</SelectItem>
+                      <SelectItem value="ALL">All</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button size="sm" onClick={() => setShowAddOverrideDialog(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
               <ScrollArea className="h-[calc(100vh-680px)]">
-                {rateOverrides.filter(o => o.roomTypeId === selectedRoomType).length === 0 ? (
+                {rateOverrides
+                  .filter(o => o.roomTypeId === selectedRoomType)
+                  .filter(o => doesOverrideMatchFilter(o, overrideStatusFilter))
+                  .length === 0 ? (
                   <div className="text-center py-8">
                     <Lightning className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
                     <p className="text-sm text-muted-foreground">No overrides set</p>
@@ -518,6 +568,7 @@ function DemoRatesView() {
                   <div className="space-y-2">
                     {rateOverrides
                       .filter(o => o.roomTypeId === selectedRoomType)
+                      .filter(o => doesOverrideMatchFilter(o, overrideStatusFilter))
                       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
                       .map(override => (
                         <Card key={override.id} className="p-3">
@@ -527,7 +578,13 @@ function DemoRatesView() {
                                 {format(new Date(override.date), 'MMM d, yyyy')}
                               </p>
                               <p className="text-xl font-bold mb-1">฿{override.rate.toLocaleString()}</p>
+                              <p className="text-xs text-muted-foreground mb-1">
+                                {override.sourceStatus || 'CONFIRMED'}{override.demandTier ? ` • ${override.demandTier}` : ''}{override.rateMultiplier ? ` (${override.rateMultiplier})` : ''}
+                              </p>
                               <p className="text-xs text-muted-foreground">{override.reason}</p>
+                              {override.reviewRepriceDate && (
+                                <p className="text-xs text-muted-foreground">Review/Reprice: {override.reviewRepriceDate}</p>
+                              )}
                             </div>
                             <Button 
                               variant="ghost" 
