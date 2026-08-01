@@ -1,17 +1,17 @@
 # Launch Current Status Index
 
-Status date: 2026-07-19.
+Status date: 2026-08-01.
 
-Verdict: **owner-accepted pilot / launch-hardening; full production sign-off remains open.** Use [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) for the four non-interchangeable levels: engineering-ready, staging-proven, owner-approved, and provider-proven. The 2026-07-07 owner-directed completion applies only to its exact historical deploy and accepted-risk decision; it does not prove the current release-foundation candidate or close the V2 gates in `LAUNCH_PROOF_PACK_V2.md`.
+Verdict: **core PMS engineering-ready and provider-deployed; full operational sign-off remains open.** Use [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) for the four non-interchangeable levels. The 2026-08-01 evidence proves the exact merged source, paid Render migration/deployment, public Cloudflare-backed routing, and signed dry-run worker path. It does not prove live OTA writes, credentialed role-by-role staff acceptance, payment-provider operation, or a recovery restore drill.
 
 | Evidence level | Current status |
 | --- | --- |
-| Engineering-ready | PR #190 integration commit `cb34b057fc829914408225802fe25fa235b0b8c5` passed both required CI jobs in run `29679511970`; merged `main` commit `9208621` remains the primary source until independent GitHub review and merge. Any later PR head must retain both checks. |
+| Engineering-ready | Green. PR #194 merged as `8c22f55ab6503dd5121886b611db9f880911101a`; both required jobs passed in GitHub run `30706415049`, including guarded PostgreSQL migration/E2E coverage. |
 | Staging-proven | Open; local disposable database evidence is not staging proof. |
-| Owner-approved | Open for the current candidate; historical approval remains attached to deploy `dep-d966aj9kh4rs73d9h10g`. |
-| Provider-proven | Partial per capability. Historical 2026-07-07 Cloudflare WAF/rate-limit and Render recovery evidence is preserved, but it is not current-candidate proof and must not be generalized into OTA, payment, secret-rotation, or credentialed RBAC proof. |
+| Owner-approved | Open for credentialed staff workflow, localization/tablet, payment-provider, live OTA, and restore-drill acceptance. |
+| Provider-proven | Partial per capability. Paid PMS deploy `dep-d9n1p93l550s7395ekog`, dry-run worker deploy `dep-d9n1p38ae00c73amj6fg`, signed job `job-d9n1qf3l550s7395git0`, verified custom domains, public deep health, and current WAF dashboard inspection are proven. Live OTA and payment-provider operations remain unproven. |
 
-The committed release-foundation Blueprint is migration-only at predeploy (`npm run db:migrate`). Historical provider records that include seeding remain historical evidence and are not current deployment proof. The operational `/messaging` workspace is server-backed and covered by server-mode browser tests; the separate legacy `/internal-comms` and `/guest-communications` routes remain capability-gated.
+The active paid Render service uses migration-only predeploy (`npm run db:migrate`) and Node `22.23.2`. Historical provider records that include seeding remain historical evidence. The operational `/messaging` workspace is server-backed and covered by server-mode browser tests; the separate legacy `/internal-comms` and `/guest-communications` routes remain capability-gated.
 
 ### 2026-07-19 consolidation correction
 

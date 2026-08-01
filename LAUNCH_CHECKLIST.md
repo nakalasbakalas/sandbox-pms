@@ -2,7 +2,7 @@
 
 Checked command-based items reflect point-in-time evidence recorded in `docs/launch/evidence/` and `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, production data ownership, provider dashboards, or role-by-role manual sign-off may be closed only by proof or explicit owner accepted-risk sign-off.
 
-Current release posture (2026-07-19): **owner-accepted pilot / launch-hardening**. Full production sign-off is open. Apply the four evidence levels in `docs/launch/RELEASE_EVIDENCE_MODEL.md`; a checked historical item proves only the exact commit, environment, and capability named by its evidence. Owner-accepted risk is not staging or provider proof. Merged `main` is `9208621`. PR #190 integration commit `cb34b057fc829914408225802fe25fa235b0b8c5` passed both required GitHub jobs in run `29679511970`; independent GitHub review and merge remain open, and any later PR head must retain both checks before merge.
+Current release posture (2026-08-01): **core PMS engineering-ready and provider-deployed; full operational sign-off remains open**. Merged `main` is `8c22f55ab6503dd5121886b611db9f880911101a` from PR #194. GitHub run `30706415049` passed both required jobs. The paid Render PMS and isolated dry-run OTA worker serve that exact revision, both public domains are verified on the paid PMS, and post-cutover live and edge checks pass. This does not enable real OTA writes or prove credentialed staff acceptance, payment-provider operation, or a recovery restore drill. See `docs/launch/evidence/2026-08-01-final-pms-release.md`.
 
 ## Historical 2026-07-04 to 2026-07-07 Evidence Refresh
 
