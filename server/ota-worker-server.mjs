@@ -39,6 +39,7 @@ const server = createServer(async (request, response) => {
         ok: true,
         service: 'sandbox-pms-ota-worker',
         mode: 'dry-run',
+        revision: process.env.RENDER_GIT_COMMIT?.slice(0, 12) || 'local',
       })
       return
     }
