@@ -2,7 +2,7 @@ import { PmsValidationError } from './pms-domain.mjs'
 import { opsWorkerBaseUrl, opsWorkerConfigured, signOpsWorkerRequest } from './ops-worker-auth.mjs'
 import { executeSignedOtaWorkerTask } from './ota-adapters/index.mjs'
 
-const WORKER_CALL_TIMEOUT_MS = 15_000
+const WORKER_CALL_TIMEOUT_MS = 60_000
 const LOCAL_SIGNED_WORKER_SECRET = 'local-signed-worker-fallback-secret'
 
 function normalizeString(value) {
