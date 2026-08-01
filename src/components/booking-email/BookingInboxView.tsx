@@ -181,7 +181,7 @@ export function BookingInboxView() {
       return
     }
     if (bookingEmailActionRequiresReason(actionDialog.event) && !actionDialog.reason.trim()) {
-      toast.error('Cancellation email actions require an operational reason.')
+      toast.error('Cancellation and modification email actions require an operational reason.')
       return
     }
     try {
@@ -228,10 +228,10 @@ export function BookingInboxView() {
     }
     const requiresReason = bookingEmailActionRequiresReason(event)
     const reason = requiresReason
-      ? window.prompt('Operational reason for applying this cancellation email?')?.trim()
+      ? window.prompt(`Operational reason for applying this ${formatEventType(event.eventType).toLowerCase()} email?`)?.trim()
       : undefined
     if (requiresReason && !reason) {
-      toast.error('Cancellation email actions require an operational reason.')
+      toast.error('Cancellation and modification email actions require an operational reason.')
       return
     }
     const mode = bookingEmailDefaultApprovalMode(event)
@@ -528,7 +528,7 @@ export function BookingInboxView() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="booking-email-action-reason">Operational reason{actionDialog.event.eventType === 'CANCELLATION' ? ' required' : ''}</Label>
+              <Label htmlFor="booking-email-action-reason">Operational reason{bookingEmailActionRequiresReason(actionDialog.event) ? ' required' : ''}</Label>
               <Textarea
                 id="booking-email-action-reason"
                 value={actionDialog.reason}

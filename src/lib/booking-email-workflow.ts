@@ -113,7 +113,7 @@ export function bookingEmailDefaultApprovalMode(event: Pick<BookingEmailEvent, '
 }
 
 export function bookingEmailActionRequiresReason(event: Pick<BookingEmailEvent, 'eventType'>) {
-  return event.eventType === 'CANCELLATION'
+  return event.eventType === 'CANCELLATION' || event.eventType === 'MODIFICATION'
 }
 
 export function bookingEmailParsedDetailsFromForm(form: BookingEmailDetailsForm): BookingEmailParsedDetails {

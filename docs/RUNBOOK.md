@@ -110,10 +110,12 @@ Booking Inbox operators:
 1. Use `/booking-inbox` to review imported booking email events.
 2. Use Approve & Apply only when the extracted guest, dates, room type, amount, and reservation match are clear.
 3. Use Edit Parsed Details Then Apply when the parser is close but needs corrected stay, payment, or guest fields.
-4. Use Link / Create Reservation to link matched events by reservation id or create only clearly unmatched new bookings.
-5. Enter an operational reason for cancellation email actions.
-6. Use Reprocess only for stale `NEEDS_REVIEW` or `ERROR` events after parser changes; reprocess returns the event to the review queue and does not auto-approve it.
-7. Treat missing mailbox sync credentials as a provider setup issue; existing imported events can still be reviewed if backend routes are available.
+4. Use Link / Create Reservation to link matched events by reservation id or create only clearly unmatched new-booking events. Payment notices cannot create reservations; guest messages and unknown events are link-only.
+5. Enter an operational reason for cancellation and modification apply. Cancellation requires `cancel:reservation`; modification requires `edit:reservation`.
+6. Never use edited details to override a folio balance. An amount above the authoritative outstanding balance must fail and be investigated.
+7. Treat the public sync request body as untrusted. It rejects caller-supplied `events`; use the bounded Gmail backfill helper for provider-fetched history.
+8. Use Reprocess only for stale `NEEDS_REVIEW` or `ERROR` events after parser changes; reprocess returns the event to the review queue and does not auto-approve it.
+9. Treat missing mailbox sync credentials as a provider setup issue; existing imported events can still be reviewed if backend routes are available.
 
 Historical booking mailbox capture:
 

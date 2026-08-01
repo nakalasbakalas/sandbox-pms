@@ -17,7 +17,7 @@ import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-w
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
-import { bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
+import { assertBookingEmailApprovalContract, bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
 import { createPasswordHash } from '../server/security.mjs'
 import { DATABASE_HEALTH_FAILURE_MESSAGE, databaseHealthFailure } from '../server/health-response.mjs'
 import { getSystemCapabilities } from '../server/capability-service.mjs'
@@ -1637,6 +1637,11 @@ for (const fixture of bookingEmailNoiseFixtures) {
 
 const duplicateScopeFixture = createBookingEmailPrismaFixture()
 const duplicateScopeActor = { id: 'front-desk-booking', username: 'front.desk', role: 'FRONT_DESK' }
+await assert.rejects(
+  syncBookingEmail(duplicateScopeFixture.prisma, { events: [] }, duplicateScopeActor),
+  /Caller-supplied booking email events are not accepted/,
+  'public booking-email sync rejects caller-supplied provider events',
+)
 const sameReferencePaymentFixture = {
   ...bookingEmailParserFixtures[4].input,
   subject: bookingEmailParserFixtures[4].input.subject.replace('PAY-5511', 'LH-ABCD1234'),
@@ -1649,7 +1654,7 @@ await syncBookingEmail(duplicateScopeFixture.prisma, {
     { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-new-booking-fixture' },
     { ...sameReferencePaymentFixture, sourceMessageId: 'gmail-payment-fixture' },
   ],
-}, duplicateScopeActor)
+}, duplicateScopeActor, { allowImportedEvents: true })
 assert.equal(duplicateScopeFixture.events.length, 2, 'booking-email duplicate-scope fixture stores both test events')
 assert.equal(duplicateScopeFixture.events[1].duplicateOfEventId, null, 'booking-email duplicate scope does not mark different event types with the same reference as duplicates')
 
@@ -1661,7 +1666,7 @@ await syncBookingEmail(duplicateReplayFixture.prisma, {
     { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-resend-a', rawHeaders: { messageId: '<provider-replay@example.test>' } },
     { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-resend-b', rawHeaders: { messageId: '<provider-replay@example.test>' } },
   ],
-}, duplicateScopeActor)
+}, duplicateScopeActor, { allowImportedEvents: true })
 assert.equal(Boolean(duplicateReplayFixture.events[1].duplicateOfEventId), true, 'booking-email duplicate scope still flags same-type resend content as a duplicate')
 
 const autoProcessFixture = createBookingEmailPrismaFixture({
@@ -1673,7 +1678,7 @@ const autoProcessResult = await syncBookingEmail(autoProcessFixture.prisma, {
   events: [
     { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-auto-process-fixture' },
   ],
-}, duplicateScopeActor)
+}, duplicateScopeActor, { allowImportedEvents: true })
 assert.equal(autoProcessResult.events[0].status, 'ERROR', 'booking-email auto-process persists async approval failures onto the event')
 assert.match(autoProcessResult.events[0].errorReason || '', /room type/i, 'booking-email auto-process keeps the approval failure reason on the event')
 
@@ -1797,6 +1802,31 @@ assert.equal(
   bookingEmailWorkflow.bookingEmailActionRequiresReason({ eventType: 'NEW_BOOKING' }),
   false,
   'booking-email non-cancellation actions do not require a cancellation reason',
+)
+assert.equal(
+  bookingEmailWorkflow.bookingEmailActionRequiresReason({ eventType: 'MODIFICATION' }),
+  true,
+  'booking-email modification actions require an operational reason',
+)
+assert.throws(
+  () => assertBookingEmailApprovalContract('CANCELLATION', 'apply_parsed', { reason: 'Matched provider cancellation.' }, { role: 'FRONT_DESK' }),
+  /do not have permission/,
+  'booking-email cancellation requires backend cancellation authority',
+)
+assert.throws(
+  () => assertBookingEmailApprovalContract('CANCELLATION', 'apply_parsed', {}, { role: 'MANAGER' }),
+  /operational reason/,
+  'booking-email cancellation requires a backend operational reason',
+)
+assert.throws(
+  () => assertBookingEmailApprovalContract('PAYMENT_NOTICE', 'create_reservation', {}, { role: 'MANAGER' }),
+  /not allowed/,
+  'booking-email payment events cannot switch into reservation creation',
+)
+assert.equal(
+  assertBookingEmailApprovalContract('MODIFICATION', 'apply_parsed', { reason: 'Provider changed stay dates.' }, { role: 'MANAGER' }).requiredPermission,
+  'edit:reservation',
+  'booking-email modification approval uses reservation-edit authority',
 )
 
 const notificationDrafts = buildOpsNotificationDrafts({

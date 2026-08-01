@@ -1495,6 +1495,49 @@ function detailsForApproval(event, editedDetails) {
   }
 }
 
+const BOOKING_EMAIL_APPROVAL_MODES = new Set(['apply_parsed', 'create_reservation', 'link_reservation'])
+
+const BOOKING_EMAIL_EVENT_MODES = {
+  NEW_BOOKING: new Set(['apply_parsed', 'create_reservation', 'link_reservation']),
+  PAYMENT_NOTICE: new Set(['apply_parsed', 'link_reservation']),
+  CANCELLATION: new Set(['apply_parsed', 'link_reservation']),
+  MODIFICATION: new Set(['apply_parsed', 'link_reservation']),
+  GUEST_MESSAGE: new Set(['link_reservation']),
+  UNKNOWN: new Set(['link_reservation']),
+}
+
+export function assertBookingEmailApprovalContract(eventType, mode, input = {}, actor) {
+  const normalizedEventType = String(eventType || 'UNKNOWN').toUpperCase()
+  const normalizedMode = String(mode || 'apply_parsed')
+  if (!BOOKING_EMAIL_APPROVAL_MODES.has(normalizedMode)) {
+    throw new PmsValidationError('Booking email approval mode is not supported.')
+  }
+  const allowedModes = BOOKING_EMAIL_EVENT_MODES[normalizedEventType] || BOOKING_EMAIL_EVENT_MODES.UNKNOWN
+  if (!allowedModes.has(normalizedMode)) {
+    throw new PmsValidationError(`${normalizedMode} is not allowed for ${normalizedEventType.toLowerCase().replaceAll('_', ' ')} email events.`)
+  }
+
+  const requiredPermission = normalizedMode === 'link_reservation'
+    ? 'edit:reservation'
+    : normalizedEventType === 'NEW_BOOKING'
+      ? 'create:reservation'
+      : normalizedEventType === 'PAYMENT_NOTICE'
+        ? 'process:payment'
+        : normalizedEventType === 'CANCELLATION'
+          ? 'cancel:reservation'
+          : 'edit:reservation'
+  if (!canPerformAction(actor, requiredPermission)) {
+    throw new PmsValidationError('You do not have permission to apply this booking email action.', 403)
+  }
+
+  if (normalizedMode === 'apply_parsed' && ['CANCELLATION', 'MODIFICATION'].includes(normalizedEventType)) {
+    if (!normalizeNullableString(input.reason)) {
+      throw new PmsValidationError(`${normalizedEventType === 'CANCELLATION' ? 'Cancellation' : 'Modification'} email actions require an operational reason.`)
+    }
+  }
+  return { eventType: normalizedEventType, mode: normalizedMode, requiredPermission }
+}
+
 async function reservationInputFromBookingEmailEvent(tx, event, details) {
   const guest = splitGuestName(details.guestName)
   if (!guest) throw new PmsValidationError('Guest name is required before creating a reservation.')
@@ -1594,7 +1637,6 @@ async function approvePaymentEmailEvent(tx, event, details, actor, reservationId
     idempotencyKey: `booking-email-payment:${event.propertyId}:${event.id}`,
     notes: `Payment notice from booking email event ${event.id}`,
     sourceEmailEventId: event.id,
-    allowOverpayment: Boolean(details.allowOverpayment),
   }, actor)
   const updated = await tx.bookingEmailEvent.update({
     where: { id: event.id },
@@ -1623,26 +1665,15 @@ async function approvePaymentEmailEvent(tx, event, details, actor, reservationId
 }
 
 async function approveCancellationEmailEvent(tx, event, details, actor, reservationId, reason) {
+  const normalizedReason = normalizeNullableString(reason)
+  if (!normalizedReason) throw new PmsValidationError('Cancellation email actions require an operational reason.')
   const reservation = reservationId
     ? await tx.reservation.findFirst({ where: { id: reservationId, propertyId: event.propertyId }, include: reservationInclude })
     : await findReservationForBookingEmailEvent(tx, event, details)
   if (!reservation) throw new PmsValidationError('Link this cancellation to a reservation before applying it.')
-  if (reservation.status === 'CHECKED_IN') throw new PmsValidationError('Checked-in reservations must be checked out before cancellation.')
-
-  await tx.roomDateInventory.deleteMany({ where: { reservationId: reservation.id } })
-  const updatedReservation = await tx.reservation.update({
-    where: { id: reservation.id },
-    data: {
-      status: 'CANCELLED',
-      notes: [reservation.notes, reason || `Cancelled from booking email event ${event.id}`].filter(Boolean).join('\n'),
-    },
-    include: reservationInclude,
-  })
-  await createReservationLog(tx, reservation.id, 'CANCELLED', actor, {
-    fromStatus: reservation.status,
-    toStatus: 'CANCELLED',
-    notes: reason || `Cancelled from booking email event ${event.id}.`,
-    changes: { sourceEmailEventId: event.id, sourceMessageId: event.sourceMessageId },
+  const updatedReservation = await cancelReservationInTransaction(tx, reservation.id, actor, 'CANCELLED', normalizedReason, {
+    expectedUpdatedAt: reservation.updatedAt.toISOString(),
+    idempotencyKey: `booking-email-cancellation:${event.propertyId}:${event.id}`,
   })
   const updated = await tx.bookingEmailEvent.update({
     where: { id: event.id },
@@ -1661,7 +1692,7 @@ async function approveCancellationEmailEvent(tx, event, details, actor, reservat
     reservationId: reservation.id,
     confirmationCode: reservation.confirmationCode,
     sourceMessageId: event.sourceMessageId,
-    reason,
+    reason: normalizedReason,
   })
   return updated
 }
@@ -1984,7 +2015,7 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
     throw new PmsValidationError('Payments can only be recorded on an open folio.', 409)
   }
   const balanceSatang = readMoneySatang(folio, 'balance')
-  if (amountSatang > balanceSatang && !input.allowOverpayment) {
+  if (amountSatang > balanceSatang) {
     throw new PmsValidationError('Payment cannot exceed the remaining balance.')
   }
   if (referenceFingerprint) {
@@ -3263,8 +3294,12 @@ async function autoProcessBookingEmailEvent(tx, event, source, actor) {
   }
 }
 
-export async function syncBookingEmail(prisma, input = {}, actor) {
+export async function syncBookingEmail(prisma, input = {}, actor, options = {}) {
   const reviewOnly = Boolean(input.reviewOnly)
+  const suppliedEvents = Array.isArray(input.events)
+  if (suppliedEvents && options.allowImportedEvents !== true) {
+    throw new PmsValidationError('Caller-supplied booking email events are not accepted by the public sync path.')
+  }
   const source = await prisma.$transaction(async (tx) => {
     const property = await getProperty(tx, actor)
     if (input.sourceId) {
@@ -3275,7 +3310,7 @@ export async function syncBookingEmail(prisma, input = {}, actor) {
     return ensurePrimaryBookingEmailSource(tx, actor)
   })
 
-  let importedEvents = Array.isArray(input.events) ? input.events : null
+  let importedEvents = suppliedEvents ? input.events : null
   if (!importedEvents) {
     try {
       importedEvents = await fetchGmailEventsForSource(source, { limit: input.limit })
@@ -3314,7 +3349,7 @@ export async function syncBookingEmail(prisma, input = {}, actor) {
   return {
     status: await getBookingEmailStatus(prisma, actor),
     events: results.map(bookingEmailEventResponse),
-    opsCommandEvents: results.map((event) => ({
+    opsCommandEvents: suppliedEvents && options.providerVerified !== true ? [] : results.map((event) => ({
       ...bookingEmailEventResponse(event),
       sourceMessageId: event.sourceMessageId || undefined,
       rawText: event.rawText || undefined,
@@ -3360,9 +3395,107 @@ async function linkBookingEmailEventToReservation(tx, event, reservationId, acto
   return updated
 }
 
-export async function approveBookingEmailEvent(prisma, eventId, input = {}, actor) {
+function modificationUpdateFromBookingEmail(event, details, reservation, reason) {
+  const update = {
+    expectedUpdatedAt: reservation.updatedAt.toISOString(),
+    notes: [reservation.notes, `Booking email modification ${event.id}: ${reason}`, normalizeNullableString(details.notes)]
+      .filter(Boolean)
+      .join('\n'),
+  }
+  if (details.checkIn) update.checkIn = details.checkIn
+  if (details.checkOut) update.checkOut = details.checkOut
+  if (details.roomType) update.roomTypeCode = details.roomType
+  if (details.adults !== undefined) update.adults = Number(details.adults)
+  if (details.children !== undefined) update.children = Number(details.children)
+  if (Array.isArray(details.childAges)) update.childAges = details.childAges.map(Number)
+  if (details.channelRef) update.channelRef = details.channelRef
+  if (details.specialRequests !== undefined) update.specialRequests = normalizeNullableString(details.specialRequests)
+
+  if (details.amount !== undefined && details.amount !== null && details.amount !== '') {
+    const amount = Number(details.amount)
+    if (!Number.isFinite(amount) || amount <= 0) throw new PmsValidationError('Modified reservation amount must be greater than zero.')
+    const { nights } = validateStayInput({
+      checkIn: update.checkIn || reservation.checkIn,
+      checkOut: update.checkOut || reservation.checkOut,
+    })
+    update.ratePerNight = roundMoney(amount / nights)
+  }
+  return update
+}
+
+async function approveModificationEmailEvent(prisma, event, details, actor, reservationId, reason) {
+  const normalizedReason = normalizeNullableString(reason)
+  if (!normalizedReason) throw new PmsValidationError('Modification email actions require an operational reason.')
+  const reservation = reservationId
+    ? await prisma.reservation.findFirst({ where: { id: reservationId, propertyId: event.propertyId }, include: reservationInclude })
+    : await findReservationForBookingEmailEvent(prisma, event, details)
+  if (!reservation) throw new PmsValidationError('Link this modification to a reservation before applying it.')
+
+  const updatedReservation = await updateReservation(
+    prisma,
+    reservation.id,
+    modificationUpdateFromBookingEmail(event, details, reservation, normalizedReason),
+    actor,
+    { idempotencyKey: `booking-email-modification:${event.propertyId}:${event.id}` },
+  )
+
   return serializableTransaction(prisma, async (tx) => {
-    const property = await getProperty(tx, actor)
+    const currentEvent = await tx.bookingEmailEvent.findFirst({
+      where: { id: event.id, propertyId: event.propertyId },
+      include: bookingEmailEventInclude(),
+    })
+    if (!currentEvent) throw new PmsValidationError('Booking email event was not found.', 404)
+    if (currentEvent.status === 'PROCESSED') return bookingEmailEventResponse(currentEvent)
+    const updated = await tx.bookingEmailEvent.update({
+      where: { id: currentEvent.id },
+      data: {
+        status: 'PROCESSED',
+        reservationId: updatedReservation.id,
+        completedAction: `Applied modification to reservation ${updatedReservation.confirmationCode}.`,
+        reviewReason: null,
+        errorReason: null,
+        processedAt: new Date(),
+        processedBy: actorName(actor),
+      },
+      include: bookingEmailEventInclude(),
+    })
+    await createReservationLog(tx, updatedReservation.id, 'MODIFIED', actor, {
+      notes: normalizedReason,
+      changes: { sourceEmailEventId: currentEvent.id, sourceMessageId: currentEvent.sourceMessageId },
+    })
+    await createAudit(tx, actor, 'BOOKING_EMAIL_MODIFIED_RESERVATION', 'bookingEmailEvent', currentEvent.id, {
+      reservationId: updatedReservation.id,
+      confirmationCode: updatedReservation.confirmationCode,
+      sourceMessageId: currentEvent.sourceMessageId,
+      reason: normalizedReason,
+    })
+    return bookingEmailEventResponse(updated)
+  })
+}
+
+export async function approveBookingEmailEvent(prisma, eventId, input = {}, actor) {
+  const property = await getProperty(prisma, actor)
+  const candidate = await prisma.bookingEmailEvent.findFirst({
+    where: { id: eventId, propertyId: property.id },
+    include: bookingEmailEventInclude(),
+  })
+  if (!candidate) throw new PmsValidationError('Booking email event was not found.', 404)
+  if (candidate.status === 'PROCESSED') throw new PmsValidationError('This booking email event has already been processed.', 409)
+  if (candidate.status === 'IGNORED') throw new PmsValidationError('Ignored booking email events must be reprocessed before approval.', 409)
+  const mode = String(input.mode || 'apply_parsed')
+  assertBookingEmailApprovalContract(candidate.eventType, mode, input, actor)
+  if (candidate.eventType === 'MODIFICATION' && mode === 'apply_parsed') {
+    return approveModificationEmailEvent(
+      prisma,
+      candidate,
+      detailsForApproval(candidate, input.editedDetails),
+      actor,
+      input.reservationId,
+      input.reason,
+    )
+  }
+
+  return serializableTransaction(prisma, async (tx) => {
     const event = await tx.bookingEmailEvent.findFirst({
       where: { id: eventId, propertyId: property.id },
       include: bookingEmailEventInclude(),
@@ -3372,13 +3505,13 @@ export async function approveBookingEmailEvent(prisma, eventId, input = {}, acto
     if (event.status === 'IGNORED') throw new PmsValidationError('Ignored booking email events must be reprocessed before approval.', 409)
 
     const details = detailsForApproval(event, input.editedDetails)
-    const mode = String(input.mode || 'apply_parsed')
+    assertBookingEmailApprovalContract(event.eventType, mode, input, actor)
     if (mode === 'link_reservation') {
       if (!input.reservationId) throw new PmsValidationError('Select a reservation to link this email event.')
       return bookingEmailEventResponse(await linkBookingEmailEventToReservation(tx, event, input.reservationId, actor))
     }
 
-    if (event.eventType === 'NEW_BOOKING' || mode === 'create_reservation') {
+    if (event.eventType === 'NEW_BOOKING') {
       return bookingEmailEventResponse(await approveNewBookingEmailEvent(tx, event, details, actor))
     }
     if (event.eventType === 'PAYMENT_NOTICE') {
@@ -3388,10 +3521,7 @@ export async function approveBookingEmailEvent(prisma, eventId, input = {}, acto
       return bookingEmailEventResponse(await approveCancellationEmailEvent(tx, event, details, actor, input.reservationId, input.reason))
     }
 
-    if (!input.reservationId) {
-      throw new PmsValidationError('This email type needs a linked reservation and staff notes before it can be marked processed.')
-    }
-    return bookingEmailEventResponse(await linkBookingEmailEventToReservation(tx, event, input.reservationId, actor))
+    throw new PmsValidationError('This booking email event must be linked to a reservation before it can be processed.')
   })
 }
 
@@ -4010,7 +4140,7 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
   })
 }
 
-export async function cancelReservation(prisma, reservationId, actor, status = 'CANCELLED', notes = undefined, options = {}) {
+async function cancelReservationInTransaction(tx, reservationId, actor, status = 'CANCELLED', notes = undefined, options = {}) {
   const reason = normalizeNullableString(notes)
   const idempotencyKey = normalizeReservationMutationIdempotencyKey(options.idempotencyKey)
   const expectedUpdatedAt = normalizeExpectedReservationUpdatedAt(options.expectedUpdatedAt)
@@ -4020,62 +4150,73 @@ export async function cancelReservation(prisma, reservationId, actor, status = '
   if (!reason) {
     throw new PmsValidationError(`${status === 'NO_SHOW' ? 'No-show' : 'Cancellation'} reason is required.`)
   }
-  return reservationMutationTransaction(prisma, async (tx) => {
-    const property = await getProperty(tx, actor)
-    const reservation = await tx.reservation.findFirst({
-      where: { id: reservationId, propertyId: property.id },
-      include: reservationInclude,
-    })
-    if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
-    await acquireReservationMutationLocks(tx, reservationRoomDateLockKeys(
-      property.id,
-      reservation.id,
-      reservation.assignedRoomId,
-      reservation.checkIn,
-      reservation.checkOut,
-    ))
-    const mutationAttempt = await claimReservationMutationAttempt(tx, {
-      propertyId: property.id,
-      reservationId: reservation.id,
-      operation: `MARK_${status}`,
-      idempotencyKey,
-      intent: { status, reason, expectedUpdatedAt: expectedUpdatedAt?.toISOString() || null },
-    })
-    if (mutationAttempt.replay) return replayReservationMutation(mutationAttempt.attempt, reservation)
-    if (expectedUpdatedAt && reservation.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
-      throw new PmsValidationError('This reservation changed after the booking board loaded it. Refresh before changing its status.', 409)
-    }
-    if (['CANCELLED', 'NO_SHOW', 'CHECKED_OUT'].includes(reservation.status)) {
-      throw new PmsValidationError('Completed, cancelled, or no-show reservations cannot be changed.', 409)
-    }
-    if (reservation.status === 'CHECKED_IN') {
-      throw new PmsValidationError('Checked-in reservations must be checked out before cancellation.')
-    }
-    if (status === 'NO_SHOW' && getBangkokDateKey(reservation.checkIn) > getBangkokDateKey(new Date())) {
-      throw new PmsValidationError('A future arrival cannot be marked as a no-show.')
-    }
+  const property = await getProperty(tx, actor)
+  const reservation = await tx.reservation.findFirst({
+    where: { id: reservationId, propertyId: property.id },
+    include: reservationInclude,
+  })
+  if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
+  await acquireReservationMutationLocks(tx, reservationRoomDateLockKeys(
+    property.id,
+    reservation.id,
+    reservation.assignedRoomId,
+    reservation.checkIn,
+    reservation.checkOut,
+  ))
+  const mutationAttempt = await claimReservationMutationAttempt(tx, {
+    propertyId: property.id,
+    reservationId: reservation.id,
+    operation: `MARK_${status}`,
+    idempotencyKey,
+    intent: { status, reason, expectedUpdatedAt: expectedUpdatedAt?.toISOString() || null },
+  })
+  if (mutationAttempt.replay) return replayReservationMutation(mutationAttempt.attempt, reservation)
+  if (expectedUpdatedAt && reservation.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+    throw new PmsValidationError('This reservation changed after the booking board loaded it. Refresh before changing its status.', 409)
+  }
+  if (['CANCELLED', 'NO_SHOW', 'CHECKED_OUT'].includes(reservation.status)) {
+    throw new PmsValidationError('Completed, cancelled, or no-show reservations cannot be changed.', 409)
+  }
+  if (reservation.status === 'CHECKED_IN') {
+    throw new PmsValidationError('Checked-in reservations must be checked out before cancellation.')
+  }
+  if (status === 'NO_SHOW' && getBangkokDateKey(reservation.checkIn) > getBangkokDateKey(new Date())) {
+    throw new PmsValidationError('A future arrival cannot be marked as a no-show.')
+  }
 
-    await tx.roomDateInventory.deleteMany({ where: { reservationId } })
-    const updated = await tx.reservation.update({
-      where: { id: reservation.id },
-      data: {
-        status,
-        notes: [
-          reservation.notes,
-          `${status === 'NO_SHOW' ? 'No-show' : 'Cancellation'} reason: ${reason}`,
-        ].filter(Boolean).join('\n'),
-      },
-      include: reservationInclude,
-    })
-    await createReservationLog(tx, reservation.id, status === 'NO_SHOW' ? 'NO_SHOW' : 'CANCELLED', actor, {
-      fromStatus: reservation.status,
-      toStatus: status,
-      notes: reason,
-    })
-    await createAudit(tx, actor, status, 'reservation', reservation.id, { reason })
-    await emitOperationalEvent(tx, reservation.propertyId, status === 'NO_SHOW' ? 'RESERVATION_NO_SHOW' : 'RESERVATION_CANCELLED', 'reservation', reservation.id, actor)
-    await completeReservationMutationAttempt(tx, mutationAttempt.attempt, updated)
-    return updated
+  await tx.roomDateInventory.deleteMany({ where: { reservationId } })
+  const updated = await tx.reservation.update({
+    where: { id: reservation.id },
+    data: {
+      status,
+      notes: [
+        reservation.notes,
+        `${status === 'NO_SHOW' ? 'No-show' : 'Cancellation'} reason: ${reason}`,
+      ].filter(Boolean).join('\n'),
+    },
+    include: reservationInclude,
+  })
+  await createReservationLog(tx, reservation.id, status === 'NO_SHOW' ? 'NO_SHOW' : 'CANCELLED', actor, {
+    fromStatus: reservation.status,
+    toStatus: status,
+    notes: reason,
+  })
+  await createAudit(tx, actor, status, 'reservation', reservation.id, { reason })
+  await emitOperationalEvent(tx, reservation.propertyId, status === 'NO_SHOW' ? 'RESERVATION_NO_SHOW' : 'RESERVATION_CANCELLED', 'reservation', reservation.id, actor)
+  await completeReservationMutationAttempt(tx, mutationAttempt.attempt, updated)
+  return updated
+}
+
+export async function cancelReservation(prisma, reservationId, actor, status = 'CANCELLED', notes = undefined, options = {}) {
+  const reason = normalizeNullableString(notes)
+  if (!['CANCELLED', 'NO_SHOW'].includes(status)) {
+    throw new PmsValidationError('Cancellation status must be CANCELLED or NO_SHOW.')
+  }
+  if (!reason) {
+    throw new PmsValidationError(`${status === 'NO_SHOW' ? 'No-show' : 'Cancellation'} reason is required.`)
+  }
+  return reservationMutationTransaction(prisma, async (tx) => {
+    return cancelReservationInTransaction(tx, reservationId, actor, status, reason, options)
   })
 }
 
