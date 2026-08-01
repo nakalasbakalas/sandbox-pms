@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: sandbox-hotel-pms-ota-worker-staging
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev
+    startCommand: npm run start:ota-worker
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: OTA_DRY_RUN
+        value: true
+      - key: OTA_WORKER_SHARED_SECRET
+        sync: false
+      - key: BOOKING_COM_USERNAME
+        sync: false
+      - key: BOOKING_COM_PASSWORD
+        sync: false
