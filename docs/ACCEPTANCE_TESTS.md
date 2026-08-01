@@ -77,6 +77,8 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 
 - API keys and OTA credentials are not returned to the browser.
 - Booking-email Gmail sync can use backend-only OAuth access-token or refresh-token credentials, reports non-secret OAuth client, refresh token, target mailbox, Gmail API profile-test, last-sync, and missing-key status through `/api/booking-email/status`, and refresh/provider failures redact token/client-secret values.
+- Public booking-email sync rejects a caller-supplied `events` array; the bounded Gmail backfill explicitly opts into provider-verified imports, and unverified imports cannot create Hotel Ops command tasks.
+- Booking-email approval rejects invalid event/mode combinations, requires `cancel:reservation` plus a reason for cancellation, requires `edit:reservation` plus a reason for modification apply, and persists the authoritative modification rather than merely marking the email processed.
 - Gmail OAuth Render setup generates a consent URL with offline access and readonly scope by default, can read a local Google OAuth client JSON file without printing values, keeps Gmail send scope opt-in, exchanges authorization codes through Google, and redacts authorization codes, client secrets, access tokens, and refresh tokens from surfaced errors/output.
 - Render Gmail OAuth status reports current Render key presence and supported credential-path readiness without values; dry-run reports missing/present local booking-email Gmail keys without values; apply mode updates only the approved booking-email Gmail env-var keys.
 - Booking-email capture proof reports aggregate current PMS email-event counts without message ids, sender/recipient, subject, raw body, guest, payment, or credential data.
@@ -183,7 +185,7 @@ Acceptance requires:
 - payment and charge rows require first-class property ownership and database uniqueness on `(propertyId, idempotencyKey)`;
 - a same-content idempotent replay returns the existing payment without duplicate payment, audit, or domain-event rows;
 - reuse of an idempotency key with different content returns `409`;
-- closed-folio and unapproved-overpayment attempts fail without a write; and
+- closed-folio and overpayment attempts fail without a write even when a caller supplies an `allowOverpayment` flag; and
 - every legacy charge write rejects a missing idempotency key;
 - same-intent and simultaneous charge retries return one append-only charge with one audit row;
 - reuse of a charge key with a different normalized intent returns `409`; and

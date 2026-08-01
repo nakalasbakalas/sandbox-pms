@@ -282,6 +282,8 @@ Hotel Ops commands use `server/ops-service.mjs`. Parsed task output is strict-sc
 
 The Booking Inbox is a staff-facing exception queue for email-derived booking events. Existing imported events can be approved, edited and applied, linked to an existing reservation, used to create a reservation, rejected, or reprocessed through `server/pms-service.mjs`.
 
+The server owns the trust and action matrix. `POST /api/booking-email/sync` does not accept caller-supplied event arrays; only the bounded Gmail backfill helper can opt into imported events after those events were obtained from the configured provider. Approval rejects an action mode that is not valid for the stored event type. New bookings may apply, create, or link; payment notices, cancellations, and modifications may apply or link; guest messages and unknown messages may only link. Cancellation requires `cancel:reservation` and a non-empty operational reason. Modification apply requires `edit:reservation`, a non-empty operational reason, and calls the authoritative reservation update service. Payment apply always enforces the current folio balance and has no request-controlled overpayment exception.
+
 - Approve uses `apply_parsed` for payment/modification/cancellation-style events and links matched new bookings to avoid duplicate reservations.
 - Edit Parsed Details Then Apply submits corrected `editedDetails` through the same approval route.
 - Reprocess reruns the deterministic parser against stored email text, clears stale `processedBy`/`processedAt` state, and returns the event to `NEEDS_REVIEW`; it does not auto-approve or bypass staff review.

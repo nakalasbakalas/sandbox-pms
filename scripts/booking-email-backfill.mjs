@@ -224,7 +224,7 @@ async function main() {
           id: 'booking-email-backfill',
           username: 'booking-email-backfill',
           role: 'SYSTEM',
-        })
+        }, { allowImportedEvents: true, providerVerified: true })
         imported.push(...(result.events || []))
       }
     }

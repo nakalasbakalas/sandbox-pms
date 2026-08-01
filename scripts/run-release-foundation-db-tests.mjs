@@ -11,6 +11,7 @@ import {
   createPayment,
   createReservation,
   assignRoom,
+  approveBookingEmailEvent,
   cancelReservation,
   checkInReservation,
   checkOutReservation,
@@ -442,6 +443,7 @@ try {
   const reservationB = await createReservationFixture(fixtureB, 'B')
   const actorA = actorFrom(contextA)
   const actorB = actorFrom(contextB)
+  const managerActorA = actorFrom(managerContextA)
   const sourceEventB = await prisma.bookingEmailEvent.create({
     data: {
       propertyId: fixtureB.property.id,
@@ -952,6 +954,76 @@ try {
     (error) => error?.statusCode === 400 && /reason is required/.test(error.message),
     'cancellation and no-show commands require an operational reason',
   )
+
+  const bookingEmailCancellationReservation = await createReservationFixture(fixtureA, 'EMAIL-CANCEL')
+  const bookingEmailCancellationEvent = await prisma.bookingEmailEvent.create({
+    data: {
+      propertyId: fixtureA.property.id,
+      sender: `provider-cancel-${runId}@example.test`,
+      receivedAt: new Date(),
+      subject: `Cancellation ${bookingEmailCancellationReservation.reservation.confirmationCode}`,
+      rawText: 'Provider cancellation fixture with no credentials or guest PII.',
+      eventType: 'CANCELLATION',
+      status: 'NEEDS_REVIEW',
+      parsedDetails: { channelRef: bookingEmailCancellationReservation.reservation.confirmationCode },
+    },
+  })
+  await assert.rejects(
+    approveBookingEmailEvent(prisma, bookingEmailCancellationEvent.id, {
+      mode: 'apply_parsed',
+      reservationId: bookingEmailCancellationReservation.reservation.id,
+      reason: 'Provider cancellation confirmed by staff.',
+    }, actorA),
+    (error) => error?.statusCode === 403,
+    'front desk cannot approve a booking-email cancellation without cancellation authority',
+  )
+  const approvedCancellationEvent = await approveBookingEmailEvent(prisma, bookingEmailCancellationEvent.id, {
+    mode: 'apply_parsed',
+    reservationId: bookingEmailCancellationReservation.reservation.id,
+    reason: 'Provider cancellation confirmed by manager.',
+  }, managerActorA)
+  assert.equal(approvedCancellationEvent.status, 'PROCESSED')
+  assert.equal((await prisma.reservation.findUnique({ where: { id: bookingEmailCancellationReservation.reservation.id } })).status, 'CANCELLED')
+  assert.equal(
+    await prisma.domainEvent.count({
+      where: { aggregateId: bookingEmailCancellationReservation.reservation.id, eventType: 'RESERVATION_CANCELLED' },
+    }),
+    1,
+    'booking-email cancellation uses the authoritative reservation domain-event path',
+  )
+
+  const bookingEmailModificationReservation = await createReservationFixture(fixtureA, 'EMAIL-MODIFY')
+  const bookingEmailModificationEvent = await prisma.bookingEmailEvent.create({
+    data: {
+      propertyId: fixtureA.property.id,
+      sender: `provider-modify-${runId}@example.test`,
+      receivedAt: new Date(),
+      subject: `Modification ${bookingEmailModificationReservation.reservation.confirmationCode}`,
+      rawText: 'Provider modification fixture with no credentials or guest PII.',
+      eventType: 'MODIFICATION',
+      status: 'NEEDS_REVIEW',
+      parsedDetails: { channelRef: bookingEmailModificationReservation.reservation.confirmationCode },
+    },
+  })
+  const approvedModificationEvent = await approveBookingEmailEvent(prisma, bookingEmailModificationEvent.id, {
+    mode: 'apply_parsed',
+    reservationId: bookingEmailModificationReservation.reservation.id,
+    reason: 'Provider stay-date modification confirmed by manager.',
+    editedDetails: {
+      checkIn: '2030-03-01',
+      checkOut: '2030-03-04',
+      adults: 1,
+      amount: 300,
+    },
+  }, managerActorA)
+  const modifiedReservation = await prisma.reservation.findUnique({
+    where: { id: bookingEmailModificationReservation.reservation.id },
+  })
+  assert.equal(approvedModificationEvent.status, 'PROCESSED')
+  assert.equal(modifiedReservation.checkIn.toISOString().slice(0, 10), '2030-03-01')
+  assert.equal(modifiedReservation.checkOut.toISOString().slice(0, 10), '2030-03-04')
+  assert.equal(modifiedReservation.adults, 1)
+  assert.equal(modifiedReservation.ratePerNightSatang, 10_000n)
 
   const guestCommandReservation = await createReservationFixture(fixtureA, 'GUEST-COMMAND')
   const guestAuditBefore = await prisma.auditLog.count({ where: { entityId: guestCommandReservation.reservation.id } })

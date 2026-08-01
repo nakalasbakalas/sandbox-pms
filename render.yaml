@@ -82,7 +82,7 @@ services:
       - key: OTA_DRY_RUN
         value: true
       - key: OTA_WORKER_BASE_URL
-        value: https://sandbox-hotel-pms.onrender.com/api/internal/ops/worker/tasks
+        value: https://sandbox-hotel-pms-ota-worker-staging.onrender.com/api/internal/ops/worker/tasks
       - key: OTA_WORKER_SHARED_SECRET
         sync: false
       - key: BOOKING_COM_USERNAME

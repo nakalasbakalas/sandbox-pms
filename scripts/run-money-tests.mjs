@@ -182,6 +182,17 @@ await assert.rejects(
   createPayment(overpaymentFixture.prisma, { folioId: 'folio-1', amount: 5.01, method: 'CASH', idempotencyKey: 'overpayment-attempt' }, { id: 'cashier-1' }),
   /cannot exceed the remaining balance/,
 )
+await assert.rejects(
+  createPayment(paymentFixture({ balanceSatang: 500n }).prisma, {
+    folioId: 'folio-1',
+    amount: 5.01,
+    method: 'CASH',
+    allowOverpayment: true,
+    idempotencyKey: 'overpayment-override-attempt',
+  }, { id: 'cashier-1' }),
+  /cannot exceed the remaining balance/,
+  'caller-supplied overpayment flags cannot bypass the balance guard',
+)
 
 const retryFixture = paymentFixture({ failSerializableOnce: true })
 await createPayment(retryFixture.prisma, { folioId: 'folio-1', amount: 1, method: 'CASH', idempotencyKey: 'serialization-retry-attempt' }, { id: 'cashier-1' })
