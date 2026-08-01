@@ -4,7 +4,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 import { format, parse as parseDate } from 'date-fns'
-import * as XLSX from 'xlsx'
+import readXlsxFile from 'read-excel-file/node'
 
 import { ROOM_TYPE_CANONICAL_BASE_RATES } from '../server/pms-service.mjs'
 import { createPrismaClient } from '../server/prisma-client.mjs'
@@ -37,7 +37,6 @@ const ROOM_RATE_TARGETS = Object.freeze({
   twin: ROOM_TYPE_CANONICAL_BASE_RATES.TWIN,
   double: ROOM_TYPE_CANONICAL_BASE_RATES.DOUBLE,
 })
-const XLSX_LIB = 'default' in XLSX && XLSX.default ? XLSX.default : XLSX
 const OVERRIDE_STATUS = Object.freeze({
   PROJECTED: 'PROJECTED',
   CONFIRMED: 'CONFIRMED',
@@ -85,11 +84,8 @@ function parseDateValue(value, rowLabel) {
   }
 
  if (typeof value === 'number' && Number.isFinite(value)) {
-    const excelDate = XLSX_LIB.SSF?.parse_date_code
-      ? XLSX_LIB.SSF.parse_date_code(value)
-      : null
-    if (excelDate) {
-      const parsed = new Date(Date.UTC(excelDate.y, excelDate.m - 1, excelDate.d))
+    const parsed = new Date(Date.UTC(1899, 11, 30) + value * 86_400_000)
+    if (Number.isFinite(parsed.getTime())) {
       return { date: format(parsed, 'yyyy-MM-dd') }
     }
   }
@@ -166,21 +162,16 @@ function toCSVValue(value) {
   return text
 }
 
-function parseWorkbookRows(buffer, sheetName) {
-  const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' })
-  const targetSheet = sheetName && workbook.SheetNames.includes(sheetName)
-    ? sheetName
-    : workbook.SheetNames[0]
+async function parseWorkbookRows(buffer, sheetName) {
+  const sheets = await readXlsxFile(buffer)
+  const worksheet = sheetName
+    ? sheets.find((sheet) => sheet.sheet === sheetName) || sheets[0]
+    : sheets[0]
 
-  if (!targetSheet) throw new Error('Workbook has no sheets.')
+  if (!worksheet) throw new Error('Workbook has no sheets.')
 
-  const worksheet = workbook.Sheets[targetSheet]
-  const matrix = XLSX.utils.sheet_to_json(worksheet, {
-    header: 1,
-    raw: true,
-    defval: '',
-    blankrows: false,
-  })
+  const targetSheet = worksheet.sheet
+  const matrix = worksheet.data
 
   if (!Array.isArray(matrix) || matrix.length === 0) {
     throw new Error(`No data rows found in worksheet "${targetSheet}".`)
@@ -488,7 +479,7 @@ async function main() {
   const payload = await readFile(sourcePath)
 
   const hash = sha256Text(payload.toString('hex'))
-  const parsed = parseWorkbookRows(payload, sheetName)
+  const parsed = await parseWorkbookRows(payload, sheetName)
   const { rows: sourceRows, headers } = parsed
   const sourceStatus = normalizeStatus(statusOverride)
 

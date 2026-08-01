@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import * as XLSX from 'xlsx'
+import readXlsxFile from 'read-excel-file/browser'
 import { useKV } from '@github/spark/hooks'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -106,9 +106,8 @@ function parseDateValue(value: unknown, rowLabel: string): { date: string; error
   }
 
   if (typeof value === 'number' && Number.isFinite(value)) {
-    const excelDate = XLSX.SSF.parse_date_code(value)
-    if (excelDate) {
-      const parsed = new Date(Date.UTC(excelDate.y, excelDate.m - 1, excelDate.d))
+    const parsed = new Date(Date.UTC(1899, 11, 30) + value * 86_400_000)
+    if (Number.isFinite(parsed.getTime())) {
       return { date: format(parsed, 'yyyy-MM-dd') }
     }
   }
@@ -268,22 +267,19 @@ export function BulkRateUpload() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const parseXlsxBuffer = async (buffer: ArrayBuffer): Promise<RateUploadRow[]> => {
-    const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' })
-    const worksheetName = workbook.SheetNames.includes('365 Calendar')
-      ? '365 Calendar'
-      : workbook.SheetNames[0]
+    const workbook = new Blob([buffer])
+    const sheets = await readXlsxFile(workbook)
+    const worksheet = sheets.find((sheet) => sheet.sheet === '365 Calendar') || sheets[0]
 
-    if (!worksheetName) {
+    if (!worksheet) {
       throw new Error('Excel workbook has no sheets')
     }
 
-    const worksheet = workbook.Sheets[worksheetName]
-    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
-      raw: true,
-      defval: '',
-      blankrows: false,
-    })
-    const headers = rawRows.length > 0 ? Object.keys(rawRows[0]) : []
+    const matrix = worksheet.data
+    const headers = (matrix[0] || []).map((header, index) => String(header || `column_${index}`))
+    const rawRows = matrix.slice(1)
+      .filter((row) => row.some((cell) => cell !== null && cell !== ''))
+      .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])))
     const parsed = parseRows(rawRows, headers, roomTypes, 'Excel')
     if (parsed.length === 0) {
       throw new Error('No data rows found in worksheet')
@@ -296,7 +292,7 @@ export function BulkRateUpload() {
 
     const fileName = file.name.toLowerCase()
     const isCSV = fileName.endsWith('.csv')
-    const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls')
+    const isExcel = fileName.endsWith('.xlsx')
 
     if (!isCSV && !isExcel) {
       toast.error('Please upload a CSV or Excel file')
@@ -461,7 +457,7 @@ export function BulkRateUpload() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.xlsx,.xls"
+            accept=".csv,.xlsx"
             onChange={handleFileSelect}
             className="hidden"
           />
