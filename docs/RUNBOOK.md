@@ -31,6 +31,27 @@ SESSION_SECRET=...
 OTA_DRY_RUN=true
 ```
 
+### Demand Calendar Preload (Nakhon Si Thammarat 2027)
+
+- Generate manifest, CSV, and backup in one versioned output:
+
+```powershell
+npm.cmd run rates:preload:nakhon-2027
+```
+
+- Import the generated CSV in **Rates → Bulk Rate Upload**.
+- Keep `sourceStatus=PROJECTED` rows for planning.
+- Promote to `CONFIRMED` only before strict enforcement is expected to apply.
+- Before push, verify:
+  - Twin base remains `750`.
+  - Double base remains `850`.
+  - Source has `365` rows with tier mix `42/162/106/41/14`.
+- Push workflow:
+  - dry-run/verification pass in the rate push panel first.
+  - owner-approved live pass after proof capture.
+- Rollback evidence:
+  - preserve `*.manifest.json` and `*.rate-overrides-backup.json` outputs for revert review.
+
 Optional remote worker:
 
 ```env

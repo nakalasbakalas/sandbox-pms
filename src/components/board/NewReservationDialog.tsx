@@ -19,6 +19,11 @@ import type { PropertySetup } from '@/types/onboarding'
 import { calculateStayPricing, getBangkokDateKey, nightsBetween, SANDBOX_HOTEL_RULES } from '@/lib/hotel/business-rules'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 
+const DEFAULT_ROOM_BASE_RATES = {
+  twin: 750,
+  double: 850,
+}
+
 export interface NewReservationGuest {
   id: string
   propertyId: string
@@ -288,8 +293,8 @@ function ConfiguredNewReservationDialog({
     if (configuredRoomTypes.length === 0) {
       if (!allowDemoFallback) return []
       return [
-        { code: 'TWIN' as const, id: 'twin', name: 'Standard Twin', baseRate: 2000, baseOccupancy: 2, maxOccupancy: 2, extraGuestFee: 300, childFee: 300 },
-        { code: 'DOUBLE' as const, id: 'double', name: 'Superior Double', baseRate: 2000, baseOccupancy: 2, maxOccupancy: 4, extraGuestFee: 300, childFee: 300 },
+        { code: 'TWIN' as const, id: 'twin', name: 'Standard Twin', baseRate: DEFAULT_ROOM_BASE_RATES.twin, baseOccupancy: 2, maxOccupancy: 2, extraGuestFee: 300, childFee: 300 },
+        { code: 'DOUBLE' as const, id: 'double', name: 'Superior Double', baseRate: DEFAULT_ROOM_BASE_RATES.double, baseOccupancy: 2, maxOccupancy: 4, extraGuestFee: 300, childFee: 300 },
       ]
     }
 

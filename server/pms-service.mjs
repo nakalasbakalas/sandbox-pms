@@ -479,6 +479,57 @@ function setupNumber(value, label, options = {}) {
   return number
 }
 
+export const ROOM_TYPE_CANONICAL_BASE_RATES = Object.freeze({
+  TWIN: 750,
+  DOUBLE: 850,
+})
+
+function detectRoomCodeFromInput(input) {
+  const normalizedId = String(input?.id || input?.code || '').toUpperCase()
+  const normalizedName = String(input?.name || '').toUpperCase()
+  if (normalizedId.includes('DOUBLE') || normalizedName.includes('DOUBLE')) return 'DOUBLE'
+  if (normalizedId.includes('TWIN') || normalizedName.includes('TWIN')) return 'TWIN'
+  return null
+}
+
+function canonicalizeRoomTypeBaseRate(roomType, baseRate) {
+  const roomCode = detectRoomCodeFromInput(roomType)
+  const canonicalRate = roomCode ? ROOM_TYPE_CANONICAL_BASE_RATES[roomCode] : null
+  if (!canonicalRate || !Number.isFinite(baseRate)) {
+    return {
+      baseRate,
+      roomCode: roomCode || null,
+      changed: false,
+      canonicalRate,
+    }
+  }
+
+  if (baseRate === canonicalRate) {
+    return {
+      baseRate,
+      roomCode,
+      changed: false,
+      canonicalRate,
+    }
+  }
+
+  if (baseRate === 2000) {
+    return {
+      baseRate: canonicalRate,
+      roomCode,
+      changed: true,
+      canonicalRate,
+    }
+  }
+
+  return {
+    baseRate,
+    roomCode,
+    changed: false,
+    canonicalRate,
+  }
+}
+
 function setupRoomTypeCode(roomType, index, usedCodes) {
   const normalizedId = String(roomType?.id || '').toUpperCase()
   const normalizedName = String(roomType?.name || '').toUpperCase()
@@ -527,7 +578,15 @@ function validateSetupPayload(input) {
     setupNumber(roomType.baseOccupancy, 'Base occupancy', { min: 1 })
     setupNumber(roomType.maxOccupancy, 'Max occupancy', { min: setupNumber(roomType.baseOccupancy, 'Base occupancy', { min: 1 }) })
     const rate = rateByRoomType.get(roomType.id)
-    setupNumber(rate?.baseRate, `Base rate for ${roomType.name}`, { min: 1 })
+    const baseRate = setupNumber(rate?.baseRate, `Base rate for ${roomType.name}`, { min: 1 })
+    const canonicalBaseRate = canonicalizeRoomTypeBaseRate(roomType, baseRate)
+
+    if (canonicalBaseRate.canonicalRate && canonicalBaseRate.baseRate !== baseRate) {
+      if (!canonicalBaseRate.changed) {
+        throw new PmsValidationError(`Base rate for ${roomType.name} must be ${canonicalBaseRate.canonicalRate} THB.`)
+      }
+      rateByRoomType.set(roomType.id, { ...rate, baseRate: canonicalBaseRate.baseRate })
+    }
   }
 
   for (const room of rooms) {
@@ -2611,12 +2670,21 @@ function normalizeSetupRoomTypeInput(input, existing = undefined) {
   const standardOcc = setupNumber(input?.baseOccupancy ?? input?.standardOcc ?? existing?.standardOcc, 'Base occupancy', { min: 1 })
   const maxOccupancy = setupNumber(input?.maxOccupancy ?? existing?.maxOccupancy, 'Max occupancy', { min: standardOcc })
   const baseRate = setupNumber(input?.baseRate ?? existing?.baseRate, 'Base rate', { min: 1 })
+  const canonicalBaseRate = canonicalizeRoomTypeBaseRate(input, baseRate)
+  const effectiveBaseRate = canonicalBaseRate.baseRate
+
+  if (canonicalBaseRate.canonicalRate && canonicalBaseRate.baseRate !== baseRate) {
+    if (!canonicalBaseRate.changed) {
+      const label = canonicalBaseRate.roomCode || setupString(input?.name, 'Room type name')
+      throw new PmsValidationError(`Base rate for ${label} must be ${canonicalBaseRate.canonicalRate} THB.`)
+    }
+  }
 
   return {
     code: normalizeSetupRoomTypeCode(input),
     name,
     description: setupString(input?.description ?? existing?.description, 'Room type description', false),
-    ...moneyDataFromBaht('baseRate', 'baseRateSatang', baseRate),
+    ...moneyDataFromBaht('baseRate', 'baseRateSatang', effectiveBaseRate),
     maxOccupancy,
     standardOcc,
   }

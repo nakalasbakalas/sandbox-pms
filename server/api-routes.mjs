@@ -94,6 +94,7 @@ const API_ROUTE_CONTRACTS = [
   route('/api/rates/calendar', ['GET', 'PUT'], { tag: 'Rates' }),
   route('/api/rates/effective', ['GET'], { tag: 'Rates' }),
   route('/api/rates/recommendations', ['POST'], { tag: 'Rates' }),
+  route('/api/rates/push', ['POST'], { tag: 'Rates' }),
   route('/api/line/webhook', ['GET', 'POST'], { tag: 'Integrations', public: true }),
   route('/api/whatsapp/webhook', ['GET', 'POST'], { tag: 'Integrations', public: true }),
   route('/api/auth/login', ['POST'], { tag: 'Authentication', public: true }),

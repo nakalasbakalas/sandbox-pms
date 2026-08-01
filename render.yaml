@@ -79,6 +79,16 @@ services:
         sync: false
       - key: DIRECT_BOOKING_TOKEN_SECRET
         sync: false
+      - key: OTA_DRY_RUN
+        value: true
+      - key: OTA_WORKER_BASE_URL
+        value: https://sandbox-hotel-pms.onrender.com/api/internal/ops/worker/tasks
+      - key: OTA_WORKER_SHARED_SECRET
+        sync: false
+      - key: BOOKING_COM_USERNAME
+        sync: false
+      - key: BOOKING_COM_PASSWORD
+        sync: false
 
 databases:
   - name: sandbox-hotel-pms-db-v43m

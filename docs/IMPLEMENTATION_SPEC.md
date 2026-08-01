@@ -139,6 +139,36 @@ Forbidden requests, credential requests, 2FA/CAPTCHA bypass attempts, audit-hidi
 
 OpenAI parser requests send redacted command text, request the strict Hotel Ops task JSON schema, validate the model output with the same backend schema, and then normalize risk, approval requirement, and hotel id against backend policy. Parser mode and fallback reason are included in task logs/audit metadata and surfaced in the `/ops/chat` parsed preview.
 
+## 2027 Demand Calendar Preload (Nakhon Si Thammarat)
+
+This repo includes a deterministic 2027 demand-calendar preload pipeline for room rates.
+
+- Script: `scripts/generate-demand-calendar-overrides.mjs`
+- Canonical source: `C:/Users/nakal/Downloads/nakhon_si_thammarat_2027_hotel_demand_calendar.xlsx`
+- Required source columns: `Date`, `Demand Tier`, `Rate Multiplier` plus `2027 Status` and `Review / Reprice Date` when available
+- Baseline room rates are canonicalized before multiplication:
+  - `TWIN = 750`
+  - `DOUBLE = 850`
+- Multiplier model for non-normal dates:
+  - low `0.9`, normal `1.0`, high `1.15`, peak `1.35`, compression `1.6`
+- The script validates source row count (`365`) and tier mix (`low 42 / normal 162 / high 106 / peak 41 / compression 14`) and fails on mismatch.
+- Script output is versioned and stores metadata for rollback:
+  - manifest (`.manifest.json`)
+  - CSV (`.csv`) for bulk upload
+  - local backup (`.rate-overrides-backup.json`)
+- Supported run path:
+
+```powershell
+npm.cmd run rates:preload:nakhon-2027
+```
+
+- Expected runtime workflow:
+  1. Generate manifest/CSV from the workbook.
+  2. Import into `BulkRateUpload` (Excel accepted; supports metadata columns).
+  3. Confirmed rows can be surfaced as active enforcement by promoting `sourceStatus` to `CONFIRMED`.
+  4. Use `RatesView` for override review with explicit filter and audit-by-date visibility.
+  5. Run `use-rate-push` operations in dry-run/verification path before any live channel changes.
+
 ## LINE Command Intake
 
 Signed LINE webhook traffic can optionally feed manager commands into the same `submitOpsCommand` backend service used by `/api/ops/commands`.

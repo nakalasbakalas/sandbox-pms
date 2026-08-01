@@ -77,6 +77,7 @@ import {
   OPS_WORKER_TIMESTAMP_HEADER,
   verifyOpsWorkerRequest,
 } from './ops-worker-auth.mjs'
+import { executeOpsWorkerTask } from './ops-worker-client.mjs'
 import { executeSignedOtaWorkerTask } from './ota-adapters/index.mjs'
 import { createHotelOpsScanScheduler } from './ops-scheduler.mjs'
 import { runDeterministicOpsAnalyzers } from './ops-analyzers.mjs'
@@ -478,6 +479,26 @@ async function readRawBody(request) {
   return Buffer.concat(chunks)
 }
 
+function normalizeSimpleText(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isIsoDate(value) {
+  if (typeof value !== 'string') return false
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+function mapRatePushPlatform(value) {
+  const normalized = normalizeSimpleText(value).replace(/[^a-z0-9]+/g, '_')
+  if (normalized === 'booking' || normalized === 'booking_com' || normalized === 'bookingcom') return 'booking'
+  if (normalized === 'agoda') return 'agoda'
+  if (normalized === 'trip' || normalized === 'trip_com' || normalized === 'tripcom') return 'trip'
+  if (normalized === 'expedia') return 'expedia'
+  return 'unknown'
+}
+
 function publicUser(user) {
   if (!user) return null
   return {
@@ -858,6 +879,102 @@ async function handleApi(request, response, url) {
       ok: true,
       data: await executeSignedOtaWorkerTask(payload),
       message: 'Signed Hotel Ops worker request accepted in dry-run worker mode.',
+    })
+    return true
+  }
+
+  if (url.pathname === '/api/rates/push' && request.method === 'POST') {
+    const user = await requireUser(request)
+    requirePermission(user, 'edit:rates')
+
+    const body = await readJson(request)
+    const roomTypeId = String(body.roomTypeId || '').trim()
+    const channelId = String(body.channelId || '').trim()
+    const date = String(body.date || '').trim()
+    const rate = Number(body.rate)
+    const platform = mapRatePushPlatform(body.platform || body.provider || channelId)
+    const currency = String(body.currency || 'THB').trim() || 'THB'
+    const message = String(body.message || '').trim() || `Rate update for ${roomTypeId} on ${date}`
+    const dryRun = body.dryRun !== false
+    const hotelId = String(body.hotelId || process.env.HOTEL_ID || 'sandbox-hotel').trim() || 'sandbox-hotel'
+
+    if (!roomTypeId) {
+      sendJson(response, 400, { ok: false, error: 'roomTypeId is required.' })
+      return true
+    }
+
+    if (!channelId) {
+      sendJson(response, 400, { ok: false, error: 'channelId is required.' })
+      return true
+    }
+
+    if (!date) {
+      sendJson(response, 400, { ok: false, error: 'date is required.' })
+      return true
+    }
+
+    if (!isIsoDate(date)) {
+      sendJson(response, 400, { ok: false, error: 'date must be YYYY-MM-DD.' })
+      return true
+    }
+
+    if (!Number.isFinite(rate) || !Number.isInteger(rate) || rate < 1) {
+      sendJson(response, 400, { ok: false, error: 'rate must be a positive integer THB amount.' })
+      return true
+    }
+
+    if (platform === 'unknown') {
+      sendJson(response, 400, { ok: false, error: 'Unsupported channel provider for rate push worker.' })
+      return true
+    }
+
+    const taskId = `rate-push-${Date.now()}-${normalizeSimpleText(Math.random()).slice(2, 8)}`
+    const workerPayload = {
+      taskId,
+      taskType: 'UPDATE_RATE',
+      platform,
+      hotelId,
+      roomType: roomTypeId,
+      dateStart: date,
+      dateEnd: date,
+      message,
+      rate: {
+        amount: rate,
+        currency,
+      },
+      dryRun,
+    }
+    const result = await executeOpsWorkerTask({
+      id: taskId,
+      taskType: 'UPDATE_RATE',
+      platform,
+      hotelId,
+      roomType: roomTypeId,
+      dateStart: date,
+      dateEnd: date,
+      message,
+      rateAmount: rate,
+      rateCurrency: currency,
+    }, { env: process.env, dryRun })
+
+    sendJson(response, 200, {
+      ok: true,
+      data: {
+        roomTypeId,
+        channelId,
+        date,
+        rate: {
+          amount: rate,
+          currency,
+        },
+        platform,
+        workerMode: result.workerMode || 'local-signed-worker',
+        signed: Boolean(result.signed),
+        dryRun,
+        taskId: result.taskId || taskId,
+        payload: workerPayload,
+        result,
+      },
     })
     return true
   }

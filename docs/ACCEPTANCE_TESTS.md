@@ -100,6 +100,28 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 
 Evidence: `scripts/run-business-tests.mjs`, `scripts/run-e2e-tests.mjs`, and supplied-secret pattern scans.
 
+## Demand Calendar 2027 Nakhon Si Thammarat
+
+- 365 source-row parse check for the seeded workbook `nakhon_si_thammarat_2027_hotel_demand_calendar.xlsx` with required `365 Calendar` sheet and tier counts:
+  - low `42`, normal `162`, high `106`, peak `41`, compression `14`.
+- Baseline checks:
+  - Twin default remains `750`.
+  - Double default remains `850`.
+  - Non-normal rows generate room-specific rates with `Math.round(baseRate * multiplier)`.
+- Source-state checks:
+  - `Source Status` from workbook is preserved.
+  - `PROJECTED` rows are retained for planning and are not treated as strict enforcement rows until promoted.
+- Push-payload checks:
+  - `use-rate-push` default path only applies `CONFIRMED` overrides.
+  - payload validation blocks unknown room ids and non-integer rates before channel attempts.
+  - dry-run verification is completed before any live publication process.
+- Rollback evidence:
+  - manifest and `.rate-overrides-backup.json` are retained and referenceable for reverse operations.
+- Required evidence command:
+  - `npm.cmd run rates:preload:nakhon-2027`
+
+Evidence: manual import/push trace + `scripts/generate-demand-calendar-overrides.mjs` output + `rate-push` logs.
+
 ## Standard Validation Commands
 
 ```powershell

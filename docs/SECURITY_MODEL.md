@@ -96,6 +96,16 @@ Autonomy shadow records are evidence, not execution authority. GPT or a future a
 - Board-to-Front-Desk/Cashier handoffs use allowlisted workflow names and sanitized reservation/folio identifiers in the URL, clear the query after consumption, and never carry guest data, money, credentials, or mutation payloads. Front Desk AI may read, suggest, and navigate only; it cannot call a mutating route or claim that navigation itself changed PMS state.
 - Operational reservations are never deleted from the Board. Posted financial corrections remain append-only reversals/refunds with original-transaction linkage.
 
+## Rate Push Safety (Demand Calendar)
+
+- Rate override rows must pass payload checks before publication attempts:
+  - `roomTypeId` must match an active room type.
+  - rate values must be integer THB values in a bounded safe range.
+- Demand-calendar rows with `sourceStatus=PROJECTED` are planning signals and are not treated as hard control rows.
+- `sourceStatus=CONFIRMED` rows are strict control rows and should be used for enforced push policy.
+- Channel publication should stay dry-run first in this runtime version until a real connector is wired.
+- Rejection or mismatch in payload validation must be logged and stop that publication attempt.
+
 ## Approval Controls
 
 High-risk or write-like task types require approval:

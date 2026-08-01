@@ -55,6 +55,15 @@ These are preparation/evaluation tracks. Do not mark a direct API as submitted, 
 The server-backed PMS rate endpoints persist internal rate rules and calendars only. They do not publish to Booking.com, Agoda, Trip.com, Expedia, Channex, or another channel. Likewise, a `RATE_*` domain event proves an internal PMS transaction occurred; it is not provider acknowledgement or live-write proof.
 
 Property profile/settings endpoints intentionally reject credential-shaped values and URLs. Provider credentials must remain in backend environment or secret storage and must never be copied into `Property.operationalSettings`, adapter health DTOs, audit changes, events, screenshots, or proof URLs.
+## Demand Calendar Rate Push Contract
+
+The demand-calendar preload path uses this repo's OTA-safe payload contract before channel publication:
+
+- `roomTypeId` must be a known room type identifier from active room settings.
+- `rate` must be an integer THB value (non-zero and within safe bounds).
+- `sourceStatus=CONFIRMED` is treated as enforceable control; `sourceStatus=PROJECTED` remains planning/review only.
+- If rate payload validation fails (bad room id or non-integer rate), the push attempt must be rejected before connector execution.
+- Current runtime remains dry-run for `use-rate-push`; treat all channel publication attempts as verification-first until a real channel writer is explicitly wired and tested.
 
 ## Booking.com Adapter
 
