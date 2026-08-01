@@ -1,9 +1,19 @@
 # Live Environment Proof Register
 
-Latest repository release-candidate refresh: 2026-07-19.
-Latest external provider evidence refresh: 2026-07-07T15:29+07:00.
+Latest repository release-candidate refresh: 2026-08-01.
+Latest external provider evidence refresh: 2026-08-01T23:28+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-08-01 Final Core PMS Provider Release
+
+- PR #194 merged to `main` as `8c22f55ab6503dd5121886b611db9f880911101a`; GitHub run `30706415049` passed both required jobs.
+- Paid PMS `srv-d6ns31h4tr6s73c9i8g0` deployed the exact merge as `dep-d9n1p93l550s7395ekog` with Node `22.23.2`, migration-only predeploy, all 26 migrations applied, and no pending migrations.
+- Isolated dry-run worker `srv-d9mrlkm417fc73c2o53g` deployed the same merge as `dep-d9n1p38ae00c73amj6fg`. Signed one-off job `job-d9n1qf3l550s7395git0` succeeded with `signed: true`, `dryRun: true`, and no external mutation.
+- `book.sandboxhotel.com` and `staff.sandboxhotel.com` were removed from the obsolete free service and verified on the paid service. Both return deep-health `200` with the production database OK. `npm.cmd run live:check` and `npm.cmd run public-edge:proof` pass after cutover.
+- Authenticated Cloudflare dashboard inspection on 2026-08-01 showed the zone active with 33 enabled security rules; the scoped probe-block and login-throttle rules remained enabled for the public PMS hostnames. The local API-token proof helper could not rerun because no token is stored in the repository checkout.
+- Provider recovery metadata showed point-in-time recovery over the preceding three days and exports retained for at least seven days. No restore was started; an actual restore drill remains open.
+- Real OTA writes remain disabled/dry-run and credential-gated. Credentialed staff acceptance, live payment-provider operation, and owner recovery sign-off remain separate gates. Full detail: `docs/launch/evidence/2026-08-01-final-pms-release.md`.
 
 ## 2026-07-19 Primary PMS Consolidation Boundary
 

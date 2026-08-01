@@ -1,10 +1,10 @@
 # Launch Proof Matrix
 
-Status date: 2026-07-19.
+Status date: 2026-08-01.
 
-Verdict: **owner-accepted pilot / launch-hardening; full production sign-off remains open.** [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) defines engineering-ready, staging-proven, owner-approved, and provider-proven. Commit `d18ea06eb974621281c43a57cf4d5a41994c2775` and deploy `dep-d966aj9kh4rs73d9h10g` retain their historical evidence, including dated 2026-07-07 Cloudflare WAF/rate-limit and Render recovery proof, but closed issues and accepted risks do not establish those levels for a later candidate. Current provider freshness, credentialed production RBAC, staff acceptance, live OTA writes, and payment collection remain unproven unless their rows gain exact current evidence.
+Verdict: **core PMS engineering-ready and provider-deployed; full operational sign-off remains open.** [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) defines engineering-ready, staging-proven, owner-approved, and provider-proven. The exact 2026-08-01 candidate now has current repository, CI, Render migration/deploy, public routing, deep-health, Cloudflare edge, and signed dry-run worker proof. Credentialed production RBAC, staff acceptance, live OTA writes, payment-provider collection, and an actual recovery restore drill remain open unless their rows gain exact evidence.
 
-Merged `main` is `9208621`. PR #190 integration commit `cb34b057fc829914408225802fe25fa235b0b8c5` passed both required GitHub jobs in run `29679511970` on 2026-07-19, covering the validated linear product stack and its server-authority corrections. The single main-target candidate remains gated on an independent GitHub review, and any later PR head must retain both required checks. The candidate Blueprint removes routine production seed from predeploy, but provider-side Render command alignment remains an open deploy gate.
+Merged `main` is `8c22f55ab6503dd5121886b611db9f880911101a`. PR #194 passed both required GitHub jobs in run `30706415049` and merged. The paid PMS deploy `dep-d9n1p93l550s7395ekog` ran migration-only predeploy successfully; worker deploy `dep-d9n1p38ae00c73amj6fg` and signed job `job-d9n1qf3l550s7395git0` prove the isolated dry-run path. Public `book` and `staff` domains are verified on the paid service. Detailed proof and remaining boundaries are in `evidence/2026-08-01-final-pms-release.md`; older table wording below is historical unless that record supersedes it.
 
 ## P0 Matrix
 
