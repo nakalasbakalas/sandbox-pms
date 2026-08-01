@@ -1,4 +1,4 @@
-/* global console, process, Response, URL, global */
+/* global console, process, Response, URL */
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { createHmac } from 'node:crypto'

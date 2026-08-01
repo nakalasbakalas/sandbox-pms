@@ -1,3 +1,4 @@
+/* global console, process */
 import { executeSignedOtaWorkerTask } from '../server/ota-adapters/index.mjs'
 import { executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 
