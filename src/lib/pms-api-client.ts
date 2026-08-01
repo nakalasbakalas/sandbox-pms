@@ -66,7 +66,7 @@ export function isBookingEmailApiNotConfigured(error: unknown) {
   return /not found|not configured|not implemented/i.test(message)
 }
 
-interface RatePushPayload {
+export interface RatePushPayload {
   roomTypeId: string
   channelId: string
   platform?: string
@@ -77,7 +77,7 @@ interface RatePushPayload {
   dryRun?: boolean
 }
 
-interface RatePushResultData {
+export interface RatePushResultData {
   roomTypeId: string
   channelId: string
   date: string

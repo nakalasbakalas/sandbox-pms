@@ -23,6 +23,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/use-auth'
+import { ratePushApi, type RatePushResultData } from '@/lib/pms-api-client'
 import {
   ratesApi,
   type ServerEffectiveRate,
@@ -140,6 +141,9 @@ export function ServerRatesView() {
   const [proposedRate, setProposedRate] = useState('')
   const [rationale, setRationale] = useState('')
   const [recommendation, setRecommendation] = useState<ServerRateRecommendation | null>(null)
+  const [pushDate, setPushDate] = useState('2027-01-01')
+  const [pushRate, setPushRate] = useState('1200')
+  const [pushResult, setPushResult] = useState<RatePushResultData | null>(null)
 
   const weekDays = useMemo(() => eachDayOfInterval({
     start: startOfWeek(selectedWeek, { weekStartsOn: 1 }),
@@ -335,6 +339,38 @@ export function ServerRatesView() {
     }
   }
 
+  const runRatePushDryRun = async () => {
+    const rate = Number(pushRate)
+    if (!selectedRoomType || !/^\d{4}-\d{2}-\d{2}$/.test(pushDate) || !Number.isInteger(rate) || rate < 1) {
+      toast.error('Select a room type, date, and positive whole-baht rate.')
+      return
+    }
+    try {
+      setSaving(true)
+      setPushResult(null)
+      const response = await ratePushApi.push(undefined, {
+        roomTypeId: selectedRoomType,
+        channelId: 'booking',
+        platform: 'booking',
+        date: pushDate,
+        rate,
+        currency: 'THB',
+        message: `Authenticated PMS dry-run: Booking.com ${selectedRoom?.name || selectedRoomType} @ THB ${rate} for ${pushDate}`,
+        dryRun: true,
+      })
+      setPushResult(response.data)
+      if (response.data.result.status === 'SUCCEEDED') {
+        toast.success('Signed OTA dry-run completed. No provider rate was changed.')
+      } else {
+        toast.error(response.data.result.errorMessage || response.data.result.summary || `Worker returned ${response.data.result.status}.`)
+      }
+    } catch (requestError) {
+      toast.error(errorMessage(requestError))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <div className="border-b bg-card px-6 py-4">
@@ -385,6 +421,7 @@ export function ServerRatesView() {
             <TabsTrigger value="calendar">Rate calendar</TabsTrigger>
             <TabsTrigger value="rules">Rules ({rules.length})</TabsTrigger>
             <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
+            <TabsTrigger value="rate-push">OTA dry run</TabsTrigger>
           </TabsList>
 
           <TabsContent value="calendar" className="space-y-4 pt-3">
@@ -485,6 +522,69 @@ export function ServerRatesView() {
                   <div><p className="text-xs text-muted-foreground">Difference</p><p className="text-xl font-semibold">{formatMoneySatang(recommendation.differenceSatang)}</p></div>
                   <Badge variant="outline">No write performed</Badge>
                   <Badge variant="outline">Approval required</Badge>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="rate-push" className="space-y-4 pt-3">
+            <Card>
+              <CardHeader>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <CardTitle>Authenticated OTA rate dry run</CardTitle>
+                    <CardDescription>Send a signed Booking.com test payload through the PMS worker boundary. Live provider writes are not available here.</CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Badge variant="outline">Booking.com</Badge>
+                    <Badge variant="secondary">Dry run enforced</Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>Room type</Label>
+                    <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                      <p className="font-medium">{selectedRoom?.name || 'Select a room type'}</p>
+                      {selectedRoomType && <p className="break-all text-xs text-muted-foreground">{selectedRoomType}</p>}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Date</Label>
+                    <Input type="date" value={pushDate} onChange={(event) => setPushDate(event.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Rate (whole THB)</Label>
+                    <Input inputMode="numeric" value={pushRate} onChange={(event) => setPushRate(event.target.value)} />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50/60 p-3 text-sm text-amber-950">
+                  <span>This action records worker evidence only. The payload always includes <strong>dryRun: true</strong>.</span>
+                  <Button onClick={() => void runRatePushDryRun()} disabled={!canEditRates || saving || !selectedRoomType}>
+                    {saving ? 'Running dry run...' : 'Run signed dry run'}
+                  </Button>
+                </div>
+                {!canEditRates && <p className="text-sm text-destructive">Your role does not have permission to test rate pushes.</p>}
+              </CardContent>
+            </Card>
+
+            {pushResult && (
+              <Card className={pushResult.result.status === 'SUCCEEDED' ? 'border-green-300' : 'border-amber-300'}>
+                <CardHeader>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <CardTitle>Dry-run evidence</CardTitle>
+                      <CardDescription>{pushResult.result.summary || pushResult.result.errorMessage || 'Worker response received.'}</CardDescription>
+                    </div>
+                    <Badge variant={pushResult.result.status === 'SUCCEEDED' ? 'default' : 'outline'}>{pushResult.result.status}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="grid gap-3 text-sm md:grid-cols-2 lg:grid-cols-4">
+                  <div><p className="text-xs text-muted-foreground">Task ID</p><p className="break-all font-medium">{pushResult.taskId}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Worker boundary</p><p className="font-medium">{pushResult.workerMode}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Request controls</p><p className="font-medium">Signed: {pushResult.signed ? 'yes' : 'no'} · Dry run: {pushResult.dryRun ? 'yes' : 'no'}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Payload</p><p className="font-medium">{pushResult.platform} · {pushResult.date} · THB {pushResult.rate.amount.toLocaleString()}</p></div>
                 </CardContent>
               </Card>
             )}
