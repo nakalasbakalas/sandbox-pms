@@ -85,6 +85,7 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 - Booking-email historical backfill dry-run fetches bounded Gmail pages, reports redacted aggregate parser counts, and does not write PMS records.
 - Booking-email historical backfill with `--confirm` imports Booking Email Events for `/booking-inbox` review only, chunking large confirmed imports by `--import-batch-size`; staff approval is still required before creating, modifying, cancelling, charging, or linking reservations.
 - Booking-email parser fixtures cover new booking, modification, cancellation, guest message, and payment notice templates with check-in/check-out label variants, stay-date ranges, and payment extraction.
+- A new-booking fixture containing cancellation-policy, free-cancellation, and cancellation-fee boilerplate remains `NEW_BOOKING`, while an explicit cancellation notification/status remains `CANCELLATION`.
 - Booking-email parser regressions also cover representative OTA security/reporting/invoice noise so non-reservation provider mail stays `UNKNOWN` instead of entering the booking workflow.
 - Booking-email backfill defaults to the approved provider query and excludes known Trip.com partner-report, Agoda partner-invoice, and Booking.com security noise unless an explicit owner-approved query override is supplied.
 - Booking-email duplicate review ignores different event types that share a booking reference, but still flags same-type/provider-message replays as duplicates.

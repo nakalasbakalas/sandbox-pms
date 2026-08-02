@@ -34,6 +34,23 @@ export const bookingEmailParserFixtures = [
     },
   },
   {
+    name: 'new booking with cancellation policy boilerplate',
+    input: {
+      subject: 'New booking confirmed AGD-4321',
+      rawText: 'Guest name: Avery Chen Booking reference: AGD-4321 Check-in date: 2026-08-12 Check-out date: 2026-08-14 Room type: Twin Room Adults: 2 Total amount: THB 5200 Cancellation policy: Free cancellation until 2026-08-09. A cancellation fee may apply after that date.',
+    },
+    expected: {
+      eventType: 'NEW_BOOKING',
+      channelRef: 'AGD-4321',
+      guestName: 'Avery Chen',
+      checkIn: '2026-08-12',
+      checkOut: '2026-08-14',
+      roomType: 'TWIN',
+      amount: 5200,
+      paymentStatus: undefined,
+    },
+  },
+  {
     name: 'cancellation template',
     input: {
       subject: 'Reservation cancelled ASC-9001',
@@ -62,6 +79,23 @@ export const bookingEmailParserFixtures = [
       guestName: 'Daniel Reed',
       checkIn: '2026-07-18',
       checkOut: '2026-07-20',
+      roomType: 'TWIN',
+      amount: undefined,
+      paymentStatus: undefined,
+    },
+  },
+  {
+    name: 'cancellation notification template',
+    input: {
+      subject: 'Cancellation notification for booking CAN-2468',
+      rawText: 'Guest name: Casey Morgan Booking reference: CAN-2468 Booking status: Canceled Check-in date: 2026-08-18 Check-out date: 2026-08-20 Room type: Twin Room',
+    },
+    expected: {
+      eventType: 'CANCELLATION',
+      channelRef: 'CAN-2468',
+      guestName: 'Casey Morgan',
+      checkIn: '2026-08-18',
+      checkOut: '2026-08-20',
       roomType: 'TWIN',
       amount: undefined,
       paymentStatus: undefined,

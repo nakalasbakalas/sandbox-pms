@@ -73,6 +73,8 @@ Booking email intake uses `BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.co
 
 Near-live sync defaults to the approved-provider sender query rather than `to:booking@sandboxhotel.com`; keep that boundary unless an owner-approved source query is required, because BCC and forwarded OTA messages may not expose the mailbox in the `To` header.
 
+Before reprocessing a backlog, verify that a normal booking confirmation containing cancellation-policy or cancellation-fee boilerplate is classified as `NEW_BOOKING`; only an explicit booking/reservation cancellation phrase, notification, or status should classify as `CANCELLATION`.
+
 Optional LINE Hotel Ops command intake:
 
 ```env
