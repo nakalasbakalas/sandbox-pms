@@ -444,3 +444,25 @@ Acceptance requires append-only exact-satang corrections, balanced journals/tria
 - **Production sign-off:** the owner accepts the exact release after engineering, staging, security, recovery, operational, and applicable provider evidence is attached.
 
 No lower evidence level implies a higher one, and no local result alone supports a launch-ready claim.
+
+## Booking Email Provider Parser And Mapping Handoff
+
+Run:
+
+```powershell
+node --check server/pms-service.mjs
+node --check server/channel-mapping-service.mjs
+node scripts/run-business-tests.mjs
+node scripts/run-channel-mapping-service-tests.mjs
+node scripts/run-channels-server-authority-source-tests.mjs
+npm.cmd run typecheck
+```
+
+Acceptance requires:
+
+- sanitized Booking.com multiline, Agoda bilingual-table, and Trip.com rate-plan-suffix fixtures extract event type, provider reference, guest name, valid stay dates, authoritative external room label, PMS room-code hint, and bounded amount without storing live guest data;
+- Booking.com account/security/partner requests and provider reports remain `UNKNOWN` and cannot reach autonomous writes;
+- observed-label suggestions group repeated events within the authenticated property, omit all guest/reference/contact/raw-message/payment fields, and suggest a PMS room type only for one consistent existing code;
+- server Channel Manager fails closed if suggestions or any other authoritative dependency fails, and a suggestion only prefills the existing editor;
+- mapping persistence still requires `manage:channels`, a configured channel, exact property/room-type room ids, an operational reason, and one retained idempotency key; and
+- production activation remains blocked until live reprocess/shadow evidence, explicit manager mapping acceptance, source/global switch approval, booking-board placement, manager notifications, and rollback observation pass for the exact deployed commit.

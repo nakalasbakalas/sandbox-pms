@@ -206,3 +206,10 @@ OTA status crosses a strict provider-adapter contract boundary. The public DTO u
 - No completed housekeeping or night-audit staff-workflow claim until disposable-DB reload/error-path tests and staff acceptance are attached to the release candidate.
 - No Accounting V2 or direct-booking production enablement from local fixture tests or an environment flag alone.
 - No multi-property SaaS claim from the membership foundation alone.
+
+## Booking Email Mapping-Suggestion Boundary
+
+- Provider parsing is deterministic evidence extraction, not sender authentication. Autonomous eligibility still separately requires an owner-configured trusted domain and aligned Gmail SPF, DKIM, or DMARC evidence.
+- The mapping-suggestion endpoint emits only property-scoped aggregates: provider, external room label, counts/timestamps, event types, consistent room-code hints, and existing mapping state. It must never return guest names, booking references, message ids, email addresses, phone numbers, raw bodies, payment values, or reservation ids.
+- Suggestions are non-mutating and require `view:channels`. Persistence remains a distinct `manage:channels` action with strict input validation, property-owned room ids, reason policy, idempotency, audit evidence, and `providerWrite: false`.
+- A parser hint cannot bypass the authoritative mapping record, room assignability validator, duplicate check, confidence floor, corroboration conflict check, emergency operational controls, or the two independent autonomy switches.

@@ -61,6 +61,107 @@ function publicMapping(mapping) {
   return payload
 }
 
+function normalizedExternalRoomType(value) {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '')
+}
+
+function providerFromBookingEmail(event) {
+  const source = `${event?.sender || ''} ${event?.sourceName || ''}`.toLowerCase()
+  if (source.includes('booking.com') || source.includes('bookingcom')) return 'BOOKING_COM'
+  if (source.includes('agoda')) return 'AGODA'
+  if (source.includes('trip.com') || source.includes('tripcom') || source.includes('ctrip')) return 'TRIP'
+  if (source.includes('expedia')) return 'EXPEDIA'
+  if (source.includes('airbnb')) return 'AIRBNB'
+  return null
+}
+
+function safeParsedDetails(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+export async function listChannelMappingSuggestions(prisma, context) {
+  const { propertyId } = contextFor(context)
+  const [events, channels, mappings, roomTypes] = await Promise.all([
+    prisma.bookingEmailEvent.findMany({
+      where: { propertyId, eventType: { in: ['NEW_BOOKING', 'MODIFICATION'] } },
+      select: {
+        sender: true,
+        sourceName: true,
+        eventType: true,
+        roomType: true,
+        parsedDetails: true,
+        receivedAt: true,
+      },
+      orderBy: { receivedAt: 'desc' },
+      take: 1000,
+    }),
+    prisma.channel.findMany({ where: { propertyId }, select: { id: true, provider: true, active: true } }),
+    prisma.channelMapping.findMany({ where: { channel: { propertyId } } }),
+    prisma.roomType.findMany({ where: { propertyId }, select: { id: true, code: true, name: true } }),
+  ])
+  const channelById = new Map(channels.map((channel) => [channel.id, channel]))
+  const groups = new Map()
+
+  for (const event of events) {
+    const provider = providerFromBookingEmail(event)
+    const details = safeParsedDetails(event.parsedDetails)
+    const label = String(details.externalRoomType || '').trim().slice(0, 300)
+    const normalizedLabel = normalizedExternalRoomType(label)
+    if (!provider || !label || !normalizedLabel) continue
+    const key = `${provider}:${normalizedLabel}`
+    const group = groups.get(key) || {
+      provider,
+      externalRoomTypeName: label,
+      normalizedExternalRoomType: normalizedLabel,
+      observationCount: 0,
+      lastSeenAt: null,
+      eventTypes: new Set(),
+      roomTypeCodes: new Set(),
+    }
+    group.observationCount += 1
+    group.eventTypes.add(event.eventType)
+    const roomTypeCode = String(event.roomType || details.roomType || '').trim().toUpperCase()
+    if (roomTypeCode) group.roomTypeCodes.add(roomTypeCode)
+    const receivedAt = event.receivedAt ? new Date(event.receivedAt) : null
+    if (receivedAt && !Number.isNaN(receivedAt.getTime()) && (!group.lastSeenAt || receivedAt > group.lastSeenAt)) {
+      group.lastSeenAt = receivedAt
+    }
+    groups.set(key, group)
+  }
+
+  return [...groups.values()].map((group) => {
+    const matchingMappings = mappings.filter((mapping) => {
+      const channel = channelById.get(mapping.channelId)
+      return channel?.provider === group.provider && (
+        normalizedExternalRoomType(mapping.externalRoomTypeId) === group.normalizedExternalRoomType
+        || normalizedExternalRoomType(mapping.externalRoomTypeName) === group.normalizedExternalRoomType
+      )
+    })
+    const observedRoomTypeCode = group.roomTypeCodes.size === 1 ? [...group.roomTypeCodes][0] : null
+    const suggestedRoomType = observedRoomTypeCode
+      ? roomTypes.find((roomType) => String(roomType.code || '').trim().toUpperCase() === observedRoomTypeCode)
+      : null
+    return {
+      provider: group.provider,
+      externalRoomTypeName: group.externalRoomTypeName,
+      normalizedExternalRoomType: group.normalizedExternalRoomType,
+      observationCount: group.observationCount,
+      lastSeenAt: group.lastSeenAt?.toISOString() || null,
+      eventTypes: [...group.eventTypes].sort(),
+      observedRoomTypeCode,
+      suggestedRoomTypeId: suggestedRoomType?.id || null,
+      suggestedRoomTypeCode: suggestedRoomType?.code || null,
+      mappingIds: matchingMappings.map((mapping) => mapping.id),
+      mapped: matchingMappings.some((mapping) => mapping.active),
+    }
+  }).sort((left, right) => (
+    Number(right.mapped) - Number(left.mapped)
+    || right.observationCount - left.observationCount
+    || String(right.lastSeenAt || '').localeCompare(String(left.lastSeenAt || ''))
+    || left.externalRoomTypeName.localeCompare(right.externalRoomTypeName)
+  )).slice(0, 100)
+}
+
 async function requireChannel(tx, propertyId, channelId) {
   const channel = await tx.channel.findFirst({ where: { id: channelId, propertyId }, select: { id: true } })
   if (!channel) throw new PmsValidationError('Channel was not found for the active property.', 404)

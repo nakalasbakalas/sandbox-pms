@@ -16,7 +16,7 @@ assert.match(wrapperSource, /return <DemoChannelsView \/>/, 'browser-backed chan
 
 assert.doesNotMatch(serverSource, /useKV|localStorage|sessionStorage|@github\/spark/, 'server Channels never reads browser-backed operational state')
 assert.doesNotMatch(serverSource, /InventorySyncPanel|InventoryCalendar|RateParityPanel|RatePushPanel/, 'server Channels does not import simulated provider tools')
-assert.match(serverSource, /Promise\.all\(\[[\s\S]*?\/api\/channels\/ical[\s\S]*?\/api\/channels\/mappings[\s\S]*?\/api\/settings\/room-setup[\s\S]*?\/api\/system\/capabilities/, 'server Channels loads one authoritative API snapshot')
+assert.match(serverSource, /Promise\.all\(\[[\s\S]*?\/api\/channels\/ical[\s\S]*?\/api\/channels\/mappings[\s\S]*?\/api\/channels\/mapping-suggestions[\s\S]*?\/api\/settings\/room-setup[\s\S]*?\/api\/system\/capabilities/, 'server Channels loads one authoritative API snapshot including PII-free mapping suggestions')
 assert.match(serverSource, /setSnapshot\(null\)[\s\S]*?setLoadError/, 'a failed authoritative load clears all displayed operational state')
 assert.match(serverSource, /No browser-backed channel state is being shown and all writes are blocked/, 'the failure state is explicit and fail closed')
 assert.match(serverSource, /hasPermission\('manage:channels'\)/, 'server channel mutations are visibly permission-gated')
@@ -28,6 +28,7 @@ assert.ok(
   'disable and every mapping mutation send retained idempotency keys',
 )
 assert.match(serverSource, /do not write to the provider/, 'mapping descriptions state that no provider write occurs')
+assert.match(serverSource, /Suggestions never create or activate a mapping/, 'booking-email mapping suggestions remain manager-reviewed and non-mutating')
 assert.doesNotMatch(serverSource, /importUrl|Provider import URL/, 'the server UI does not collect or display private provider import URLs')
 
 assert.doesNotMatch(icalSource, /importUrl:\s*config\.importUrl/, 'normal iCal responses do not return the private provider URL')

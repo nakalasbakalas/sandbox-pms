@@ -23,6 +23,7 @@ import {
 import {
   createChannelMapping,
   deleteChannelMapping,
+  listChannelMappingSuggestions,
   listChannelMappings,
   updateChannelMapping,
 } from './channel-mapping-service.mjs'
@@ -1158,6 +1159,12 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/channels/mappings' && request.method === 'GET') {
     requirePermission(user, 'view:channels')
     sendJson(response, 200, { ok: true, data: await listChannelMappings(db, context) })
+    return true
+  }
+
+  if (url.pathname === '/api/channels/mapping-suggestions' && request.method === 'GET') {
+    requirePermission(user, 'view:channels')
+    sendJson(response, 200, { ok: true, data: await listChannelMappingSuggestions(db, context) })
     return true
   }
 

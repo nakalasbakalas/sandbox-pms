@@ -58,6 +58,20 @@ type ChannelRoomMapping = {
   updatedAt: string
 }
 
+type ChannelMappingSuggestion = {
+  provider: ChannelProvider
+  externalRoomTypeName: string
+  normalizedExternalRoomType: string
+  observationCount: number
+  lastSeenAt?: string | null
+  eventTypes: string[]
+  observedRoomTypeCode?: string | null
+  suggestedRoomTypeId?: string | null
+  suggestedRoomTypeCode?: string | null
+  mappingIds: string[]
+  mapped: boolean
+}
+
 type RoomType = {
   id: string
   code?: string
@@ -81,6 +95,7 @@ type RoomSetup = {
 type ServerChannelsSnapshot = {
   channels: ServerIcalChannel[]
   mappings: ChannelRoomMapping[]
+  suggestions: ChannelMappingSuggestion[]
   roomSetup: RoomSetup
   capabilities: SystemCapabilityRegistry
 }
@@ -159,15 +174,17 @@ export function ServerChannelsView() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [channelsPayload, mappingsPayload, roomSetupPayload, capabilitiesPayload] = await Promise.all([
+      const [channelsPayload, mappingsPayload, suggestionsPayload, roomSetupPayload, capabilitiesPayload] = await Promise.all([
         pmsApi<{ ok: true; data: ServerIcalChannel[] }>('/api/channels/ical', null),
         pmsApi<{ ok: true; data: ChannelRoomMapping[] }>('/api/channels/mappings', null),
+        pmsApi<{ ok: true; data: ChannelMappingSuggestion[] }>('/api/channels/mapping-suggestions', null),
         pmsApi<{ ok: true; data: RoomSetup }>('/api/settings/room-setup', null),
         pmsApi<{ ok: true; data: SystemCapabilityRegistry }>('/api/system/capabilities', null),
       ])
       if (
         !Array.isArray(channelsPayload.data) ||
         !Array.isArray(mappingsPayload.data) ||
+        !Array.isArray(suggestionsPayload.data) ||
         !roomSetupPayload.data ||
         !Array.isArray(roomSetupPayload.data.roomTypes) ||
         !Array.isArray(roomSetupPayload.data.rooms) ||
@@ -179,6 +196,7 @@ export function ServerChannelsView() {
       setSnapshot({
         channels: channelsPayload.data || [],
         mappings: mappingsPayload.data || [],
+        suggestions: suggestionsPayload.data || [],
         roomSetup: roomSetupPayload.data,
         capabilities: capabilitiesPayload.data,
       })
@@ -203,6 +221,7 @@ export function ServerChannelsView() {
   const selectedMappings = selectedChannel?.persisted
     ? snapshot?.mappings.filter((mapping) => mapping.channelId === selectedChannel.persisted?.id) || []
     : []
+  const selectedSuggestions = snapshot?.suggestions.filter((suggestion) => suggestion.provider === selectedProvider) || []
   const selectedRoomTypeRooms = snapshot?.roomSetup.rooms
     .filter((room) => room.roomTypeId === mappingDraft.roomTypeId)
     .sort((left, right) => left.number.localeCompare(right.number, undefined, { numeric: true })) || []
@@ -210,6 +229,18 @@ export function ServerChannelsView() {
   const resetMappingDraft = () => {
     setEditingMappingId(null)
     setMappingDraft(EMPTY_MAPPING_DRAFT)
+  }
+
+  const prefillMappingSuggestion = (suggestion: ChannelMappingSuggestion) => {
+    const roomTypeId = suggestion.suggestedRoomTypeId || ''
+    setEditingMappingId(null)
+    setMappingDraft({
+      ...EMPTY_MAPPING_DRAFT,
+      externalRoomTypeId: suggestion.normalizedExternalRoomType,
+      externalRoomTypeName: suggestion.externalRoomTypeName,
+      roomTypeId,
+      roomIds: roomTypeId ? snapshot?.roomSetup.rooms.filter((room) => room.roomTypeId === roomTypeId).map((room) => room.id) || [] : [],
+    })
   }
 
   const openChannelConfiguration = (channel: ServerChannel) => {
@@ -565,7 +596,49 @@ export function ServerChannelsView() {
 
             <TabsContent value="mapping" className="mt-4">
               <div className="grid gap-6 xl:grid-cols-[22rem_1fr]">
-                <Card>
+                <div className="space-y-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Observed booking-email labels</CardTitle>
+                      <CardDescription>PII-free OTA room categories extracted from recent booking emails. Suggestions never create or activate a mapping.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {selectedSuggestions.length === 0 ? (
+                        <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                          No external room labels have been extracted for {selectedChannel?.name} yet.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {selectedSuggestions.map((suggestion) => (
+                            <div key={`${suggestion.provider}:${suggestion.normalizedExternalRoomType}`} className="rounded-md border p-4">
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="font-semibold">{suggestion.externalRoomTypeName}</p>
+                                    <Badge variant={suggestion.mapped ? 'outline' : 'secondary'}>{suggestion.mapped ? 'Mapped' : 'Needs mapping'}</Badge>
+                                  </div>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    Seen {suggestion.observationCount} time{suggestion.observationCount === 1 ? '' : 's'}
+                                    {suggestion.suggestedRoomTypeCode ? ` · parser suggests ${suggestion.suggestedRoomTypeCode}` : ' · select the PMS room type'}
+                                  </p>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => prefillMappingSuggestion(suggestion)}
+                                  disabled={!canManageChannels || suggestion.mapped || !selectedChannel?.persisted}
+                                >
+                                  Use in editor
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card>
                   <CardHeader>
                     <CardTitle>Mapping editor</CardTitle>
                     <CardDescription>Map an OTA room category to authoritative PMS rooms.</CardDescription>
@@ -650,7 +723,8 @@ export function ServerChannelsView() {
                       </>
                     )}
                   </CardContent>
-                </Card>
+                  </Card>
+                </div>
 
                 <Card>
                   <CardHeader>

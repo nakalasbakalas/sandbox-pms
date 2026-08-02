@@ -213,3 +213,9 @@ The following are PMS engineering evidence only:
 - a successful local or CI adapter test
 
 Provider proof requires a separately approved account, safe test dates/inventory, verified read/write result, sanitized before/after evidence, rollback/recovery evidence, and account-owner sign-off. Until that proof exists, keep `OTA_LIVE_WRITES_ENABLED=false`, retain review-gated manual availability tasks, and describe provider state as dry-run, provider-pending, or unproven.
+
+## Booking Email Room Labels
+
+Booking.com, Agoda, and Trip.com reservation emails may be used as inbound PMS evidence for reservation extraction and for proposing an external room-category label. This is not an OTA API read, provider inventory acknowledgement, rate sync, or proof that the provider currently sells the mapped inventory.
+
+Channel Manager may prefill an audited room-mapping draft from PII-free observed-label aggregates. An authorized manager must still verify the exact provider label and choose the property-owned PMS room type/room ids. The suggestion endpoint never creates or activates a mapping and never performs a provider write. Real OTA inventory/rate synchronization remains separately disabled and provider-unproven.
