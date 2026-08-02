@@ -33,6 +33,7 @@ import {
   satangToApiString,
   sumMoneySatang,
 } from './money.mjs'
+import { approvedBookingEmailProviderQuery } from '../scripts/booking-email-query.mjs'
 
 const reservationInclude = {
   guest: true,
@@ -1263,7 +1264,7 @@ async function ensurePrimaryBookingEmailSource(tx, actor) {
       enabled: true,
       autoProcessSafeEvents: false,
       reviewThreshold: BOOKING_EMAIL_DEFAULT_REVIEW_THRESHOLD,
-      query: `to:${mailbox} -in:spam -in:trash newer_than:30d`,
+      query: approvedBookingEmailProviderQuery(),
       lastError: credentials.configured ? null : BOOKING_EMAIL_GMAIL_MISSING_CREDENTIALS_MESSAGE,
     },
   })
@@ -1366,7 +1367,7 @@ export async function fetchGmailEventsForSource(source, options = {}) {
   }
   const env = options.env || process.env
   const userId = encodeURIComponent(env.BOOKING_EMAIL_GMAIL_USER_ID || env.GMAIL_USER_ID || 'me')
-  const query = normalizeNullableString(options.query) || source.query || `to:${source.mailbox} -in:spam -in:trash newer_than:30d`
+  const query = normalizeNullableString(options.query) || source.query || approvedBookingEmailProviderQuery()
   const maxMessages = Math.min(Math.max(Number(options.maxMessages || options.limit || 10), 1), 1000)
   const pageSize = Math.min(Math.max(Number(options.pageSize || Math.min(maxMessages, 50)), 1), 50)
   const maxPages = Math.min(Math.max(Number(options.maxPages || Math.ceil(maxMessages / pageSize)), 1), 100)

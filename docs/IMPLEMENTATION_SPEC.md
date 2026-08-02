@@ -290,7 +290,7 @@ The server owns the trust and action matrix. `POST /api/booking-email/sync` does
 
 ### Controlled booking autonomy
 
-The near-live scheduler polls enabled Gmail sources at a bounded interval (30 seconds by default). It sends `reviewOnly: false` only when the global autonomy policy is configured. A source must also have `autoProcessSafeEvents=true`, which only a manager or administrator may change.
+The near-live scheduler polls enabled Gmail sources at a bounded interval (30 seconds by default). Its default Gmail query is the bounded approved-provider sender scope and deliberately does not require `to:booking@sandboxhotel.com`, because provider mail may arrive by BCC or forwarding. It sends `reviewOnly: false` only when the global autonomy policy is configured. A source must also have `autoProcessSafeEvents=true`, which only a manager or administrator may change.
 
 Automatic PMS writes are restricted to `NEW_BOOKING`. The server requires an owner-configured trusted sender domain, Gmail SPF/DKIM pass evidence by default, a provider reference, no parser or duplicate conflicts, confidence at or above both the hard 0.95 floor and the source threshold, one unambiguous active OTA `ChannelMapping`, and an available mapped room. The room is validated and reserved within the same serializable reservation transaction. Booking.com, Agoda, Trip.com, Expedia, and Airbnb are authoritative channel/source values; Trip.com uses `TRIP`.
 

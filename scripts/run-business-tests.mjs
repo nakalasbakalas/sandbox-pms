@@ -1624,6 +1624,20 @@ assert.match(approvedProviderQuery, /-from:growth-product@agoda\.com/, 'booking-
 assert.match(approvedProviderQuery, /-subject:"new sign-in to your account"/, 'booking-email approved provider query excludes Booking.com security notices')
 assert.match(approvedProviderQuery, /newer_than:30d/, 'booking-email approved provider query stays bounded by default')
 assert.doesNotMatch(approvedBookingEmailProviderQuery({ allPast: true }), /newer_than:/, 'booking-email all-past provider query removes the recency bound')
+let defaultNearLiveGmailQuery = null
+await fetchGmailEventsForSource({
+  mailbox: 'booking@sandboxhotel.com',
+}, {
+  env: { BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: 'gmail-access-fixture' },
+  maxMessages: 1,
+  fetchImpl: async (url) => {
+    const parsed = new URL(String(url))
+    defaultNearLiveGmailQuery = parsed.searchParams.get('q')
+    return new Response(JSON.stringify({ messages: [] }), { status: 200 })
+  },
+})
+assert.equal(defaultNearLiveGmailQuery, approvedProviderQuery, 'near-live Gmail sync defaults to the approved-provider scope so BCC and forwarded OTA mail is not lost')
+assert.doesNotMatch(defaultNearLiveGmailQuery, /\bto:/, 'near-live Gmail sync does not require a visible To header')
 assert.equal(
   primaryMailboxBookingEmailQuery('booking@sandboxhotel.com'),
   'to:booking@sandboxhotel.com -in:spam -in:trash newer_than:30d',
