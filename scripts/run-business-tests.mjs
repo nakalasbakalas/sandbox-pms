@@ -1518,6 +1518,11 @@ assert.deepEqual(
   ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send'],
   'Gmail OAuth helper keeps send scope opt-in',
 )
+assert.deepEqual(
+  gmailOauthScopes(['--include-drive-readonly-scope']),
+  ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/drive.readonly'],
+  'Google Drive read access for Workspace booking JSON remains explicit and opt-in',
+)
 const gmailOauthClientFixturePath = resolve('node_modules/.tmp/business-tests/google-oauth-client.fixture.json')
 await writeFile(gmailOauthClientFixturePath, JSON.stringify({
   installed: {
@@ -1613,14 +1618,23 @@ const bookingAutomationConfigured = bookingEmailAutomationPolicy({
 })
 assert.equal(bookingAutomationConfigured.configured, true, 'booking-email autonomy requires explicit enablement and trusted sender domains')
 assert.equal(bookingAutomationConfigured.minimumConfidence, 0.95, 'booking-email autonomy cannot lower the hard confidence floor')
+const bookingAutomationMissingWorkspace = bookingEmailAutomationPolicy({
+  BOOKING_EMAIL_AUTONOMY_ENABLED: 'true',
+  BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS: 'booking.com,agoda.com',
+  BOOKING_EMAIL_WORKSPACE_JSON_ENABLED: 'true',
+  BOOKING_EMAIL_REQUIRE_WORKSPACE_JSON: 'true',
+})
+assert.equal(bookingAutomationMissingWorkspace.configured, false, 'booking-email autonomy fails closed when required Workspace JSON access is incomplete')
+assert.equal(bookingAutomationMissingWorkspace.missing.includes('BOOKING_EMAIL_WORKSPACE_JSON_FOLDER_ID'), true, 'Workspace JSON policy reports the non-secret missing folder configuration')
 assert.equal(bookingEmailAuthenticationPass({ authenticationResults: 'mx.google.com; dkim=pass header.d=booking.com' }, ['booking.com']), true, 'booking-email authentication accepts aligned trusted DKIM evidence')
 assert.equal(bookingEmailAuthenticationPass({ authenticationResults: 'mx.google.com; spf=pass smtp.mailfrom=mailer.agoda.com' }, ['agoda.com']), true, 'booking-email authentication accepts a trusted sender subdomain with aligned SPF evidence')
 assert.equal(bookingEmailAuthenticationPass({ authenticationResults: 'mx.google.com; dmarc=pass header.from=trip.com' }, ['trip.com']), true, 'booking-email authentication accepts aligned trusted DMARC evidence')
 assert.equal(bookingEmailAuthenticationPass({ authenticationResults: 'mx.google.com; spf=pass smtp.mailfrom=attacker.test; dkim=fail header.d=booking.com; dmarc=fail header.from=booking.com' }, ['booking.com']), false, 'booking-email authentication rejects a trusted domain that is not attached to a passing mechanism')
 const approvedProviderQuery = approvedBookingEmailProviderQuery()
-assert.match(approvedProviderQuery, /\(from:booking\.com OR from:guest\.booking\.com OR from:agoda\.com OR from:trip\.com OR from:expedia\.com OR from:priceline\.com OR from:airbnb\.com\)/, 'booking-email approved provider query keeps the approved OTA sender scope')
+assert.match(approvedProviderQuery, /\(from:booking\.com OR from:guest\.booking\.com OR from:agoda\.com OR from:trip\.com OR from:expedia\.com OR from:priceline\.com OR from:airbnb\.com OR from:app\.littlehotelier\.com\)/, 'booking-email approved provider query keeps the approved reservation sender scope')
 assert.match(approvedProviderQuery, /-from:ebk\.promo\.hotelpartner@trip\.com/, 'booking-email approved provider query excludes the Trip.com partner-report sender')
 assert.match(approvedProviderQuery, /-from:growth-product@agoda\.com/, 'booking-email approved provider query excludes the Agoda partner-invoice sender')
+assert.match(approvedProviderQuery, /from:app\.littlehotelier\.com/, 'booking-email approved provider query includes verified LittleHotelier reservation mail')
 assert.match(approvedProviderQuery, /-subject:"new sign-in to your account"/, 'booking-email approved provider query excludes Booking.com security notices')
 assert.match(approvedProviderQuery, /newer_than:30d/, 'booking-email approved provider query stays bounded by default')
 assert.doesNotMatch(approvedBookingEmailProviderQuery({ allPast: true }), /newer_than:/, 'booking-email all-past provider query removes the recency bound')

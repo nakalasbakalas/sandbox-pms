@@ -440,12 +440,19 @@ export function BookingInboxView() {
                       <div>Target mailbox configured: {yesNo(status?.credentialStatus?.targetMailboxConfigured)}</div>
                       <div>Target mailbox: {status?.credentialStatus?.targetMailbox || 'Not configured'}</div>
                       <div>Gmail API connection test: {gmailConnectionLabel(status?.credentialStatus?.connectionTest?.status)}</div>
+                      <div>Workspace booking JSON requested: {yesNo(status?.workspaceJson?.requested)}</div>
+                      <div>Workspace JSON folder configured: {yesNo(status?.workspaceJson?.folderConfigured)}</div>
+                      <div>Google Drive readonly scope configured: {yesNo(status?.workspaceJson?.driveScopeConfigured)}</div>
+                      <div>Workspace JSON ready: {yesNo(status?.workspaceJson?.configured)}</div>
                       {status?.credentialStatus?.connectionTest?.message && (
                         <div className="text-amber-700">{status.credentialStatus.connectionTest.message}</div>
                       )}
                       {status?.lastSyncAt && <div>Last sync: {formatReceived(status.lastSyncAt)}</div>}
                       {status?.credentialStatus?.missing?.length ? (
                         <div>Missing setting: {status.credentialStatus.missing.join(', ')}</div>
+                      ) : null}
+                      {status?.workspaceJson?.missing?.length ? (
+                        <div>Workspace JSON missing setting: {status.workspaceJson.missing.join(', ')}</div>
                       ) : null}
                     </div>
                     {sources.length === 0 ? (

@@ -114,6 +114,14 @@ export interface BookingEmailStatus {
       targetMailboxMatchesAuthenticatedAccount?: boolean
     }
   }
+  workspaceJson?: {
+    requested: boolean
+    configured: boolean
+    folderConfigured: boolean
+    driveScopeConfigured: boolean
+    requireForAutonomy: boolean
+    missing: string[]
+  }
   lastSyncAt?: string
   nextSyncAt?: string
   needsReview: number
@@ -129,6 +137,8 @@ export interface BookingEmailStatus {
     notifyManager: boolean
     requireAuthenticationResults: boolean
     requireCorroboration: boolean
+    requireWorkspaceJson: boolean
+    workspaceJsonConfigured: boolean
     minimumConfidence: number
     trustedSenderDomainCount: number
     missing: string[]

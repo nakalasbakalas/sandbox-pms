@@ -8,6 +8,7 @@ const APPROVED_PROVIDER_SENDERS = [
   'expedia.com',
   'priceline.com',
   'airbnb.com',
+  'app.littlehotelier.com',
 ]
 
 const APPROVED_PROVIDER_EXCLUDED_SENDERS = [
