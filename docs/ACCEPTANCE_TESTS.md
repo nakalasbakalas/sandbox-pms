@@ -460,7 +460,8 @@ npm.cmd run typecheck
 
 Acceptance requires:
 
-- sanitized Booking.com multiline, Agoda bilingual-table, and Trip.com rate-plan-suffix fixtures extract event type, provider reference, guest name, valid stay dates, authoritative external room label, PMS room-code hint, and bounded amount without storing live guest data;
+- sanitized Booking.com multiline, Agoda bilingual-table and whitespace-collapsed, Agoda booking-id cancellation, and Trip.com rate-plan-suffix fixtures extract event type, provider reference, guest name, valid stay dates, authoritative external room label, PMS room-code hint, and bounded amount without storing live guest data;
+- review/error reprocess ignores stale prior `parsedDetails` and regenerates classification and provider fields from canonical stored email evidence without auto-approval;
 - Booking.com account/security/partner requests and provider reports remain `UNKNOWN` and cannot reach autonomous writes;
 - observed-label suggestions group repeated events within the authenticated property, omit all guest/reference/contact/raw-message/payment fields, and suggest a PMS room type only for one consistent existing code;
 - server Channel Manager fails closed if suggestions or any other authoritative dependency fails, and a suggestion only prefills the existing editor;

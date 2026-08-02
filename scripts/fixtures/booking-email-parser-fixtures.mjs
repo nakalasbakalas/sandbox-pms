@@ -80,6 +80,43 @@ export const bookingEmailParserFixtures = [
     },
   },
   {
+    name: 'Agoda collapsed bilingual confirmation template',
+    input: {
+      sender: 'no-reply@agoda.com',
+      subject: 'Agoda Booking ID AGD-DEMO-8402 - confirmed',
+      rawText: 'Booking ID หมายเลขการจอง AGD-DEMO-8402 Reservation Information Booking confirmation Customer First Name ชื่อลูกค้า Jordan Customer Last Name นามสกุลลูกค้า Example Country of Residence Thailand Check-in เช็คอิน 7-Aug-2026 (7-08-2026) Check-out เช็คเอาท์ 9-Aug-2026 (9-08-2026) Room Type ประเภทห้อง No. of Rooms จำนวนห้องพัก Occupancy ผู้เข้าพัก No. of Extra Bed จำนวนเตียงเสริม : Standard Twin Room 1 2 Adults 0 ชื่อแผนราคา: Room Only Cancellation and Modification policy terms apply.',
+    },
+    expected: {
+      eventType: 'NEW_BOOKING',
+      channelRef: 'AGD-DEMO-8402',
+      guestName: 'Jordan Example',
+      checkIn: '2026-08-07',
+      checkOut: '2026-08-09',
+      roomType: 'TWIN',
+      externalRoomType: 'Standard Twin Room',
+      amount: undefined,
+      paymentStatus: undefined,
+    },
+  },
+  {
+    name: 'Agoda booking-id cancellation subject template',
+    input: {
+      sender: 'no-reply@agoda.com',
+      subject: 'Agoda Booking ID AGD-DEMO-8403 - CANCELLED Sandbox Hotel',
+      rawText: 'Booking ID หมายเลขการจอง AGD-DEMO-8403 Cancellation policy details follow.',
+    },
+    expected: {
+      eventType: 'CANCELLATION',
+      channelRef: 'AGD-DEMO-8403',
+      guestName: undefined,
+      checkIn: undefined,
+      checkOut: undefined,
+      roomType: undefined,
+      amount: undefined,
+      paymentStatus: undefined,
+    },
+  },
+  {
     name: 'Trip.com accepted booking with rate-plan suffix template',
     input: {
       sender: 'reservations@trip.com',

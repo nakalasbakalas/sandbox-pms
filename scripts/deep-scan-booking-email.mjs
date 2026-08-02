@@ -277,8 +277,6 @@ async function main() {
     pushFinding(findings, 'unknown-event-type', 'medium', unknownEvents, 'Events classified as UNKNOWN need manual or parser review.', 'Improve parser signals and add provider-specific fixtures for common OTA templates.')
     pushFinding(findings, 'missing-source-message-id', 'medium', missingSourceMessageId, 'Events without sourceMessageId cannot rely on provider-level idempotent upsert.', 'Populate sourceMessageId from Gmail id, Message-ID, or a stable content fingerprint before insert.')
     pushFinding(findings, 'missing-raw-text', 'medium', missingRawText, 'Events without rawText cannot be reprocessed with improved parser logic.', 'Persist sanitized text/plain or text/html extraction output for every scanned message.')
-    pushFinding(findings, 'duplicate-channel-reference', 'medium', duplicateChannelGroups.length, 'Multiple email events share a source/channel reference.', 'Treat same-reference events as duplicates only when the event type and provider message fingerprint also match.')
-    pushFinding(findings, 'mixed-type-same-reference', 'high', mixedReferenceGroups.length, 'Different email event types share the same channel reference; current channelRef-only duplicate checks can flag legitimate payment/cancellation/modification notices as duplicates.', 'Scope duplicate detection to sourceMessageId, provider Message-ID, and channelRef + eventType, not channelRef alone.')
     pushFinding(findings, 'same-type-same-reference', 'medium', repeatedSameTypeReferenceGroups.length, 'Same event type appears more than once for the same channel reference.', 'Review whether these are resend duplicates, multi-room reservations, or legitimate updates.')
     pushFinding(findings, 'sample-invalid-stay-range', 'high', sampleAnomalies.invalidStayRange, 'Sampled events contain check-out dates not after check-in.', 'Reject or quarantine invalid stay ranges before approval.')
     pushFinding(findings, 'sample-parser-type-drift', 'medium', sampleAnomalies.parserTypeDrift, 'Re-previewing sampled events produces a different event type than the stored value.', 'After parser upgrades, run reprocess on stale events and store parser version metadata.')
@@ -330,24 +328,21 @@ async function main() {
         count: group._count._all,
         eventTypes: channelTypeMap.get(`${group.sourceId || 'none'}::${group.channelRef}`) || [],
       })),
-      staticFindings: [
+      implementedControls: [
         {
           id: 'parser-date-label-coverage',
-          severity: 'high',
           file: 'server/pms-service.mjs',
-          summary: 'Date parsing should accept check-in/check-out, checkin/checkout, arrival/departure, and provider variants before event confidence is scored.',
+          summary: 'Date parsing accepts check-in/check-out, checkin/checkout, arrival/departure, provider text-month ranges, and collapsed Agoda bilingual layouts before confidence is scored.',
         },
         {
           id: 'duplicate-detection-scope',
-          severity: 'high',
           file: 'server/pms-service.mjs',
-          summary: 'Duplicate detection should not use channelRef alone; payment, cancellation, and modification notices often share the original booking reference.',
+          summary: 'Duplicate detection uses source message id first, then same-event-type provider Message-ID or content fingerprint. Mixed event types sharing one booking reference are treated as lifecycle evidence, not duplicates.',
         },
         {
           id: 'auto-process-async-catch',
-          severity: 'high',
           file: 'server/pms-service.mjs',
-          summary: 'Auto-processing should await approval helpers inside the try block so errors are persisted on the event rather than aborting sync.',
+          summary: 'Auto-processing awaits approval helpers inside the protected try/catch and persists redacted errors plus manager-review evidence.',
         },
       ],
       findings,
@@ -363,8 +358,7 @@ async function main() {
         channelReferences: 'fingerprinted',
       },
       nextActions: [
-        'Run npm run booking-email:deep-scan -- --limit=500 in the target environment.',
-        'Fix parser coverage and duplicate-scope defects in server/pms-service.mjs, then rerun with --strict.',
+        'Review high-severity data-quality findings, then add provider fixtures only for evidence-backed template gaps.',
         'Run npm run booking-email:reprocess -- --confirm for NEEDS_REVIEW and ERROR events after parser changes; do not auto-approve historical events without staff review.',
       ],
     }

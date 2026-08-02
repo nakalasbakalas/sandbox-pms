@@ -1075,26 +1075,40 @@ function providerBookingEmailDetails(input, combined, rawText) {
       skip: /^(?:หมายเลขการจอง)$/i,
       stop: /^(?:customer|guest|check[\s-]?in|room type)\b/i,
       accept: (candidate) => /^[A-Z0-9][A-Z0-9-]{3,}$/i.test(candidate),
-    })
+    }) || firstMatch([
+      /\bbooking\s+id\b(?:\s+หมายเลขการจอง)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{3,})\b/i,
+    ], combined)
     const firstName = valueAfterBookingEmailLabel(lines, /^customer\s+first\s+name\s*[:：]?$/i, {
       skip: /^(?:ชื่อลูกค้า)$/i,
       stop: /^customer\s+last\s+name\b/i,
       accept: (candidate) => /^[\p{L}][\p{L} .'-]{1,80}$/u.test(candidate),
-    })
+    }) || firstMatch([
+      /\bcustomer\s+first\s+name\b\s*(?:ชื่อลูกค้า\s*)?([\p{L}][\p{L} .'-]{1,80}?)(?=\s+customer\s+last\s+name\b)/iu,
+    ], rawText)
     const lastName = valueAfterBookingEmailLabel(lines, /^customer\s+last\s+name\s*[:：]?$/i, {
       skip: /^(?:นามสกุลลูกค้า)$/i,
       stop: /^(?:country|nationality|check[\s-]?in)\b/i,
       accept: (candidate) => /^[\p{L}][\p{L} .'-]{1,80}$/u.test(candidate),
-    })
+    }) || firstMatch([
+      /\bcustomer\s+last\s+name\b\s*(?:นามสกุลลูกค้า\s*)?([\p{L}][\p{L} .'-]{1,80}?)(?=\s+(?:country\s+of\s+residence|nationality|check[\s-]?in)\b)/iu,
+    ], rawText)
     details.guestName = normalizeNullableString([firstName, lastName].filter(Boolean).join(' '))
     details.checkIn = parseProviderDateFromLines(lines, [/^check[\s-]?in\s*[:：]?$/i])
+      || normalizeProviderBookingDate(firstMatch([
+        /\bcheck[\s-]?in\b\s*(?:เช็คอิน\s*)?([^\r\n]{3,40}?)(?=\s+check[\s-]?out\b)/iu,
+      ], rawText))
     details.checkOut = parseProviderDateFromLines(lines, [/^check[\s-]?out\s*[:：]?$/i])
+      || normalizeProviderBookingDate(firstMatch([
+        /\bcheck[\s-]?out\b\s*(?:เช็คเอาท์\s*)?([^\r\n]{3,40}?)(?=\s+room\s+type\b)/iu,
+      ], rawText))
     details.externalRoomType = valueAfterBookingEmailLabel(lines, /^room\s+type\s*[:：]?$/i, {
       maxScan: 16,
       skip: /^(?:ประเภทห้อง|no\.? of rooms?|จำนวนห้องพัก|occupancy|ผู้เข้าพัก|no\.? of extra bed|จำนวนเตียงเสริม\s*[:：]?|\d+|\d+\s+(?:adult|adults|child|children))$/i,
       stop: /^(?:benefits|payment|cancellation|special request|booking conditions?)\b/i,
       accept: (candidate) => /\b(?:double|twin|bed|room|suite|superior|deluxe|standard|family)\b/i.test(candidate),
-    })
+    }) || firstMatch([
+      /\bno\.?\s+of\s+extra\s+bed\b\s*(?:จำนวนเตียงเสริม\s*[:：]?\s*)?(.{2,120}?)(?=\s+\d+\s+\d+\s+(?:adult|adults|child|children)\b|\s+ชื่อแผนราคา\s*[:：]|\s+benefits\s+included\b)/iu,
+    ], rawText)
   }
 
   if (provider === 'TRIP') {
@@ -1278,12 +1292,14 @@ export function parseBookingEmailDetails(input = {}) {
     || (/\b(payment received|paid in full|fully paid|prepaid)\b/i.test(combined) ? 'PAID' : /\bdeposit\b/i.test(combined) ? 'DEPOSIT' : null)
   const newBookingSignal = /\b(new booking|booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\b/i.test(combined)
     || /\b(?:booking|reservation)(?:\s+(?:no(?:\.|\b)|number|id)\s*[:#-]?\s*#?[A-Z0-9-]+#?)?\s+(?:accepted|confirmed)\b/i.test(combined)
-  const explicitCancellationSignal = /\b(?:booking|reservation)\s+(?:(?:has|had)\s+been\s+|is\s+|was\s+)?(?:cancelled|canceled)\b|\b(?:cancelled|canceled)\s+(?:booking|reservation)\b|\b(?:booking|reservation)\s+cancellation\b|\bcancellation\s+(?:confirmation|confirmed|notification|notice|of|for)\b/i
+  const explicitCancellationSignal = /\b(?:booking|reservation)(?:\s+(?:id|no\.?|number|reference|ref)\s*[:#-]?\s*#?[A-Z0-9-]+#?)?\s*(?:-|:)?\s*(?:(?:has|had)\s+been\s+|is\s+|was\s+)?(?:cancelled|canceled)\b|\b(?:cancelled|canceled)\s+(?:booking|reservation)\b|\b(?:booking|reservation)\s+cancellation\b|\bcancellation\s+(?:confirmation|confirmed|notification|notice|of|for)\b/i
   const cancellationStatusSignal = /\b(?:booking|reservation)(?:\s+status)?\s*[:#-]\s*(?:cancelled|canceled)\b/i
   const cancellationSignal = explicitCancellationSignal.test(subject)
     || explicitCancellationSignal.test(rawText)
     || cancellationStatusSignal.test(rawText)
-  const modificationSignal = /\b(modification|modified|changed booking|booking changed|updated booking|updated reservation|reservation updated|amended|amendment|alteration|revised)\b/i.test(combined)
+  const modificationSignal = /\b(modification|modified|changed booking|booking changed|updated booking|updated reservation|reservation updated|amended|amendment|alteration|revised)\b/i.test(subject)
+    || /แก้ไขการจอง/u.test(subject)
+    || /\b(?:booking|reservation)\s+(?:(?:has|had)\s+been\s+|is\s+|was\s+)?(?:modified|changed|updated|amended|revised)\b|\b(?:modified|changed|updated|amended|revised)\s+(?:booking|reservation)\b/i.test(rawText)
   const paymentSignal = /\b(payment received|payment notice|paid in full|fully paid|deposit received|deposit paid|transfer received|amount received|prepaid)\b/i.test(combined)
   const guestMessageSignal = /\b(guest message|message from guest|guest request|guest question|guest enquiry|special request from guest|question from guest)\b/i.test(combined)
   const nonBookingOperationalSignal = hasNonBookingOperationalSignal(combined)
@@ -4165,7 +4181,6 @@ export async function reprocessBookingEmailEvent(prisma, eventId, actor) {
       subject: event.subject,
       receivedAt: event.receivedAt,
       rawText: event.rawText,
-      parsedDetails: event.parsedDetails,
     }, event.id)
     const updated = await tx.bookingEmailEvent.update({
       where: { id: event.id },
