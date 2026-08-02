@@ -154,6 +154,7 @@ export function ServerChannelsView() {
   const [exportFileName, setExportFileName] = useState('')
   const [configurationReason, setConfigurationReason] = useState('')
   const [configurationIdempotencyKey, setConfigurationIdempotencyKey] = useState('')
+  const [configurationError, setConfigurationError] = useState<string | null>(null)
   const [issuedFeedUrls, setIssuedFeedUrls] = useState<Partial<Record<ChannelProvider, string>>>({})
   const [saving, setSaving] = useState(false)
   const mutationAttemptKeys = useRef(new Map<string, string>())
@@ -247,6 +248,7 @@ export function ServerChannelsView() {
     setConfiguringChannel(channel)
     setExportFileName(channel.persisted?.exportFileName || `${channel.key}-sandbox-hotel-blocks.ics`)
     setConfigurationReason('')
+    setConfigurationError(null)
     setConfigurationIdempotencyKey(createPmsIdempotencyKey(`ical-${channel.key}`))
   }
 
@@ -261,6 +263,7 @@ export function ServerChannelsView() {
       return
     }
     setSaving(true)
+    setConfigurationError(null)
     try {
       const payload = await pmsApi<{ ok: true; data: ServerIcalChannel }>(
         `/api/channels/ical/${providerPath(configuringChannel.provider)}`,
@@ -282,7 +285,9 @@ export function ServerChannelsView() {
       toast.success(`${configuringChannel.name} iCal configuration saved to the PMS.`)
       await load()
     } catch (error) {
-      toast.error(safeError(error, 'The server did not save this iCal configuration.'))
+      const message = safeError(error, 'The server did not save this iCal configuration.')
+      setConfigurationError(message)
+      toast.error(message)
     } finally {
       setSaving(false)
     }
@@ -769,7 +774,7 @@ export function ServerChannelsView() {
         </div>
       </ScrollArea>
 
-      <Dialog open={Boolean(configuringChannel)} onOpenChange={(open) => { if (!open) setConfiguringChannel(null) }}>
+      <Dialog open={Boolean(configuringChannel)} onOpenChange={(open) => { if (!open) { setConfiguringChannel(null); setConfigurationError(null) } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{configuringChannel?.name} iCal configuration</DialogTitle>
@@ -786,6 +791,9 @@ export function ServerChannelsView() {
               <Label htmlFor="channel-configuration-reason">Operational reason</Label>
               <Input id="channel-configuration-reason" value={configurationReason} onChange={(event) => setConfigurationReason(event.target.value)} />
             </div>
+            {configurationError && (
+              <p role="alert" className="text-sm text-destructive">{configurationError}</p>
+            )}
           </div>
           <DialogFooter className="gap-2">
             {configuringChannel?.persisted?.exportTokenConfigured && (

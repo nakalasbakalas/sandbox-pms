@@ -223,3 +223,5 @@ Agoda's Gmail text representation may collapse the visual bilingual table to one
 Trip.com may likewise collapse `Guest Name` directly before `Room Type`; the guest capture terminates at that provider label and then normalizes the provider's family/given slash form. This remains email extraction evidence, not OTA API identity proof.
 
 Channel Manager may prefill an audited room-mapping draft from PII-free observed-label aggregates. An authorized manager must still verify the exact provider label and choose the property-owned PMS room type/room ids. The suggestion endpoint never creates or activates a mapping and never performs a provider write. Real OTA inventory/rate synchronization remains separately disabled and provider-unproven.
+
+When a manual iCal channel shell cannot be persisted, the manager UI keeps the sanitized server failure visible and retains the unchanged request's idempotency key. Operators must remedy the reported prerequisite through the authenticated service boundary and must not insert channel or mapping rows directly.

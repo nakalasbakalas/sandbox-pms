@@ -23,6 +23,8 @@ assert.match(serverSource, /hasPermission\('manage:channels'\)/, 'server channel
 assert.match(serverSource, /Rate push, real-time inventory sync, provider performance, sync logs, and browser reservation imports are unavailable/, 'unsupported provider functions are capability-gated instead of simulated')
 assert.match(serverSource, /reason: configurationReason\.trim\(\)/, 'iCal configuration requires an operational reason')
 assert.match(serverSource, /headers: \{ 'x-idempotency-key': configurationIdempotencyKey \}/, 'iCal configuration retains one retry key per visible intent')
+assert.match(serverSource, /setConfigurationError\(message\)/, 'failed iCal configuration retains the sanitized API error in dialog state')
+assert.match(serverSource, /<p role="alert" className="text-sm text-destructive">\{configurationError\}<\/p>/, 'failed iCal configuration renders a persistent inline alert')
 assert.ok(
   [...serverSource.matchAll(/headers: \{ 'x-idempotency-key': idempotencyKeyFor\(intent\) \}/g)].length >= 4,
   'disable and every mapping mutation send retained idempotency keys',

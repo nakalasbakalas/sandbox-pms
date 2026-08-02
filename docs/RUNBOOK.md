@@ -427,6 +427,7 @@ The server-mode Channel Manager is an authority boundary, not a channel manager 
 5. Initial issue and rotation require `x-idempotency-key`. Retain the same key when retrying an uncertain request: the same intent replays the original URL without a second audit event while that token is still current or in grace. Changed intent, disabled channels, and expired/superseded token attempts return `409`. A new export URL is visible only on issue/rotation. Prior hashed tokens remain valid for 15 minutes; update the provider, verify the new feed, then allow the grace window to expire.
 6. Configuration/removal reasons are JSON-body fields and must contain no credentials, URLs, email addresses, or phone numbers.
 7. Apply migration `20260719103000_channel_mutation_idempotency` before deploying this API/UI pair. Run `npm.cmd run test:channels-server-authority` after changing channel UI, iCal configuration, mapping validation, idempotency, or capability wording.
+8. If `Save to PMS` fails, record the inline sanitized error shown in the still-open dialog. Correct the stated prerequisite and retry the unchanged form so the original idempotency key is reused; do not create a channel or mapping directly in PostgreSQL.
 
 Rate push, rate parity, real-time inventory, provider sync logs/performance, and browser iCal reservation imports are demo-only. Do not use them as server, staging, or provider evidence.
 
