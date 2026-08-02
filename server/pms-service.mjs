@@ -34,6 +34,11 @@ import {
   sumMoneySatang,
 } from './money.mjs'
 import { approvedBookingEmailProviderQuery } from '../scripts/booking-email-query.mjs'
+import {
+  bookingEmailWorkspaceAnalysisKey,
+  bookingEmailWorkspaceJsonStatus,
+  fetchBookingEmailWorkspaceAnalyses,
+} from './booking-email-workspace-json.mjs'
 
 const reservationInclude = {
   guest: true,
@@ -731,13 +736,16 @@ function bookingEmailTrustedSenderDomains(env = process.env) {
 export function bookingEmailAutomationPolicy(env = process.env) {
   const requested = bookingEmailEnvFlag(env.BOOKING_EMAIL_AUTONOMY_ENABLED)
   const trustedSenderDomains = bookingEmailTrustedSenderDomains(env)
-  const configured = requested && trustedSenderDomains.length > 0
+  const workspaceJson = bookingEmailWorkspaceJsonStatus(env)
+  const workspaceReady = !workspaceJson.requireForAutonomy || workspaceJson.configured
+  const configured = requested && trustedSenderDomains.length > 0 && workspaceReady
   const requestedConfidence = Number(env.BOOKING_EMAIL_AUTONOMY_MIN_CONFIDENCE)
   const minimumConfidence = Number.isFinite(requestedConfidence)
     ? Math.min(0.99, Math.max(BOOKING_EMAIL_MIN_AUTONOMOUS_CONFIDENCE, requestedConfidence))
     : BOOKING_EMAIL_MIN_AUTONOMOUS_CONFIDENCE
   const missing = []
   if (requested && trustedSenderDomains.length === 0) missing.push('BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS')
+  if (requested && workspaceJson.requireForAutonomy && !workspaceJson.configured) missing.push(...workspaceJson.missing)
 
   return {
     version: BOOKING_EMAIL_AUTONOMY_VERSION,
@@ -748,6 +756,8 @@ export function bookingEmailAutomationPolicy(env = process.env) {
     notifyManager: bookingEmailEnvFlag(env.BOOKING_EMAIL_NOTIFY_MANAGER, true),
     requireAuthenticationResults: bookingEmailEnvFlag(env.BOOKING_EMAIL_REQUIRE_AUTHENTICATION_RESULTS, true),
     requireCorroboration: bookingEmailEnvFlag(env.BOOKING_EMAIL_REQUIRE_CORROBORATION, false),
+    requireWorkspaceJson: workspaceJson.requireForAutonomy,
+    workspaceJsonConfigured: workspaceJson.configured,
     minimumConfidence,
     trustedSenderDomains,
     missing,
@@ -1066,7 +1076,8 @@ function parseProviderDateRange(text, labels) {
 }
 
 function providerBookingEmailDetails(input, combined, rawText) {
-  const provider = normalizeBookingSourceFromEmail(input.sender, input.sourceName)
+  const providerIdentity = `${input.sender || ''} ${input.sourceName || ''} ${input.subject || ''}`.toLowerCase()
+  const provider = providerIdentity.includes('littlehotelier') ? 'LITTLE_HOTELIER' : normalizeBookingSourceFromEmail(input.sender, input.sourceName)
   const lines = bookingEmailTextLines(rawText)
   const details = { provider }
 
@@ -1136,6 +1147,31 @@ function providerBookingEmailDetails(input, combined, rawText) {
     details.externalRoomType = normalizeNullableString(roomLine
       ?.replace(/\s+(?:flexible-until|non-refundable|room only|breakfast|prepay|pay at property)\b.*$/i, '')
       .trim())
+  }
+
+  if (provider === 'LITTLE_HOTELIER') {
+    details.channelRef = valueAfterBookingEmailLabel(lines, /^reference\s+number\s*[:：]?$/i, {
+      maxScan: 3,
+      stop: /^check\s+in\s+date\b/i,
+      accept: (candidate) => /^LH[A-Z0-9-]{6,}$/i.test(candidate),
+    }) || firstMatch([/\((LH[A-Z0-9-]{6,})\)/i], combined)
+    details.guestName = firstMatch([
+      /\[LittleHotelier\]\s+Booking\s+For\s+(.{2,120}?)\s+\(LH[A-Z0-9-]{6,}\)/iu,
+      /\[LittleHotelier\]\s+(?:Cancellation|การยกเลิก)\s+(?:For|สำหรับ)\s+(.{2,120}?)\s+\(LH[A-Z0-9-]{6,}\)/iu,
+    ], String(input.subject || ''))
+    details.checkIn = parseProviderDateFromLines(lines, [/^check\s+in\s+date\s*[:：]?$/i])
+    details.checkOut = parseProviderDateFromLines(lines, [/^check\s+out\s+date\s*[:：]?$/i])
+    details.externalRoomType = valueAfterBookingEmailLabel(lines, /^room\s*[:：]?/i, {
+      maxScan: 4,
+      stop: /^(?:date|rate|inclusion|booking summary|total)\b/i,
+      accept: (candidate) => /\b(?:double|twin|bed|room|suite|superior|deluxe|standard|family)\b/i.test(candidate),
+    })
+    const total = valueAfterBookingEmailLabel(lines, /^total\s*[:：]?$/i, {
+      maxScan: 3,
+      accept: (candidate) => /(?:฿|THB)?\s*[0-9][0-9,]*(?:\.\d{1,2})?/i.test(candidate),
+    })
+    details.amount = normalizeBookingEmailAmount(String(total || '').replace(/[^0-9.,]/g, '').replace(/,/g, ''))
+    details.currency = details.amount ? 'THB' : undefined
   }
 
   if (provider === 'BOOKING_COM') {
@@ -1286,7 +1322,9 @@ export function parseBookingEmailDetails(input = {}) {
   const roomType = normalizeRoomTypeCode(input.roomType || parsedInput.roomType)
     || normalizeRoomTypeCode(externalRoomType)
     || (/\bdouble\b/i.test(combined) ? 'DOUBLE' : /\btwin\b/i.test(combined) ? 'TWIN' : undefined)
-  const money = parseMoney(combined)
+  const money = providerDetails.amount
+    ? { amount: providerDetails.amount, currency: providerDetails.currency || 'THB' }
+    : parseMoney(combined)
   const amount = normalizeBookingEmailAmount(input.amount ?? parsedInput.amount ?? money.amount)
   const adults = Number(input.adults ?? parsedInput.adults ?? combined.match(/\b(?:adults?)\s*[:#-]?\s*(\d+)/i)?.[1] ?? 1)
   const children = Number(input.children ?? parsedInput.children ?? combined.match(/\b(?:children|kids?)\s*[:#-]?\s*(\d+)/i)?.[1] ?? 0)
@@ -1297,6 +1335,7 @@ export function parseBookingEmailDetails(input = {}) {
   const explicitCancellationSignal = /\b(?:booking|reservation)(?:\s+(?:id|no\.?|number|reference|ref)\s*[:#-]?\s*#?[A-Z0-9-]+#?)?\s*(?:-|:)?\s*(?:(?:has|had)\s+been\s+|is\s+|was\s+)?(?:cancelled|canceled)\b|\b(?:cancelled|canceled)\s+(?:booking|reservation)\b|\b(?:booking|reservation)\s+cancellation\b|\bcancellation\s+(?:confirmation|confirmed|notification|notice|of|for)\b/i
   const cancellationStatusSignal = /\b(?:booking|reservation)(?:\s+status)?\s*[:#-]\s*(?:cancelled|canceled)\b/i
   const cancellationSignal = explicitCancellationSignal.test(subject)
+    || /การยกเลิก/u.test(subject)
     || explicitCancellationSignal.test(rawText)
     || cancellationStatusSignal.test(rawText)
   const modificationSignal = /\b(modification|modified|changed booking|booking changed|updated booking|updated reservation|reservation updated|amended|amendment|alteration|revised)\b/i.test(subject)
@@ -1677,6 +1716,41 @@ function bookingEmailCorroborationValue(field, value) {
   return normalizedBookingEmailMatchValue(value)
 }
 
+function bookingEmailWorkspaceAlignment(parsed, analysis) {
+  const candidate = safeJsonObject(analysis)
+  const candidateDetails = safeJsonObject(candidate.details)
+  if (candidate.schemaVersion !== 'workspace-booking-analysis-v1') {
+    return { present: false, aligned: false, matchedFields: [], conflictingFields: [] }
+  }
+  const matchedFields = []
+  const conflictingFields = []
+  const compare = (field, left, right) => {
+    const normalizedLeft = bookingEmailCorroborationValue(field, left)
+    const normalizedRight = bookingEmailCorroborationValue(field, right)
+    if (!normalizedLeft || !normalizedRight) return
+    if (normalizedLeft === normalizedRight) matchedFields.push(field)
+    else conflictingFields.push(field)
+  }
+  compare('channelRef', parsed.channelRef, candidate.channelRef)
+  compare('eventType', parsed.eventType, candidate.eventType)
+  compare('guestName', parsed.details.guestName, candidateDetails.guestName)
+  compare('checkIn', parsed.details.checkIn, candidateDetails.checkIn)
+  compare('checkOut', parsed.details.checkOut, candidateDetails.checkOut)
+  compare('externalRoomType', parsed.details.externalRoomType || parsed.details.roomType, candidateDetails.externalRoomType)
+  compare('amount', parsed.details.amount, candidateDetails.amount)
+  const requiredMatches = ['channelRef', 'eventType', 'checkIn', 'checkOut', 'externalRoomType']
+  const aligned = conflictingFields.length === 0 && requiredMatches.every((field) => matchedFields.includes(field))
+  return {
+    present: true,
+    aligned,
+    matchedFields,
+    conflictingFields,
+    fileId: normalizeNullableString(candidate.fileId),
+    modifiedTime: normalizeNullableString(candidate.modifiedTime),
+    ignoredSelfAssessment: Boolean(candidate.ignoredSelfAssessment),
+  }
+}
+
 async function findBookingEmailCorroboration(tx, propertyId, parsed, eventId) {
   if (!parsed.channelRef || parsed.eventType === 'UNKNOWN') return { count: 0, eventIds: [], conflicts: [] }
   const candidates = await tx.bookingEmailEvent.findMany({
@@ -1759,13 +1833,21 @@ async function buildBookingEmailEventData(tx, source, input, existingEventId = u
   const parsed = parseBookingEmailDetails(input)
   const duplicateEvent = await findDuplicateBookingEmailEvent(tx, source.id, parsed, input, existingEventId)
   const corroboration = await findBookingEmailCorroboration(tx, source.propertyId, parsed, existingEventId)
+  const workspaceAlignment = bookingEmailWorkspaceAlignment(parsed, input.workspaceAnalysis)
   const sourceMessageId = normalizeNullableString(input.sourceMessageId || input.sourceEmailId || input.gmailMessageId || input.messageId)
   const status = normalizeBookingEmailStatus(input.status, 'NEEDS_REVIEW')
-  const confidence = Math.min(0.99, roundMoney(Number(input.confidence ?? parsed.confidence) + Math.min(0.04, corroboration.count * 0.02)))
+  const confidence = Math.min(0.99, roundMoney(
+    Number(input.confidence ?? parsed.confidence)
+    + Math.min(0.04, corroboration.count * 0.02)
+    + (workspaceAlignment.aligned ? 0.02 : 0),
+  ))
   const reviewReason = [
     normalizeNullableString(input.reviewReason),
     parsed.reviewReason,
     corroboration.conflicts.length > 0 ? `Conflicting duplicate evidence for ${corroboration.conflicts.join(', ')}.` : null,
+    workspaceAlignment.present && workspaceAlignment.conflictingFields.length > 0
+      ? `Workspace JSON conflicts with the source email for ${workspaceAlignment.conflictingFields.join(', ')}.`
+      : null,
   ].filter(Boolean).join(' ') || null
 
   return {
@@ -1797,7 +1879,18 @@ async function buildBookingEmailEventData(tx, source, input, existingEventId = u
     completedAction: normalizeNullableString(input.completedAction),
     reviewReason,
     errorReason: normalizeNullableString(input.errorReason),
-    parsedDetails: parsed.details,
+    parsedDetails: {
+      ...parsed.details,
+      ...(workspaceAlignment.present ? { workspaceEvidence: {
+        schemaVersion: 'workspace-booking-analysis-v1',
+        aligned: workspaceAlignment.aligned,
+        matchedFields: workspaceAlignment.matchedFields,
+        conflictingFields: workspaceAlignment.conflictingFields,
+        fileId: workspaceAlignment.fileId,
+        modifiedTime: workspaceAlignment.modifiedTime,
+        ignoredSelfAssessment: workspaceAlignment.ignoredSelfAssessment,
+      } } : {}),
+    },
     automationDecision: {
       version: BOOKING_EMAIL_AUTONOMY_VERSION,
       stage: 'EXTRACTED',
@@ -1805,6 +1898,12 @@ async function buildBookingEmailEventData(tx, source, input, existingEventId = u
       corroborationCount: corroboration.count,
       corroboratingEventIds: corroboration.eventIds,
       conflictingFields: corroboration.conflicts,
+      workspaceJson: {
+        present: workspaceAlignment.present,
+        aligned: workspaceAlignment.aligned,
+        matchedFields: workspaceAlignment.matchedFields,
+        conflictingFields: workspaceAlignment.conflictingFields,
+      },
       duplicateOfEventId: duplicateEvent?.id || null,
       evaluatedAt: new Date().toISOString(),
     },
@@ -3565,6 +3664,7 @@ export async function getBookingEmailStatus(prisma, actor) {
     const enabledSources = sources.filter((source) => source.enabled)
     const gmailEnabled = enabledSources.some((source) => source.provider === 'GMAIL')
     const gmailCredentials = bookingEmailGmailCredentialStatus()
+    const workspaceJson = bookingEmailWorkspaceJsonStatus()
     const automation = bookingEmailAutomationPolicy()
     const configured = enabledSources.length > 0 && (!gmailEnabled || gmailCredentials.configured)
     const lastSyncAt = sources.map((source) => source.lastSyncAt).filter(Boolean).sort((a, b) => b - a)[0]
@@ -3604,6 +3704,14 @@ export async function getBookingEmailStatus(prisma, actor) {
             },
           },
       lastSyncAt: isoOrUndefined(lastSyncAt),
+      workspaceJson: {
+        requested: workspaceJson.requested,
+        configured: workspaceJson.configured,
+        folderConfigured: workspaceJson.folderConfigured,
+        driveScopeConfigured: workspaceJson.driveScopeConfigured,
+        requireForAutonomy: workspaceJson.requireForAutonomy,
+        missing: workspaceJson.missing,
+      },
       needsReview,
       processedToday,
       errors,
@@ -3617,6 +3725,8 @@ export async function getBookingEmailStatus(prisma, actor) {
         notifyManager: automation.notifyManager,
         requireAuthenticationResults: automation.requireAuthenticationResults,
         requireCorroboration: automation.requireCorroboration,
+        requireWorkspaceJson: automation.requireWorkspaceJson,
+        workspaceJsonConfigured: automation.workspaceJsonConfigured,
         minimumConfidence: automation.minimumConfidence,
         trustedSenderDomainCount: automation.trustedSenderDomains.length,
         missing: automation.missing,
@@ -3819,6 +3929,9 @@ async function autoProcessBookingEmailEvent(tx, event, source, actor, options = 
   if (policy.requireCorroboration && Number(extractionDecision.corroborationCount || 0) < 1) {
     blockers.push('A second consistent provider email is required by the current corroboration policy.')
   }
+  if (policy.requireWorkspaceJson && safeJsonObject(extractionDecision.workspaceJson).aligned !== true) {
+    blockers.push('An aligned Google Workspace booking JSON record is required by the current autonomy policy.')
+  }
   if (!policy.autoAssignRooms) blockers.push('Autonomous room assignment is disabled.')
 
   try {
@@ -3924,6 +4037,32 @@ export async function syncBookingEmail(prisma, input = {}, actor, options = {}) 
         data: { lastError: redactedCredentialMessage(error instanceof Error ? error.message : String(error)) },
       })
       throw error
+    }
+  }
+
+  if (!suppliedEvents && importedEvents.length > 0) {
+    const targets = importedEvents.map((event) => {
+      const parsed = parseBookingEmailDetails(event)
+      return { channelRef: parsed.channelRef, eventType: parsed.eventType }
+    })
+    const workspaceStatus = bookingEmailWorkspaceJsonStatus(options.env || process.env)
+    if (workspaceStatus.configured) {
+      const accessToken = await resolveBookingEmailGmailAccessToken({
+        env: options.env || process.env,
+        fetchImpl: options.fetchImpl || fetch,
+      })
+      const workspaceResult = await fetchBookingEmailWorkspaceAnalyses(targets, {
+        env: options.env || process.env,
+        fetchImpl: options.fetchImpl || fetch,
+        accessToken,
+      })
+      importedEvents = importedEvents.map((event, index) => ({
+        ...event,
+        workspaceAnalysis: workspaceResult.analyses[bookingEmailWorkspaceAnalysisKey(
+          targets[index].channelRef,
+          targets[index].eventType,
+        )],
+      }))
     }
   }
 

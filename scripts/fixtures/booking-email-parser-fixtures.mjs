@@ -215,6 +215,26 @@ export const bookingEmailParserFixtures = [
     },
   },
   {
+    name: 'LittleHotelier new booking template',
+    input: {
+      sender: 'noreply@app.littlehotelier.com',
+      sourceName: 'Primary booking mailbox',
+      subject: '[LittleHotelier] Booking For Example Guest (LH26000000000000), SANDBOX HOTEL, Checking In: 02 Aug 2026',
+      rawText: 'Dear Customer\nYou have received a new booking through LittleHotelier\'s Extranet channel.\nReference Number:\nLH26000000000000\nCheck In Date:\n02 Aug 2026\nCheck Out Date:\n03 Aug 2026\nGuest Comments:\nRoom: Standard Twin (Room Only)\n1 Adults, 0 Children\nBooking Summary\nTotal:\n฿790\nPrices are in THB',
+    },
+    expected: {
+      eventType: 'NEW_BOOKING',
+      channelRef: 'LH26000000000000',
+      guestName: 'Example Guest',
+      checkIn: '2026-08-02',
+      checkOut: '2026-08-03',
+      roomType: 'TWIN',
+      externalRoomType: 'Standard Twin (Room Only)',
+      amount: 790,
+      paymentStatus: undefined,
+    },
+  },
+  {
     name: 'cancellation template',
     input: {
       subject: 'Reservation cancelled ASC-9001',

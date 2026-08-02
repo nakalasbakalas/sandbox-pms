@@ -14,6 +14,7 @@ const RENDER_API_BASE = 'https://api.render.com/v1'
 
 const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send'
+const DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
 
 function hasFlag(args, name) {
   return args.includes(name)
@@ -122,6 +123,7 @@ function redirectUri(args, env = process.env, clientConfig = {}) {
 export function gmailOauthScopes(args = []) {
   const scopes = [GMAIL_READONLY_SCOPE]
   if (hasFlag(args, '--include-send-scope')) scopes.push(GMAIL_SEND_SCOPE)
+  if (hasFlag(args, '--include-drive-readonly-scope')) scopes.push(DRIVE_READONLY_SCOPE)
   return scopes
 }
 

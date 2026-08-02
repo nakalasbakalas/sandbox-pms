@@ -53,6 +53,12 @@ services:
         value: true
       - key: BOOKING_EMAIL_REQUIRE_CORROBORATION
         value: false
+      - key: BOOKING_EMAIL_WORKSPACE_JSON_ENABLED
+        value: false
+      - key: BOOKING_EMAIL_WORKSPACE_JSON_FOLDER_ID
+        sync: false
+      - key: BOOKING_EMAIL_REQUIRE_WORKSPACE_JSON
+        value: true
       - key: BOOKING_EMAIL_NOTIFY_MANAGER
         value: true
       - key: CHANNEL_MANAGER_PROVIDER
@@ -64,6 +70,8 @@ services:
       - key: BOOKING_EMAIL_GMAIL_CLIENT_SECRET
         sync: false
       - key: BOOKING_EMAIL_GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_SCOPES
         sync: false
       - key: INITIAL_SETUP_TOKEN
         sync: false
