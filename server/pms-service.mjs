@@ -1089,7 +1089,11 @@ export function parseBookingEmailDetails(input = {}) {
   const paymentStatus = normalizeNullableString(input.paymentStatus || parsedInput.paymentStatus)
     || (/\b(payment received|paid in full|fully paid|prepaid)\b/i.test(combined) ? 'PAID' : /\bdeposit\b/i.test(combined) ? 'DEPOSIT' : null)
   const newBookingSignal = /\b(new booking|booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\b/i.test(combined)
-  const cancellationSignal = /\b(cancelled|canceled|cancellation|booking cancelled|reservation cancelled)\b/i.test(combined)
+  const explicitCancellationSignal = /\b(?:booking|reservation)\s+(?:(?:has|had)\s+been\s+|is\s+|was\s+)?(?:cancelled|canceled)\b|\b(?:cancelled|canceled)\s+(?:booking|reservation)\b|\b(?:booking|reservation)\s+cancellation\b|\bcancellation\s+(?:confirmation|confirmed|notification|notice|of|for)\b/i
+  const cancellationStatusSignal = /\b(?:booking|reservation)(?:\s+status)?\s*[:#-]\s*(?:cancelled|canceled)\b/i
+  const cancellationSignal = explicitCancellationSignal.test(subject)
+    || explicitCancellationSignal.test(rawText)
+    || cancellationStatusSignal.test(rawText)
   const modificationSignal = /\b(modification|modified|changed booking|booking changed|updated booking|updated reservation|reservation updated|amended|amendment|alteration|revised)\b/i.test(combined)
   const paymentSignal = /\b(payment received|payment notice|paid in full|fully paid|deposit received|deposit paid|transfer received|amount received|prepaid)\b/i.test(combined)
   const guestMessageSignal = /\b(guest message|message from guest|guest request|guest question|guest enquiry|special request from guest|question from guest)\b/i.test(combined)
