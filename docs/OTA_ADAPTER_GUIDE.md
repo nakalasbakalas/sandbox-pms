@@ -220,4 +220,6 @@ Booking.com, Agoda, and Trip.com reservation emails may be used as inbound PMS e
 
 Agoda's Gmail text representation may collapse the visual bilingual table to one line. The deterministic parser bounds values between known adjacent provider labels, treats `Booking ID ... - CANCELLED` as cancellation evidence, and does not treat policy boilerplate as modification intent. Reprocess regenerates rather than inherits external room labels before they enter mapping suggestions.
 
+Trip.com may likewise collapse `Guest Name` directly before `Room Type`; the guest capture terminates at that provider label and then normalizes the provider's family/given slash form. This remains email extraction evidence, not OTA API identity proof.
+
 Channel Manager may prefill an audited room-mapping draft from PII-free observed-label aggregates. An authorized manager must still verify the exact provider label and choose the property-owned PMS room type/room ids. The suggestion endpoint never creates or activates a mapping and never performs a provider write. Real OTA inventory/rate synchronization remains separately disabled and provider-unproven.

@@ -145,6 +145,25 @@ export const bookingEmailParserFixtures = [
     },
   },
   {
+    name: 'Trip.com collapsed accepted booking template',
+    input: {
+      sender: 'reservations@trip.com',
+      subject: 'Booking no. #TRIP-DEMO-9012# accepted',
+      rawText: 'Guest Name: Example/Riley Room Type:Superior Double Room Flexible-until 3 days before arrival-Room Only-Prepay Bed type:1 Double bed Staying period:Sep 12, 2026 - Sep 14, 2026 | 2 night(s) Guests:2 adults',
+    },
+    expected: {
+      eventType: 'NEW_BOOKING',
+      channelRef: 'TRIP-DEMO-9012',
+      guestName: 'Riley Example',
+      checkIn: '2026-09-12',
+      checkOut: '2026-09-14',
+      roomType: 'DOUBLE',
+      externalRoomType: 'Superior Double Room',
+      amount: undefined,
+      paymentStatus: undefined,
+    },
+  },
+  {
     name: 'new booking template',
     input: {
       subject: 'New booking confirmed LH-ABCD1234',
