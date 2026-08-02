@@ -32,6 +32,8 @@ Booking-email historical backfill is not an OTA adapter and is not live OTA scra
 
 Provider templates often embed cancellation-policy, free-cancellation, and fee terms in booking confirmations. Those terms are not cancellation evidence; the parser requires an explicit booking/reservation cancellation phrase, notification, or status.
 
+Provider account and reference numbers can appear beside currency labels. Values outside the PMS exact-money compatibility range are not amounts and are omitted rather than coerced; the event remains review-gated.
+
 The HTTP sync endpoint must not be used as an alternate OTA adapter. It rejects caller-supplied email events. Only the bounded backfill helper may opt into imported events, and only provider-verified imports can be evaluated by the prefix-gated Hotel Ops email-command bridge.
 
 Legacy PMS charge idempotency, including exact-satang extras posted from the authoritative Booking Board, is an internal financial-safety boundary, not evidence of an OTA payment or charge integration. Board cancellation/no-show and guest edits are PMS commands only; they do not acknowledge or mutate a provider. OTA-derived booking-email sources must still pass property ownership and staff review before a charge link or reservation change can be recorded.

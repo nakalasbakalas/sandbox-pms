@@ -75,6 +75,8 @@ Near-live sync defaults to the approved-provider sender query rather than `to:bo
 
 Before reprocessing a backlog, verify that a normal booking confirmation containing cancellation-policy or cancellation-fee boilerplate is classified as `NEW_BOOKING`; only an explicit booking/reservation cancellation phrase, notification, or status should classify as `CANCELLATION`.
 
+If a provider template contains a THB-like account/reference number outside the PMS money safety range, the parser must omit the amount and continue review-only reprocessing; never reduce, truncate, or manually coerce the value.
+
 Optional LINE Hotel Ops command intake:
 
 ```env

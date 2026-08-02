@@ -88,7 +88,7 @@ export const bookingEmailParserFixtures = [
     name: 'cancellation notification template',
     input: {
       subject: 'Cancellation notification for booking CAN-2468',
-      rawText: 'Guest name: Casey Morgan Booking reference: CAN-2468 Booking status: Canceled Check-in date: 2026-08-18 Check-out date: 2026-08-20 Room type: Twin Room',
+      rawText: 'Guest name: Casey Morgan Booking reference: CAN-2468 Booking status: Canceled Check-in date: 2026-08-18 Check-out date: 2026-08-20 Room type: Twin Room Provider account marker: THB 123456789012345',
     },
     expected: {
       eventType: 'CANCELLATION',

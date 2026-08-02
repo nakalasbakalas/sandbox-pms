@@ -946,6 +946,7 @@ function parseMoney(text) {
   if (!amountMatch) return {}
   const amount = Number(amountMatch.replace(/,/g, ''))
   if (!Number.isFinite(amount) || amount <= 0) return {}
+  if (bahtToSatang(amount, 'booking email amount') > MAX_SAFE_MONEY_SATANG) return {}
   return { amount, currency: 'THB' }
 }
 
