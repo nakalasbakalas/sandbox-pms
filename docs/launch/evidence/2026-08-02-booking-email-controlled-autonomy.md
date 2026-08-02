@@ -2,7 +2,7 @@
 
 Date: 2026-08-02 (Asia/Bangkok)
 
-Status: **local engineering candidate; not deployed, owner-approved, staging-proven, or provider-proven.**
+Status: **local engineering and disposable-database proven; not deployed, owner-approved, staging-proven, or production-enabled.**
 
 ## Scope implemented
 
@@ -20,7 +20,7 @@ Status: **local engineering candidate; not deployed, owner-approved, staging-pro
 
 ## Local validation
 
-Passed in the dirty local checkout on branch `codex/bookinginbox`, based on commit `15880efd64ad0c5f5a412546eeb8d81e95cd8d35`:
+Passed on branch `codex/bookinginbox` at commit `3a42123522a61e72b3a5e0ab1ba8a94d66f66bc6`:
 
 - `node --check server/pms-service.mjs`
 - `node --check server/ops-scheduler.mjs`
@@ -36,19 +36,24 @@ Passed in the dirty local checkout on branch `codex/bookinginbox`, based on comm
 - `npm.cmd run test:e2e`
 - `npm.cmd run render:validate`
 - `npm.cmd run launch:evidence`
+- guarded `npm.cmd run test:e2e:db` with separate local development and disposable E2E databases
+- `npm.cmd run launch:check`
 - `git diff --check`
 
-The non-database E2E run passed documentation-link, internal-worker-route, API-contract, and Playwright browser smoke checks.
+The guarded database suite passed booking workflow, release-foundation, cashier-projection, and autonomy isolation/idempotency coverage. The new migration applied successfully to both local development and disposable E2E databases. The full launch gate passed database doctor, migration status, lint, typecheck, unit/contract tests, non-database E2E, production build, and high-severity dependency audit.
 
-## Unverified boundary
+## Live read-only readiness inspection
 
-The new disposable-database acceptance cases cover automatic creation, mapped room assignment, Trip.com source preservation, decision evidence, manager notification, and replay idempotency. They were not executed in this pass because Docker Desktop was not running and PostgreSQL at `localhost:55432/sandbox_hotel_e2e` was unavailable. No database migration was applied to staging or production.
+- The Gmail connector profile is `booking@sandboxhotel.com`.
+- Bounded Gmail searches found current provider traffic from the `booking.com`, `agoda.com`, and `trip.com` domain families. No subjects, bodies, message ids, guest data, or payment data were recorded in this evidence.
+- Render CLI is authenticated to the intended workspace. Canonical production service `sandbox-hotel-pms-v43m` uses branch `main`, migration-only predeploy, and managed PostgreSQL `sandbox-hotel-pms-db-v43m`.
+- Redacted Render status reports the booking-specific Gmail OAuth refresh-token tuple ready. Values were not printed.
+- Production remains on the previous release. No production migration, deployment, source opt-in, or autonomous reservation write was performed at the time of this record.
 
 ## Required before activation
 
-1. Start the disposable PostgreSQL environment and pass the guarded database-mutating suite with `ALLOW_DB_E2E=true` and the non-production `E2E_DATABASE_URL`.
-2. Review and complete every live OTA room label mapping, including explicit operational room ids.
-3. Approve the exact provider sender domains and verify real Gmail `Authentication-Results` behavior.
-4. Perform manager/front-desk acceptance for the Booking Inbox, notifications, and booking-board room placement.
-5. Apply the migration through the normal reviewed release path and deploy the exact validated revision.
-6. Enable the global autonomy switch and each source separately, beginning with controlled live observation and emergency-stop readiness.
+1. Review and complete every live OTA room label mapping, including explicit operational room ids.
+2. Configure the observed approved sender-domain families; keep aligned Gmail authentication evidence mandatory.
+3. Apply the migration through the normal reviewed release path and deploy the exact validated revision with global autonomy disabled.
+4. Observe near-live ingestion and perform manager/front-desk acceptance for the Booking Inbox, notifications, and booking-board room placement.
+5. Enable the global autonomy switch and each source separately only after the corresponding live mapping and parser evidence is accepted.
