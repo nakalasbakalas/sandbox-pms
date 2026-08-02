@@ -937,6 +937,17 @@ function splitGuestName(value) {
   return { firstName: parts.slice(0, -1).join(' '), lastName: parts.at(-1) }
 }
 
+function normalizeBookingEmailAmount(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount) || amount <= 0) return undefined
+  try {
+    if (bahtToSatang(amount, 'booking email amount') > MAX_SAFE_MONEY_SATANG) return undefined
+  } catch {
+    return undefined
+  }
+  return roundMoney(amount)
+}
+
 function parseMoney(text) {
   const amountMatch = firstMatch([
     /\b(?:total(?: amount| price)?|amount received|amount paid|payment amount|paid amount|deposit amount)\s*[:#-]?\s*(?:THB\s*)?([0-9][0-9,]*(?:\.\d{1,2})?)\b/i,
@@ -944,9 +955,8 @@ function parseMoney(text) {
     /\b([0-9][0-9,]*(?:\.\d{1,2})?)\s*THB\b/i,
   ], text)
   if (!amountMatch) return {}
-  const amount = Number(amountMatch.replace(/,/g, ''))
-  if (!Number.isFinite(amount) || amount <= 0) return {}
-  if (bahtToSatang(amount, 'booking email amount') > MAX_SAFE_MONEY_SATANG) return {}
+  const amount = normalizeBookingEmailAmount(amountMatch.replace(/,/g, ''))
+  if (amount === undefined) return {}
   return { amount, currency: 'THB' }
 }
 
@@ -1084,7 +1094,7 @@ export function parseBookingEmailDetails(input = {}) {
     || normalizeRoomTypeCode(externalRoomType)
     || (/\bdouble\b/i.test(combined) ? 'DOUBLE' : /\btwin\b/i.test(combined) ? 'TWIN' : undefined)
   const money = parseMoney(combined)
-  const amount = Number(input.amount ?? parsedInput.amount ?? money.amount)
+  const amount = normalizeBookingEmailAmount(input.amount ?? parsedInput.amount ?? money.amount)
   const adults = Number(input.adults ?? parsedInput.adults ?? combined.match(/\b(?:adults?)\s*[:#-]?\s*(\d+)/i)?.[1] ?? 1)
   const children = Number(input.children ?? parsedInput.children ?? combined.match(/\b(?:children|kids?)\s*[:#-]?\s*(\d+)/i)?.[1] ?? 0)
   const paymentStatus = normalizeNullableString(input.paymentStatus || parsedInput.paymentStatus)
@@ -1130,7 +1140,7 @@ export function parseBookingEmailDetails(input = {}) {
     externalRoomType: externalRoomType || undefined,
     adults: Number.isInteger(adults) && adults > 0 ? adults : 1,
     children: Number.isInteger(children) && children >= 0 ? children : 0,
-    amount: Number.isFinite(amount) && amount > 0 ? roundMoney(amount) : undefined,
+    amount,
     currency: normalizeNullableString(input.currency || parsedInput.currency || money.currency) || 'THB',
     paymentStatus: paymentStatus || undefined,
     paymentReference: normalizeNullableString(input.paymentReference || parsedInput.paymentReference) || undefined,
