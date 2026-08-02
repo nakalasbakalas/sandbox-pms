@@ -1095,11 +1095,11 @@ function providerBookingEmailDetails(input, combined, rawText) {
     details.guestName = normalizeNullableString([firstName, lastName].filter(Boolean).join(' '))
     details.checkIn = parseProviderDateFromLines(lines, [/^check[\s-]?in\s*[:：]?$/i])
       || normalizeProviderBookingDate(firstMatch([
-        /\bcheck[\s-]?in\b\s*(?:เช็คอิน\s*)?([^\r\n]{3,40}?)(?=\s+check[\s-]?out\b)/iu,
+        /\bcheck[\s-]?in\b[^0-9]{0,80}(\d{1,2}-[A-Za-z]{3,9}-\d{4}(?:\s*\(\d{1,2}-\d{1,2}-\d{4}\))?)/iu,
       ], rawText))
     details.checkOut = parseProviderDateFromLines(lines, [/^check[\s-]?out\s*[:：]?$/i])
       || normalizeProviderBookingDate(firstMatch([
-        /\bcheck[\s-]?out\b\s*(?:เช็คเอาท์\s*)?([^\r\n]{3,40}?)(?=\s+room\s+type\b)/iu,
+        /\bcheck[\s-]?out\b[^0-9]{0,80}(\d{1,2}-[A-Za-z]{3,9}-\d{4}(?:\s*\(\d{1,2}-\d{1,2}-\d{4}\))?)/iu,
       ], rawText))
     details.externalRoomType = valueAfterBookingEmailLabel(lines, /^room\s+type\s*[:：]?$/i, {
       maxScan: 16,
@@ -1118,7 +1118,9 @@ function providerBookingEmailDetails(input, combined, rawText) {
     const tripGuest = valueAfterBookingEmailLabel(lines, /^guest\s+name\s*[:：]?/i, {
       stop: /^(?:room type|bed type|staying period|arrival time)\b/i,
       accept: (candidate) => /^[\p{L}][\p{L} .'/-]{1,100}$/u.test(candidate),
-    })
+    }) || firstMatch([
+      /\bguest\s+name\s*[:：]?\s*([\p{L}][\p{L} .'/-]{1,100}?)(?=\s+room\s+type\b)/iu,
+    ], rawText)
     if (tripGuest?.includes('/')) {
       const [familyName, givenName] = tripGuest.split('/').map((part) => part.trim()).filter(Boolean)
       details.guestName = normalizeNullableString([givenName, familyName].filter(Boolean).join(' '))
