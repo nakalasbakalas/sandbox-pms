@@ -1651,11 +1651,17 @@ for (const fixture of bookingEmailParserFixtures) {
   assert.equal(parsed.details.checkIn, fixture.expected.checkIn, `${fixture.name} keeps the expected booking-email check-in date`)
   assert.equal(parsed.details.checkOut, fixture.expected.checkOut, `${fixture.name} keeps the expected booking-email check-out date`)
   assert.equal(parsed.details.roomType, fixture.expected.roomType, `${fixture.name} keeps the expected booking-email room type`)
+  if (fixture.expected.externalRoomType !== undefined) {
+    assert.equal(parsed.details.externalRoomType, fixture.expected.externalRoomType, `${fixture.name} keeps the authoritative external OTA room label`)
+  }
   assert.equal(parsed.details.amount, fixture.expected.amount, `${fixture.name} keeps the expected booking-email amount`)
   assert.equal(parsed.details.paymentStatus, fixture.expected.paymentStatus, `${fixture.name} keeps the expected booking-email payment status`)
   assert.equal(parsed.reviewReason, null, `${fixture.name} parses without a review blocker`)
 }
-assert.equal(parseBookingEmailDetails(bookingEmailParserFixtures[0].input).details.externalRoomType, 'Deluxe Double Room', 'booking-email JSON preserves the external OTA room label for authoritative mapping')
+const standardNewBookingFixture = bookingEmailParserFixtures.find((fixture) => fixture.name === 'new booking template')
+const paymentNoticeFixture = bookingEmailParserFixtures.find((fixture) => fixture.name === 'payment notice template')
+assert.ok(standardNewBookingFixture && paymentNoticeFixture, 'booking-email focused fixtures remain available by stable name')
+assert.equal(parseBookingEmailDetails(standardNewBookingFixture.input).details.externalRoomType, 'Deluxe Double Room', 'booking-email JSON preserves the external OTA room label for authoritative mapping')
 
 for (const fixture of bookingEmailNoiseFixtures) {
   const parsed = parseBookingEmailDetails(fixture.input)
@@ -1671,15 +1677,15 @@ await assert.rejects(
   'public booking-email sync rejects caller-supplied provider events',
 )
 const sameReferencePaymentFixture = {
-  ...bookingEmailParserFixtures[4].input,
-  subject: bookingEmailParserFixtures[4].input.subject.replace('PAY-5511', 'LH-ABCD1234'),
-  rawText: bookingEmailParserFixtures[4].input.rawText.replace(/PAY-5511/g, 'LH-ABCD1234'),
+  ...paymentNoticeFixture.input,
+  subject: paymentNoticeFixture.input.subject.replace('PAY-5511', 'LH-ABCD1234'),
+  rawText: paymentNoticeFixture.input.rawText.replace(/PAY-5511/g, 'LH-ABCD1234'),
 }
 await syncBookingEmail(duplicateScopeFixture.prisma, {
   sourceId: duplicateScopeFixture.sources[0].id,
   reviewOnly: true,
   events: [
-    { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-new-booking-fixture' },
+    { ...standardNewBookingFixture.input, sourceMessageId: 'gmail-new-booking-fixture' },
     { ...sameReferencePaymentFixture, sourceMessageId: 'gmail-payment-fixture' },
   ],
 }, duplicateScopeActor, { allowImportedEvents: true })
@@ -1691,8 +1697,8 @@ await syncBookingEmail(duplicateReplayFixture.prisma, {
   sourceId: duplicateReplayFixture.sources[0].id,
   reviewOnly: true,
   events: [
-    { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-resend-a', rawHeaders: { messageId: '<provider-replay@example.test>' } },
-    { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-resend-b', rawHeaders: { messageId: '<provider-replay@example.test>' } },
+    { ...standardNewBookingFixture.input, sourceMessageId: 'gmail-resend-a', rawHeaders: { messageId: '<provider-replay@example.test>' } },
+    { ...standardNewBookingFixture.input, sourceMessageId: 'gmail-resend-b', rawHeaders: { messageId: '<provider-replay@example.test>' } },
   ],
 }, duplicateScopeActor, { allowImportedEvents: true })
 assert.equal(Boolean(duplicateReplayFixture.events[1].duplicateOfEventId), true, 'booking-email duplicate scope still flags same-type resend content as a duplicate')
@@ -1704,7 +1710,7 @@ const autoProcessResult = await syncBookingEmail(autoProcessFixture.prisma, {
   sourceId: autoProcessFixture.sources[0].id,
   reviewOnly: false,
   events: [
-    { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-auto-process-fixture' },
+    { ...standardNewBookingFixture.input, sourceMessageId: 'gmail-auto-process-fixture' },
   ],
 }, duplicateScopeActor, { allowImportedEvents: true })
 assert.equal(autoProcessResult.events[0].status, 'NEEDS_REVIEW', 'booking-email source opt-in cannot bypass the server autonomy kill switch')

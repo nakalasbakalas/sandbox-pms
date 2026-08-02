@@ -586,3 +586,14 @@ npm.cmd run test:e2e:autonomy
 The guarded database test proves replay idempotency, concurrent locking, property isolation, emergency-stop blocking, audit/domain evidence, empty-only rollback-column enforcement, and no reservation/payment/provider mutation. It remains engineering evidence only. Production scheduling must use an external durable trigger and exact-release staging proof; the in-process scheduler is not autonomy proof.
 
 Do not add provider acknowledgement or compensation records until a credentialed adapter implements write, acknowledgement, read-back, retry, reconciliation, and rollback semantics. Do not add Agents SDK execution tools; future agent tools may read sanitized snapshots or submit candidates only.
+
+## Booking Email Parser Rollout And Room Mapping
+
+1. Deploy parser changes with `BOOKING_EMAIL_AUTONOMY_ENABLED=false` and the booking source `autoProcessSafeEvents=false`.
+2. Run a bounded near-live sync, then reprocess only `NEEDS_REVIEW`/`ERROR` records. Do not reset processed or ignored history and never run database-mutating E2E against production.
+3. Open Channel Manager -> Room mapping. Review `Observed booking-email labels`; these rows are PII-free suggestions derived from the PMS event store, not OTA acknowledgement.
+4. Configure the relevant property/provider channel if it is not present. Select `Use in editor`, confirm the exact OTA label, PMS room type, and operational room ids, enter a non-secret operational reason, then save. Do not map by direct SQL, guessed provider ids, or room-name similarity alone.
+5. Confirm every active label maps to exactly one PMS room type and at least one operational room. Keep ambiguous or conflicting labels unmapped and resolve them with the manager/provider portal.
+6. Reprocess the affected review rows and verify the automation decision resolves the expected provider/mapping ids and finds an assignable room without creating a reservation while the switches are off.
+7. After manager/front-desk acceptance, enable `BOOKING_EMAIL_REQUIRE_CORROBORATION=true`, retain the 0.95 hard confidence floor and aligned Gmail authentication requirement, enable the global kill switch, then separately enable the source switch in Booking Inbox. Non-new-booking types remain review-only.
+8. Watch Booking Inbox, manager notifications, reservation/guest timelines, and Booking Board placement. Disable the source first, then the global switch, on any extraction, mapping, duplicate, capacity, or assignment anomaly.

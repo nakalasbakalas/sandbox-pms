@@ -163,6 +163,7 @@ const API_ROUTE_CONTRACTS = [
   route('/api/rooms/{id}/operational-status', ['POST'], { tag: 'Rooms' }),
   route('/api/channels/ical', ['GET'], { tag: 'Channels' }),
   route('/api/channels/ical/{provider}', ['POST', 'DELETE'], { tag: 'Channels' }),
+  route('/api/channels/mapping-suggestions', ['GET'], { tag: 'Channels', summary: 'PII-free OTA room labels observed in booking emails' }),
   route('/api/channels/mappings', ['GET', 'POST'], { tag: 'Channels', summary: 'Property-scoped channel room mappings' }),
   route('/api/channels/mappings/{id}', ['PATCH', 'DELETE'], { tag: 'Channels', summary: 'Update or delete a channel room mapping' }),
   route('/api/settings/room-setup', ['GET'], { tag: 'Settings' }),

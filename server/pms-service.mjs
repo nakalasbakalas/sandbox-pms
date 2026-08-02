@@ -971,6 +971,176 @@ function normalizeParsedDateValue(raw) {
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
 }
 
+const BOOKING_EMAIL_MONTHS = Object.freeze({
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+})
+
+function validBookingEmailDateKey(year, month, day) {
+  const numericYear = Number(year)
+  const numericMonth = Number(month)
+  const numericDay = Number(day)
+  const candidate = new Date(Date.UTC(numericYear, numericMonth - 1, numericDay))
+  if (
+    candidate.getUTCFullYear() !== numericYear
+    || candidate.getUTCMonth() + 1 !== numericMonth
+    || candidate.getUTCDate() !== numericDay
+  ) return undefined
+  return `${String(numericYear).padStart(4, '0')}-${String(numericMonth).padStart(2, '0')}-${String(numericDay).padStart(2, '0')}`
+}
+
+function normalizeProviderBookingDate(raw) {
+  const value = String(raw || '').trim().replace(/^\(|\)$/g, '')
+  if (!value) return undefined
+  const numeric = value.match(/\b(\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.]\d{1,2}[/.]\d{2,4})\b/)
+  if (numeric) {
+    const normalized = normalizeParsedDateValue(numeric[1])
+    const [year, month, day] = normalized.split('-')
+    return validBookingEmailDateKey(year, month, day)
+  }
+  const dayFirst = value.match(/\b(\d{1,2})[-\s]([A-Za-z]{3,9})[-\s,]+(\d{4})\b/)
+  if (dayFirst) {
+    return validBookingEmailDateKey(dayFirst[3], BOOKING_EMAIL_MONTHS[dayFirst[2].toLowerCase()], dayFirst[1])
+  }
+  const monthFirst = value.match(/\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})\b/)
+  if (monthFirst) {
+    return validBookingEmailDateKey(monthFirst[3], BOOKING_EMAIL_MONTHS[monthFirst[1].toLowerCase()], monthFirst[2])
+  }
+  return undefined
+}
+
+function bookingEmailTextLines(text) {
+  return String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+}
+
+function valueAfterBookingEmailLabel(lines, labelPattern, options = {}) {
+  const maxScan = Math.max(1, Number(options.maxScan || 5))
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    if (!labelPattern.test(line)) continue
+    labelPattern.lastIndex = 0
+    const inline = normalizeNullableString(line.match(/^[^:：]{1,80}[:：]\s*(.+)$/)?.[1])
+    if (inline && (!options.accept || options.accept(inline))) return inline
+    for (let offset = 1; offset <= maxScan && index + offset < lines.length; offset += 1) {
+      const candidate = lines[index + offset]
+      if (options.stop?.test(candidate)) break
+      if (options.skip?.test(candidate)) continue
+      if (!options.accept || options.accept(candidate)) return candidate
+    }
+  }
+  return null
+}
+
+function parseProviderDateFromLines(lines, labels) {
+  for (const label of labels) {
+    const value = valueAfterBookingEmailLabel(lines, label, {
+      maxScan: 5,
+      skip: /^(?:เช็คอิน|เช็คเอาท์|วันเข้าพัก|วันออก|arrival|departure)$/i,
+      stop: /^(?:check[\s-]?in|check[\s-]?out|arrival|departure|room type|customer|guest|booking id)\b/i,
+      accept: (candidate) => Boolean(normalizeProviderBookingDate(candidate)),
+    })
+    const parsed = normalizeProviderBookingDate(value)
+    if (parsed) return parsed
+  }
+  return undefined
+}
+
+function parseProviderDateRange(text, labels) {
+  for (const label of labels) {
+    const match = String(text || '').match(new RegExp(`${label}\\s*[:#-]?\\s*([^\\r\\n|]{3,80}?)\\s*(?:to|until|through|-|–|—)\\s*([^\\r\\n|]{3,80})`, 'i'))
+    const start = normalizeProviderBookingDate(match?.[1])
+    const end = normalizeProviderBookingDate(match?.[2])
+    if (start && end) return { start, end }
+  }
+  return null
+}
+
+function providerBookingEmailDetails(input, combined, rawText) {
+  const provider = normalizeBookingSourceFromEmail(input.sender, input.sourceName)
+  const lines = bookingEmailTextLines(rawText)
+  const details = { provider }
+
+  if (provider === 'AGODA') {
+    details.channelRef = valueAfterBookingEmailLabel(lines, /^booking\s+id\s*[:：]?$/i, {
+      skip: /^(?:หมายเลขการจอง)$/i,
+      stop: /^(?:customer|guest|check[\s-]?in|room type)\b/i,
+      accept: (candidate) => /^[A-Z0-9][A-Z0-9-]{3,}$/i.test(candidate),
+    })
+    const firstName = valueAfterBookingEmailLabel(lines, /^customer\s+first\s+name\s*[:：]?$/i, {
+      skip: /^(?:ชื่อลูกค้า)$/i,
+      stop: /^customer\s+last\s+name\b/i,
+      accept: (candidate) => /^[\p{L}][\p{L} .'-]{1,80}$/u.test(candidate),
+    })
+    const lastName = valueAfterBookingEmailLabel(lines, /^customer\s+last\s+name\s*[:：]?$/i, {
+      skip: /^(?:นามสกุลลูกค้า)$/i,
+      stop: /^(?:country|nationality|check[\s-]?in)\b/i,
+      accept: (candidate) => /^[\p{L}][\p{L} .'-]{1,80}$/u.test(candidate),
+    })
+    details.guestName = normalizeNullableString([firstName, lastName].filter(Boolean).join(' '))
+    details.checkIn = parseProviderDateFromLines(lines, [/^check[\s-]?in\s*[:：]?$/i])
+    details.checkOut = parseProviderDateFromLines(lines, [/^check[\s-]?out\s*[:：]?$/i])
+    details.externalRoomType = valueAfterBookingEmailLabel(lines, /^room\s+type\s*[:：]?$/i, {
+      maxScan: 16,
+      skip: /^(?:ประเภทห้อง|no\.? of rooms?|จำนวนห้องพัก|occupancy|ผู้เข้าพัก|no\.? of extra bed|จำนวนเตียงเสริม\s*[:：]?|\d+|\d+\s+(?:adult|adults|child|children))$/i,
+      stop: /^(?:benefits|payment|cancellation|special request|booking conditions?)\b/i,
+      accept: (candidate) => /\b(?:double|twin|bed|room|suite|superior|deluxe|standard|family)\b/i.test(candidate),
+    })
+  }
+
+  if (provider === 'TRIP') {
+    details.channelRef = firstMatch([
+      /\b(?:booking|reservation)\s+(?:no(?:\.|\b)|number|id)\s*[:#-]?\s*#?([A-Z0-9][A-Z0-9-]{3,})#?/i,
+    ], combined)
+    const tripGuest = valueAfterBookingEmailLabel(lines, /^guest\s+name\s*[:：]?/i, {
+      stop: /^(?:room type|bed type|staying period|arrival time)\b/i,
+      accept: (candidate) => /^[\p{L}][\p{L} .'/-]{1,100}$/u.test(candidate),
+    })
+    if (tripGuest?.includes('/')) {
+      const [familyName, givenName] = tripGuest.split('/').map((part) => part.trim()).filter(Boolean)
+      details.guestName = normalizeNullableString([givenName, familyName].filter(Boolean).join(' '))
+    } else {
+      details.guestName = tripGuest
+    }
+    const tripStay = parseProviderDateRange(combined, ['staying\\s+period', 'stay(?:ing)?\\s+dates?'])
+    details.checkIn = tripStay?.start
+    details.checkOut = tripStay?.end
+    const roomLine = firstMatch([
+      /\broom\s+type\s*[:：]\s*([^\r\n|]{2,200}?)(?=\s+(?:bed type|staying period|adults?|children|check(?:\s*|-)?in|check(?:\s*|-)?out|amount|total|payment|booking|reservation|reference)\b|\s*\||$)/i,
+    ], combined)
+    details.externalRoomType = normalizeNullableString(roomLine
+      ?.replace(/\s+(?:flexible-until|non-refundable|room only|breakfast|prepay|pay at property)\b.*$/i, '')
+      .trim())
+  }
+
+  if (provider === 'BOOKING_COM') {
+    details.channelRef = firstMatch([
+      /\b(?:reservation|booking)\s+(?:number|no(?:\.|\b)|id)\s*[:#-]?\s*#?([A-Z0-9][A-Z0-9-]{3,})#?/i,
+    ], combined)
+    details.guestName = valueAfterBookingEmailLabel(lines, /^(?:guest name|booker|guest)\s*[:：]?/i, {
+      stop: /^(?:reservation|booking|arrival|departure|check[\s-]?in|room type)\b/i,
+      accept: (candidate) => /^[\p{L}][\p{L} .'-]{1,100}$/u.test(candidate),
+    })
+    details.checkIn = parseProviderDateFromLines(lines, [/^(?:check[\s-]?in|arrival)(?:\s+date)?\s*[:：]?/i])
+    details.checkOut = parseProviderDateFromLines(lines, [/^(?:check[\s-]?out|departure)(?:\s+date)?\s*[:：]?/i])
+    details.externalRoomType = valueAfterBookingEmailLabel(lines, /^(?:room type|room category|accommodation)\s*[:：]?/i, {
+      stop: /^(?:arrival|departure|check[\s-]?in|price|total|payment|guest)\b/i,
+      accept: (candidate) => /\b(?:double|twin|bed|room|suite|superior|deluxe|standard|family)\b/i.test(candidate),
+    })
+  }
+
+  return details
+}
+
 function parseDateFromText(label, text) {
   const labels = Array.isArray(label) ? label : [label]
   for (const currentLabel of labels) {
@@ -1067,26 +1237,33 @@ export function parseBookingEmailDetails(input = {}) {
   const rawText = String(input.rawText || input.body || input.snippet || '')
   const subject = String(input.subject || '')
   const combined = `${subject}\n${rawText}`
+  const providerDetails = providerBookingEmailDetails(input, combined, rawText)
   const stayDateRange = parseDateRangeFromNormalizedText(['stay', 'stay dates', 'travel dates', 'dates'], combined)
     || parseDateRangeFromText(['stay', 'stay dates', 'travel dates', 'dates'], combined)
+    || parseProviderDateRange(combined, ['stay(?:ing)?\\s+period', 'stay(?:ing)?\\s+dates?', 'travel\\s+dates?'])
   const channelRef = normalizeNullableString(input.channelRef || parsedInput.channelRef || parsedInput.confirmationCode)
+    || normalizeNullableString(providerDetails.channelRef)
     || firstMatch([
       /\b(?:confirmation number|confirmation no\.?|booking number|reservation number|booking id|reservation id|booking reference|reservation reference|booking ref|reservation ref|reference|ref)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{3,})\b/i,
       /\b(?:booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\s+([A-Z0-9][A-Z0-9-]{3,})\b/i,
     ], combined)
     || null
   const guestName = normalizeNullableString(input.guestName || parsedInput.guestName)
+    || normalizeNullableString(providerDetails.guestName)
     || firstMatch([
       /\b(?:guest name|lead guest|main guest|customer name|booker|guest|name)\s*[:#-]\s*([A-Z][A-Za-z .'-]{2,80}?)(?=\s+(?:booking|reservation|reference|check(?:\s*|-)?in|arrival|check(?:\s*|-)?out|departure|room type|adults?|children|amount|total|payment|special requests?|notes?)\b|$)/i,
     ], combined)
     || null
   const checkIn = dateKeyOrUndefined(input.checkIn || parsedInput.checkIn)
+    || providerDetails.checkIn
     || parseDateFromText(['check in', 'check-in', 'checkin', 'arrival'], combined)
     || stayDateRange?.start
   const checkOut = dateKeyOrUndefined(input.checkOut || parsedInput.checkOut)
+    || providerDetails.checkOut
     || parseDateFromText(['check out', 'check-out', 'checkout', 'departure'], combined)
     || stayDateRange?.end
   const externalRoomType = normalizeNullableString(input.externalRoomType || parsedInput.externalRoomType)
+    || normalizeNullableString(providerDetails.externalRoomType)
     || firstMatch([
       /\b(?:room type|room category|accommodation|unit type)\s*[:#-]?\s*([A-Za-z][A-Za-z0-9 /&'()-]{2,80}?)(?=\s+(?:adults?|children|check(?:\s*|-)?in|arrival|check(?:\s*|-)?out|departure|amount|total|payment|special requests?|notes?|booking|reservation|reference)\b|$)/i,
     ], combined)
@@ -1100,6 +1277,7 @@ export function parseBookingEmailDetails(input = {}) {
   const paymentStatus = normalizeNullableString(input.paymentStatus || parsedInput.paymentStatus)
     || (/\b(payment received|paid in full|fully paid|prepaid)\b/i.test(combined) ? 'PAID' : /\bdeposit\b/i.test(combined) ? 'DEPOSIT' : null)
   const newBookingSignal = /\b(new booking|booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\b/i.test(combined)
+    || /\b(?:booking|reservation)(?:\s+(?:no(?:\.|\b)|number|id)\s*[:#-]?\s*#?[A-Z0-9-]+#?)?\s+(?:accepted|confirmed)\b/i.test(combined)
   const explicitCancellationSignal = /\b(?:booking|reservation)\s+(?:(?:has|had)\s+been\s+|is\s+|was\s+)?(?:cancelled|canceled)\b|\b(?:cancelled|canceled)\s+(?:booking|reservation)\b|\b(?:booking|reservation)\s+cancellation\b|\bcancellation\s+(?:confirmation|confirmed|notification|notice|of|for)\b/i
   const cancellationStatusSignal = /\b(?:booking|reservation)(?:\s+status)?\s*[:#-]\s*(?:cancelled|canceled)\b/i
   const cancellationSignal = explicitCancellationSignal.test(subject)

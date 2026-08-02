@@ -386,6 +386,14 @@ Notifications are backend records:
 - In server mode, Front Desk, `/guests`, and `/messaging` select server-only data providers and never mount their demo `useKV` or KV-backed room-sync hooks. All three workspaces fail closed with Retry and no operational metrics, rows, assistant context, or mutation affordance when an authoritative read fails; `New Guest` additionally requires `edit:reservation`. Successful guest creation and message drafts refetch or update server state and survive reload. Message drafts require one valid idempotency key in the request header, reject a conflicting body key, compare the complete replay intent, and serialize same-key PostgreSQL writes so concurrent retries return one persisted draft.
 - The client event bridge subscribes to the real emitted `RESERVATION_ROOM_ASSIGNED` and `RESERVATION_GUEST_UPDATED` names as reservation invalidations. Views use those events only to refetch authoritative APIs; event payloads never become operational state.
 
+## Booking Email Provider Extraction And Mapping Suggestions
+
+- `parseBookingEmailDetails()` applies provider-specific deterministic extraction before the existing generic fallback. Provider selection comes only from normalized sender/source identity; it does not grant trust or write authority.
+- Agoda parsing supports bilingual multiline `Booking ID`, customer first/last name, check-in/out, and room-table fields. Trip.com parsing supports `Booking no. #...# accepted`, multiline slash-form guest names, `Staying period` text-month ranges, and room labels with rate-plan suffixes. Booking.com parsing supports multiline reservation number, guest, arrival/departure, and room-category values.
+- Textual and numeric provider dates are calendar-validated before becoming Bangkok date keys. Invalid dates remain missing and therefore review-gated.
+- `listChannelMappingSuggestions()` is property-scoped and read-only. It scans at most 1,000 recent new-booking/modification events, groups at most 100 unique provider/label pairs, and emits only PII-free aggregate fields. A PMS room type is suggested only when every observation in that group has one consistent parsed room code and that code exists in the active property.
+- `GET /api/channels/mapping-suggestions` requires `view:channels`. It is not a mutation endpoint. Channel creation and mapping persistence continue through the existing `manage:channels`, reason-gated, idempotent service functions.
+
 ## Rate And Settings Services
 
 - Rate rules support percentage adjustments in integer basis points and fixed/override amounts in satang. Date-specific calendar rates and computed effective rates are property/room-type scoped.
