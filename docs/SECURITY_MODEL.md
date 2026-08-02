@@ -35,6 +35,7 @@ Autonomy shadow records are evidence, not execution authority. GPT or a future a
 - `OPENAI_API_KEY`, when used for the optional parser, must be a backend environment secret only.
 - Booking.com credentials, when used, must come from backend environment secrets.
 - Booking email sync must use server-side Gmail API credentials, either an OAuth access token or backend OAuth refresh-token credentials, not a raw mailbox password.
+- Near-live Gmail search must remain bounded to approved OTA sender domains and exclude known provider security, report, invoice, and promotion traffic. It must not require a visible `To` header because BCC and forwarded reservation mail is valid input; sender authentication and the downstream autonomy gates remain authoritative.
 - Booking email credential diagnostics may expose boolean readiness, missing environment key names, target mailbox, scope names, and redacted Gmail API connection status, but must not expose token, client-secret, authorization-code, password, or authorization-header values.
 - Booking email historical backfill must be dry-run first or explicitly confirmed; CLI output must omit message ids, senders, recipients, subjects, raw body text, guest data, payment data, and credential values.
 - Booking email parsing must not auto-route OTA account-security notices, partner reports, invoices, or other non-reservation provider mail into reservation/payment mutations; those messages stay `UNKNOWN` and require manual staff review.

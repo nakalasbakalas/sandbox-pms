@@ -90,6 +90,7 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 - Booking-email duplicate review ignores different event types that share a booking reference, but still flags same-type/provider-message replays as duplicates.
 - Booking-email review/error reprocess keeps output redacted, reparses only the selected queue events, and returns them to `NEEDS_REVIEW` without auto-approval.
 - Booking-email near-live scheduler defaults to review-only and switches to controlled autonomy only when the global policy is configured; a source opt-in alone cannot enable writes.
+- Booking-email near-live Gmail sync defaults to the bounded approved-provider query, contains no `to:` requirement, and therefore includes legitimate BCC/forwarded OTA mail while retaining the spam/trash and known-noise exclusions.
 - Only trusted, Gmail-authenticated, 95%+ `NEW_BOOKING` events with no parser/duplicate conflict can auto-apply; payment, modification, cancellation, guest-message, and unknown events remain review-gated.
 - External OTA room labels resolve through one active property/provider `ChannelMapping`; the selected room must be in the mapping, match the PMS room type, be operationally available, and have no reservation or inventory overlap.
 - Trip.com is represented consistently as `TRIP` in booking source and channel mapping records.

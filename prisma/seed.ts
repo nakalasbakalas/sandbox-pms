@@ -1,5 +1,6 @@
 import { PrismaClient, type RoomType, type UserRole } from '@prisma/client'
 import { pbkdf2Sync, randomBytes } from 'node:crypto'
+import { approvedBookingEmailProviderQuery } from '../scripts/booking-email-query.mjs'
 
 const prisma = new PrismaClient()
 
@@ -409,7 +410,7 @@ async function seedBookingEmailSource(propertyId: string) {
       enabled: true,
       autoProcessSafeEvents: false,
       reviewThreshold: 0.85,
-      query: `to:${mailbox} -in:spam -in:trash newer_than:30d`,
+      query: approvedBookingEmailProviderQuery(),
     },
     create: {
       propertyId,
@@ -419,7 +420,7 @@ async function seedBookingEmailSource(propertyId: string) {
       enabled: true,
       autoProcessSafeEvents: false,
       reviewThreshold: 0.85,
-      query: `to:${mailbox} -in:spam -in:trash newer_than:30d`,
+      query: approvedBookingEmailProviderQuery(),
       lastError: 'Gmail API credentials are not configured for this server.',
     },
   })

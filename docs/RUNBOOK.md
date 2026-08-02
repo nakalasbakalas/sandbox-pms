@@ -71,6 +71,8 @@ OTA credentials must be platform secrets only. Do not commit or log them. Bookin
 
 Booking email intake uses `BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.com`. Do not store a Gmail mailbox password in app config. Server sync requires either `BOOKING_EMAIL_GMAIL_ACCESS_TOKEN` or backend OAuth refresh-token credentials: `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, and `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`. `BOOKING_EMAIL_GMAIL_SCOPES` defaults to `https://www.googleapis.com/auth/gmail.readonly`; do not broaden it unless a backend feature genuinely needs more access. `/api/booking-email/status` reports non-secret credential readiness, missing key names, the target mailbox, last sync state, and a Gmail profile connection test. For Render, prefer the durable refresh-token tuple. Use `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` to check current Render key presence without printing values, then use `npm.cmd run render:gmail-oauth` as a dry-run before applying any env-var changes. Operational/security/provider-admin emails from OTA senders are not booking events; keep those rows `UNKNOWN` / review-only unless staff confirm they are actionable reservation communications. When no explicit `--query` is supplied, historical backfill defaults to the approved provider-query boundary instead of the incomplete direct `to:booking@sandboxhotel.com` filter.
 
+Near-live sync defaults to the approved-provider sender query rather than `to:booking@sandboxhotel.com`; keep that boundary unless an owner-approved source query is required, because BCC and forwarded OTA messages may not expose the mailbox in the `To` header.
+
 Optional LINE Hotel Ops command intake:
 
 ```env
