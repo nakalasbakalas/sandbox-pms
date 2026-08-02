@@ -1,8 +1,10 @@
 # Launch Current Status Index
 
-Status date: 2026-08-01.
+Status date: 2026-08-02.
 
 Verdict: **core PMS engineering-ready and provider-deployed; full operational sign-off remains open.** Use [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) for the four non-interchangeable levels. The 2026-08-01 evidence proves the exact merged source, paid Render migration/deployment, public Cloudflare-backed routing, and signed dry-run worker path. It does not prove live OTA writes, credentialed role-by-role staff acceptance, payment-provider operation, or a recovery restore drill.
+
+The 2026-08-02 booking-email controlled-autonomy work is a dirty local engineering candidate only. Its non-database validation is green, but the new disposable-database acceptance cases were blocked because Docker Desktop was not running. It has not been deployed or enabled in production.
 
 | Evidence level | Current status |
 | --- | --- |
@@ -27,6 +29,7 @@ The active paid Render service uses migration-only predeploy (`npm run db:migrat
 
 | Slice | Status | Evidence |
 | --- | --- | --- |
+| 2026-08-02 booking-email controlled autonomy | Local engineering candidate; non-database validation green, disposable-DB acceptance blocked by unavailable Docker, not deployed or enabled | [2026-08-02-booking-email-controlled-autonomy.md](evidence/2026-08-02-booking-email-controlled-autonomy.md) |
 | 2026-07-19 primary PMS consolidation | PR #190 integration commit `cb34b057` is CI-green; independent review, merge, staging drills, owner approval, and provider freshness remain open | This index; [live environment register](../live-environment-proof.md) |
 | 2026-07-07 Cloudflare WAF and Render recovery proof | Historical provider proof; exact WAF rules and recovery metadata recorded without secret values, but freshness remains open for the current candidate | [2026-07-07-cloudflare-waf-zone-proof.md](evidence/2026-07-07-cloudflare-waf-zone-proof.md); [live environment register](../live-environment-proof.md) |
 | 2026-07-07 owner completion deploy and issue closure | Completed by owner-directed accepted-risk closure; `d18ea06` deployed live, post-deploy checks passed, external proof gaps carried as owner-managed risk | [2026-07-07-owner-completion-deploy-and-issue-closure.md](evidence/2026-07-07-owner-completion-deploy-and-issue-closure.md) |

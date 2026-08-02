@@ -38,9 +38,23 @@ services:
       - key: BOOKING_EMAIL_NEAR_LIVE_ENABLED
         value: false
       - key: BOOKING_EMAIL_SYNC_INTERVAL_SECONDS
-        value: 120
+        value: 30
       - key: BOOKING_EMAIL_SYNC_BATCH_LIMIT
         value: 25
+      - key: BOOKING_EMAIL_AUTONOMY_ENABLED
+        value: false
+      - key: BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS
+        sync: false
+      - key: BOOKING_EMAIL_AUTONOMY_MIN_CONFIDENCE
+        value: 0.95
+      - key: BOOKING_EMAIL_AUTO_ASSIGN_ROOMS
+        value: true
+      - key: BOOKING_EMAIL_REQUIRE_AUTHENTICATION_RESULTS
+        value: true
+      - key: BOOKING_EMAIL_REQUIRE_CORROBORATION
+        value: false
+      - key: BOOKING_EMAIL_NOTIFY_MANAGER
+        value: true
       - key: CHANNEL_MANAGER_PROVIDER
         value: channex
       - key: BOOKING_EMAIL_GMAIL_USER_ID

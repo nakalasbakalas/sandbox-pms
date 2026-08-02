@@ -241,6 +241,7 @@ enum BookingSource {
   WEBSITE
   BOOKING_COM
   AGODA
+  TRIP
   EXPEDIA
   AIRBNB
   OTHER
@@ -566,6 +567,7 @@ model BookingEmailEvent {
   reviewReason String?
   errorReason String?
   parsedDetails Json?
+  automationDecision Json?
   rawHeaders  Json?
   rawText     String?
   reservationId String?
@@ -579,6 +581,7 @@ model BookingEmailEvent {
   duplicateEvents BookingEmailEvent[] @relation("DuplicateBookingEmailEvent")
   processedAt DateTime?
   processedBy String?
+  managerReviewNotifiedAt DateTime?
   rejectedAt  DateTime?
   createdAt   DateTime                @default(now())
   updatedAt   DateTime                @updatedAt
@@ -1310,6 +1313,7 @@ model Channel {
 enum ChannelProvider {
   BOOKING_COM
   AGODA
+  TRIP
   EXPEDIA
   AIRBNB
   ICAL

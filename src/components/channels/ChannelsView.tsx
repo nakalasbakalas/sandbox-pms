@@ -48,7 +48,7 @@ interface Channel {
   id: string
   serverId?: string
   name: string
-  provider: 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB'
+  provider: 'BOOKING_COM' | 'AGODA' | 'TRIP' | 'EXPEDIA' | 'AIRBNB'
   connectionMode?: 'ICAL'
   enabled: boolean
   connected: boolean
@@ -185,6 +185,16 @@ const DEFAULT_CHANNELS: Channel[] = [
     id: 'agoda',
     name: 'Agoda',
     provider: 'AGODA',
+    connectionMode: 'ICAL',
+    enabled: false,
+    connected: false,
+    status: 'DISCONNECTED',
+    stats: { totalBookings: 0, monthlyRevenue: 0, occupancyRate: 0 }
+  },
+  {
+    id: 'trip',
+    name: 'Trip.com',
+    provider: 'TRIP',
     connectionMode: 'ICAL',
     enabled: false,
     connected: false,
@@ -1220,6 +1230,7 @@ function DemoChannelsView() {
     const colors: Record<Channel['provider'], string> = {
       BOOKING_COM: 'bg-blue-500',
       AGODA: 'bg-red-500',
+      TRIP: 'bg-sky-500',
       EXPEDIA: 'bg-yellow-500',
       AIRBNB: 'bg-pink-500'
     }

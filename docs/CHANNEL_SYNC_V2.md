@@ -6,7 +6,7 @@ Status: **lite finalization candidate on `feat/channel-sync-lite-finalize`; exte
 
 The current operating mode is:
 
-- inbound reservations and changes: near-live Gmail polling into the existing review inbox;
+- inbound reservations and changes: near-live Gmail polling into the Booking Inbox, with tightly gated automation for verified new bookings only;
 - outbound availability: explicit manual queue with owner/manager approval and provider confirmation;
 - direct API access: Agoda and Trip.com application tracks run in parallel;
 - future true two-way distribution: prefer Channex as a channel-only layer rather than buying or operating a second PMS.
@@ -15,7 +15,7 @@ The SANDBOX HOTEL PMS remains the sole system of record for reservations, invent
 
 ## What “near-live” means
 
-The scheduler polls every 120 seconds by default. It is not a webhook and it is not guaranteed zero-lag delivery.
+The scheduler polls every 30 seconds by default. It is not a webhook and it is not guaranteed zero-lag delivery.
 
 A scheduled pass:
 
@@ -23,27 +23,34 @@ A scheduled pass:
 2. polls only Gmail-backed source types supported by the lite synchronizer and records unsupported source types as skipped;
 3. fetches a bounded set of recent Gmail messages through OAuth;
 4. uses existing source-message and booking-reference de-duplication;
-5. parses and stores review events;
+5. stores the raw message plus deterministic extraction and automation-decision JSON;
 6. optionally recognizes allowlisted `/ops` commands through the existing guarded intake;
 7. records source sync timestamps/errors;
-8. leaves booking, cancellation, modification, and payment application to the review workflow.
+8. may create and room-assign only a verified, high-confidence new booking when the global policy and source opt-in are both enabled; cancellation, modification, payment, guest-message, unknown, conflicting, or unmapped events remain in review and notify a manager once.
 
-The scheduler always calls `syncBookingEmail` with `reviewOnly: true`. Its policy also reports `operationalMutationsEnabled: false`.
+The scheduler calls `syncBookingEmail` in review-only mode unless `BOOKING_EMAIL_AUTONOMY_ENABLED=true` and at least one owner-approved trusted sender domain is configured. The source must also be explicitly enabled for safe-event automation. Historical backfill and reprocessing remain review-only regardless of this setting.
 
 ### Configuration
 
 ```dotenv
 BOOKING_EMAIL_NEAR_LIVE_ENABLED=true
-BOOKING_EMAIL_SYNC_INTERVAL_SECONDS=120
+BOOKING_EMAIL_SYNC_INTERVAL_SECONDS=30
 BOOKING_EMAIL_SYNC_BATCH_LIMIT=25
 BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.com
 BOOKING_EMAIL_GMAIL_USER_ID=me
 BOOKING_EMAIL_GMAIL_CLIENT_ID=...
 BOOKING_EMAIL_GMAIL_CLIENT_SECRET=...
 BOOKING_EMAIL_GMAIL_REFRESH_TOKEN=...
+BOOKING_EMAIL_AUTONOMY_ENABLED=false
+BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS=
+BOOKING_EMAIL_AUTONOMY_MIN_CONFIDENCE=0.95
+BOOKING_EMAIL_AUTO_ASSIGN_ROOMS=true
+BOOKING_EMAIL_REQUIRE_AUTHENTICATION_RESULTS=true
+BOOKING_EMAIL_REQUIRE_CORROBORATION=false
+BOOKING_EMAIL_NOTIFY_MANAGER=true
 ```
 
-Polling is enabled only when the explicit flag is true **and** Gmail OAuth is complete. The interval is bounded to 30–3,600 seconds; the batch is bounded to 1–250 messages. Secret values belong in the deployment secret store.
+Polling is enabled only when the explicit near-live flag is true **and** Gmail OAuth is complete. Autonomous writes remain disabled by default and require the separate global switch, approved sender domains, source opt-in, a confidence threshold of at least 0.95, authenticated sender evidence, and an unambiguous room mapping. The interval is bounded to 30–3,600 seconds; the batch is bounded to 1–250 messages. Secret values belong in the deployment secret store.
 
 ### Failure behavior
 

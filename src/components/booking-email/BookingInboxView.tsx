@@ -35,7 +35,7 @@ import {
 import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
 import { useNavigation } from '@/hooks/use-navigation'
 import { cn } from '@/lib/utils'
-import type { BookingEmailEvent, BookingEmailEventStatus } from '@/types/booking-email'
+import type { BookingEmailEvent, BookingEmailEventStatus, BookingEmailSource } from '@/types/booking-email'
 
 type InboxTab = 'NEEDS_REVIEW' | 'PROCESSED' | 'ERROR' | 'IGNORED' | 'SOURCES'
 
@@ -128,6 +128,7 @@ export function BookingInboxView() {
   })
   const canUseBackend = capabilities.canApplyEvents
   const canSyncMailbox = capabilities.canSyncMailbox
+  const autonomy = status?.automation
 
   const counts = useMemo(() => ({
     NEEDS_REVIEW: events.filter((event) => event.status === 'NEEDS_REVIEW').length,
@@ -221,6 +222,22 @@ export function BookingInboxView() {
     }
   }
 
+  const toggleSourceAutomation = async (source: BookingEmailSource) => {
+    if (!canUseBackend) {
+      requireBackend()
+      return
+    }
+    const enabling = !source.autoProcessSafeEvents
+    if (enabling && !window.confirm('Enable controlled autonomy for high-confidence new bookings from this source? Manager review remains required for blocked or low-confidence events.')) return
+    try {
+      const payload = await bookingEmailApi.updateSource(authToken, source.id, { autoProcessSafeEvents: enabling })
+      toast.success(payload.message || 'Booking email source automation updated.')
+      await reload()
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : 'Could not update booking email source automation.')
+    }
+  }
+
   const approve = async (event: BookingEmailEvent) => {
     if (!canUseBackend) {
       requireBackend()
@@ -285,7 +302,7 @@ export function BookingInboxView() {
             </div>
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">Booking Inbox</h1>
-              <p className="mt-1 text-sm text-white/65">Review email-derived booking events before they change PMS reservations, folios, or rooms.</p>
+              <p className="mt-1 text-sm text-white/65">Near-live Gmail extraction with controlled high-confidence booking creation, room assignment, and manager review.</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -332,6 +349,24 @@ export function BookingInboxView() {
               <Button variant="outline" className="border-amber-300 bg-white/70" onClick={() => setActiveTab('SOURCES')}>
                 View source settings
               </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {canUseBackend && (
+          <Card className={cn('rounded-lg py-0', autonomy?.operationalMutationsEnabled ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white')}>
+            <CardContent className="flex flex-col gap-2 p-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="font-semibold">{autonomy?.operationalMutationsEnabled ? 'Controlled booking autonomy enabled' : 'Review-first booking intake'}</div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {autonomy?.operationalMutationsEnabled
+                    ? `Only trusted, authenticated new-booking emails at ${(autonomy.minimumConfidence * 100).toFixed(0)}%+ confidence can create and auto-assign mapped rooms. Other events notify the manager once.`
+                    : 'Mailbox events are extracted into structured JSON and queued for review. Server autonomy and at least one source opt-in are required before automatic PMS writes.'}
+                </p>
+              </div>
+              <Badge variant="outline" className={autonomy?.operationalMutationsEnabled ? 'border-emerald-300 bg-white text-emerald-800' : 'border-slate-300 bg-slate-50 text-slate-700'}>
+                {autonomy?.operationalMutationsEnabled ? 'Autonomy guardrails active' : 'No automatic PMS writes'}
+              </Badge>
             </CardContent>
           </Card>
         )}
@@ -426,6 +461,15 @@ export function BookingInboxView() {
                               </Badge>
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">{source.mailbox || source.provider}</div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <Badge variant="outline" className={source.autoProcessSafeEvents ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-700'}>
+                                {source.autoProcessSafeEvents ? 'Source autonomy on' : 'Source review-only'}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground">Source threshold {(source.reviewThreshold * 100).toFixed(0)}%</span>
+                              <Button size="sm" variant="outline" disabled={!canUseBackend} onClick={() => void toggleSourceAutomation(source)}>
+                                {source.autoProcessSafeEvents ? 'Disable autonomy' : 'Enable autonomy'}
+                              </Button>
+                            </div>
                             {source.lastError && <div className="mt-2 text-xs text-rose-700">{source.lastError}</div>}
                           </div>
                         ))}
@@ -601,6 +645,9 @@ function BookingEmailEventCard({
             <Badge variant="outline">{formatEventType(event.eventType)}</Badge>
             <Badge variant="outline">{confidenceLabel(event.confidence)}</Badge>
             {event.duplicateOfEventId && <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-800">Possible duplicate</Badge>}
+            {event.automationDecision?.stage === 'AUTO_APPLIED' && <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">Auto-created + room assigned</Badge>}
+            {event.automationDecision?.stage?.startsWith('AUTO_LINKED') && <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-800">Auto-linked</Badge>}
+            {event.managerReviewNotifiedAt && <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">Manager notified</Badge>}
           </div>
 
           <div>
@@ -619,6 +666,17 @@ function BookingEmailEventCard({
             <EventFact label="Amount / payment" value={amountLabel(event)} />
             <EventFact label="Reservation" value={event.reservationConfirmation || event.reservationId || 'Not matched'} />
           </div>
+
+          {event.automationDecision && (
+            <div className="rounded-md border border-sky-100 bg-sky-50/60 p-3 text-xs text-sky-950">
+              <div className="font-semibold">Automation evidence</div>
+              <div className="mt-1 text-sky-900/80">
+                Stage {event.automationDecision.stage || 'EXTRACTED'} · corroborating emails {event.automationDecision.corroborationCount || 0}
+                {event.automationDecision.resolvedRoomTypeCode ? ` · mapped room type ${event.automationDecision.resolvedRoomTypeCode}` : ''}
+              </div>
+              {event.automationDecision.blockers?.length ? <div className="mt-1 text-amber-800">{event.automationDecision.blockers.join(' ')}</div> : null}
+            </div>
+          )}
 
           <div className="rounded-md border bg-muted/30 p-3 text-sm">
             <div className="font-medium">Operational reason</div>

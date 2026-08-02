@@ -4,6 +4,8 @@ Checked command-based items reflect point-in-time evidence recorded in `docs/lau
 
 Current release posture (2026-08-01): **core PMS engineering-ready and provider-deployed; full operational sign-off remains open**. Merged `main` is `8c22f55ab6503dd5121886b611db9f880911101a` from PR #194. GitHub run `30706415049` passed both required jobs. The paid Render PMS and isolated dry-run OTA worker serve that exact revision, both public domains are verified on the paid PMS, and post-cutover live and edge checks pass. This does not enable real OTA writes or prove credentialed staff acceptance, payment-provider operation, or a recovery restore drill. See `docs/launch/evidence/2026-08-01-final-pms-release.md`.
 
+Local candidate note (2026-08-02): controlled booking-email autonomy is implemented in the dirty `codex/bookinginbox` checkout with the global switch disabled by default. Non-database validation is green. Disposable-database acceptance could not run because Docker Desktop was unavailable; the migration is not deployed, live sender domains and room mappings are not accepted, and production autonomy is not enabled. See `docs/launch/evidence/2026-08-02-booking-email-controlled-autonomy.md`.
+
 ## Historical 2026-07-04 to 2026-07-07 Evidence Refresh
 
 - [x] Owner-directed completion deploy: commit `d18ea06eb974621281c43a57cf4d5a41994c2775` passed GitHub CI run `28800962218`, deployed live to Render as `dep-d966aj9kh4rs73d9h10g`, and passed post-deploy `live:check`, `public-edge:proof`, `prod:preflight`, and redacted Render Gmail OAuth status on 2026-07-07. Remaining external proof gaps are owner-accepted operational risk; see `docs/launch/evidence/2026-07-07-owner-completion-deploy-and-issue-closure.md`.

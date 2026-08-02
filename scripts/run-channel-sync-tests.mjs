@@ -208,6 +208,16 @@ async function run() {
   assert.equal(enabled.intervalSeconds, 120)
   assert.equal(enabled.batchLimit, 25)
   assert.equal(enabled.credentialMode, 'refresh_token')
+  assert.equal(enabled.reviewOnly, true)
+  assert.equal(enabled.operationalMutationsEnabled, false)
+
+  const autonomous = getBookingEmailSyncPolicy(bookingEmailEnv({
+    BOOKING_EMAIL_AUTONOMY_ENABLED: 'true',
+    BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS: 'booking.com,agoda.com,trip.com',
+  }))
+  assert.equal(autonomous.reviewOnly, false)
+  assert.equal(autonomous.operationalMutationsEnabled, true)
+  assert.equal(autonomous.automation.minimumConfidence, 0.95)
 
   const bounded = getBookingEmailSyncPolicy(bookingEmailEnv({
     BOOKING_EMAIL_SYNC_INTERVAL_SECONDS: '2',
