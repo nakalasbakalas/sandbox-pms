@@ -116,6 +116,25 @@ Booking Inbox operators:
 7. Treat the public sync request body as untrusted. It rejects caller-supplied `events`; use the bounded Gmail backfill helper for provider-fetched history.
 8. Use Reprocess only for stale `NEEDS_REVIEW` or `ERROR` events after parser changes; reprocess returns the event to the review queue and does not auto-approve it.
 9. Treat missing mailbox sync credentials as a provider setup issue; existing imported events can still be reviewed if backend routes are available.
+10. In Sources / Settings, only a manager or administrator may enable controlled autonomy for a source. The global server policy must already report ready.
+11. Confirm each OTA room label is mapped to exactly one PMS room type and the intended operational room ids before enabling source autonomy. Trip.com mappings use provider `TRIP`.
+12. Treat `Manager notified` as an exception requiring review. Resolve missing/contradictory guest, stay, amount, provider, authentication, room-mapping, or room-availability evidence; do not lower the 95% hard floor.
+13. Verify processed cards show `AUTO_APPLIED` or an `AUTO_LINKED_*` decision and open the Booking Board to confirm the assigned room and stay dates.
+
+Controlled near-live activation (production owner step):
+
+```powershell
+BOOKING_EMAIL_NEAR_LIVE_ENABLED=true
+BOOKING_EMAIL_SYNC_INTERVAL_SECONDS=30
+BOOKING_EMAIL_AUTONOMY_ENABLED=true
+BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS=<owner-approved comma-separated domains>
+BOOKING_EMAIL_AUTONOMY_MIN_CONFIDENCE=0.95
+BOOKING_EMAIL_AUTO_ASSIGN_ROOMS=true
+BOOKING_EMAIL_REQUIRE_AUTHENTICATION_RESULTS=true
+BOOKING_EMAIL_NOTIFY_MANAGER=true
+```
+
+Keep `BOOKING_EMAIL_REQUIRE_CORROBORATION=false` unless the owner requires a second consistent provider email before any automatic creation. Activation is incomplete until Gmail profile proof, real provider-message parser proof, every active OTA room mapping, a safe test booking, Booking Board assignment, and manager notification behavior are verified in the target environment.
 
 Historical booking mailbox capture:
 

@@ -1,5 +1,6 @@
 import { getOpsScanPolicy, runOpsScan, submitOpsCommand } from './ops-service.mjs'
 import {
+  bookingEmailAutomationPolicy,
   bookingEmailGmailCredentialStatus,
   listBookingEmailSources,
   syncBookingEmail,
@@ -59,9 +60,10 @@ function disabledReasonForPolicy(policy) {
 
 export function getBookingEmailSyncPolicy(env = process.env) {
   const requested = envEnabled(env.BOOKING_EMAIL_NEAR_LIVE_ENABLED)
-  const intervalSeconds = boundedInteger(env.BOOKING_EMAIL_SYNC_INTERVAL_SECONDS, 120, 30, 3_600)
+  const intervalSeconds = boundedInteger(env.BOOKING_EMAIL_SYNC_INTERVAL_SECONDS, 30, 30, 3_600)
   const batchLimit = boundedInteger(env.BOOKING_EMAIL_SYNC_BATCH_LIMIT, 25, 1, 250)
   const credentials = bookingEmailGmailCredentialStatus(env)
+  const automation = bookingEmailAutomationPolicy(env)
   const enabled = requested && credentials.configured
 
   return {
@@ -70,8 +72,9 @@ export function getBookingEmailSyncPolicy(env = process.env) {
     enabled,
     intervalSeconds,
     batchLimit,
-    reviewOnly: true,
-    operationalMutationsEnabled: false,
+    reviewOnly: !automation.operationalMutationsEnabled,
+    operationalMutationsEnabled: automation.operationalMutationsEnabled,
+    automation,
     disabledReason: enabled
       ? null
       : !requested
@@ -90,8 +93,9 @@ function initialBookingEmailState(policy) {
     enabled: policy.enabled,
     intervalSeconds: policy.intervalSeconds,
     batchLimit: policy.batchLimit,
-    reviewOnly: true,
-    operationalMutationsEnabled: false,
+    reviewOnly: policy.reviewOnly,
+    operationalMutationsEnabled: policy.operationalMutationsEnabled,
+    automation: policy.automation,
     status: policy.enabled ? 'IDLE' : 'DISABLED',
     disabledReason: policy.disabledReason,
     credentialMode: policy.credentialMode,
@@ -247,7 +251,7 @@ export function createHotelOpsScanScheduler(options = {}) {
             db,
             {
               sourceId: source.id,
-              reviewOnly: true,
+              reviewOnly: emailState.reviewOnly,
               limit: emailState.batchLimit,
               schedulerTrigger: trigger,
             },
@@ -346,7 +350,7 @@ export function createHotelOpsScanScheduler(options = {}) {
       }, state.bookingEmail.intervalSeconds * 1_000)
       bookingEmailTimer?.unref?.()
       bookingEmailStarted = true
-      logger.log?.(`Near-live booking email scheduler active every ${state.bookingEmail.intervalSeconds} seconds (review-only).`)
+      logger.log?.(`Near-live booking email scheduler active every ${state.bookingEmail.intervalSeconds} seconds (${state.bookingEmail.reviewOnly ? 'review-only' : 'controlled autonomy'}).`)
     }
 
     if (scanStarted || bookingEmailStarted) {

@@ -1,8 +1,10 @@
 # Launch Proof Matrix
 
-Status date: 2026-08-01.
+Status date: 2026-08-02.
 
 Verdict: **core PMS engineering-ready and provider-deployed; full operational sign-off remains open.** [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) defines engineering-ready, staging-proven, owner-approved, and provider-proven. The exact 2026-08-01 candidate now has current repository, CI, Render migration/deploy, public routing, deep-health, Cloudflare edge, and signed dry-run worker proof. Credentialed production RBAC, staff acceptance, live OTA writes, payment-provider collection, and an actual recovery restore drill remain open unless their rows gain exact evidence.
+
+The 2026-08-02 booking-email autonomy change is newer local evidence, not part of the deployed 2026-08-01 candidate. Its full launch gate and disposable-database acceptance pass. Live Gmail identity/provider-domain traffic and Render OAuth/service/database readiness were inspected; deployment, mapping acceptance, staff acceptance, and production autonomy enablement remain open.
 
 Merged `main` is `8c22f55ab6503dd5121886b611db9f880911101a`. PR #194 passed both required GitHub jobs in run `30706415049` and merged. The paid PMS deploy `dep-d9n1p93l550s7395ekog` ran migration-only predeploy successfully; worker deploy `dep-d9n1p38ae00c73amj6fg` and signed job `job-d9n1qf3l550s7395git0` prove the isolated dry-run path. Public `book` and `staff` domains are verified on the paid service. Detailed proof and remaining boundaries are in `evidence/2026-08-01-final-pms-release.md`; older table wording below is historical unless that record supersedes it.
 
@@ -32,7 +34,7 @@ Owner-proof intake aid: `docs/launch/evidence/P0_OWNER_PROOF_HANDOFF.md` lists t
 | LINE messaging | Optional/manual unless required by owner. | If required, record credentials configured, signed webhook verification, and send-test proof without exposing secrets. |
 | OTA automation | iCal/manual metadata only. | No live Booking.com, Agoda, Expedia, Airbnb, or other OTA API/browser automation claim without adapter evidence, challenge handling, dry-run/default safety, and account-owner approval. |
 | Payments | PMS-recorded payments only. | No live card, PromptPay, bank-transfer collection, or gateway claim without provider credentials, callback proof, reconciliation proof, and finance owner acceptance. |
-| Booking email capture | Loaded for staff review; review-only until accepted. | Slice 5BW configures Render backend Gmail OAuth with the booking-specific refresh-token tuple `ready=true`, deploys chunked confirmed backfill handling as `dep-d94reknlk1mc73bqndq0`, and imports 1000 provider-query messages into `/booking-inbox` as review-only events. `npm run booking-email:proof` then reported 1000 total/source-message events, all `NEEDS_REVIEW`, 0 processed, 0 errors, and 0 ignored. Output omitted message ids, senders, recipients, subjects, raw email text, guest data, payment data, and credentials. Nick accepted the expert posture that imported events remain review-only until Nick and staff accept parser quality; no reservation, cancellation, payment, or guest-message action is applied until staff approval. |
+| Booking email capture and controlled autonomy | Historical capture is loaded for review; a newer autonomous-new-booking path is locally database-proven but not deployed or enabled. | Slice 5BW proves the historical 1000-message review-only backfill. [2026-08-02 evidence](evidence/2026-08-02-booking-email-controlled-autonomy.md) records the newer double-opt-in, authenticated, high-confidence, mapped-room path, passing guarded database/full launch gates, correct live Gmail identity, observed provider-domain families, and ready redacted backend OAuth path. Historical backfill/reprocess and non-new-booking event types remain review-only. | Approve every live OTA room mapping; deploy the exact revision and migration with autonomy disabled; observe near-live ingestion; complete manager/front-desk acceptance; then separately enable the global and source switches. |
 
 ## Proof Standards
 

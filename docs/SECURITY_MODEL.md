@@ -38,6 +38,10 @@ Autonomy shadow records are evidence, not execution authority. GPT or a future a
 - Booking email credential diagnostics may expose boolean readiness, missing environment key names, target mailbox, scope names, and redacted Gmail API connection status, but must not expose token, client-secret, authorization-code, password, or authorization-header values.
 - Booking email historical backfill must be dry-run first or explicitly confirmed; CLI output must omit message ids, senders, recipients, subjects, raw body text, guest data, payment data, and credential values.
 - Booking email parsing must not auto-route OTA account-security notices, partner reports, invoices, or other non-reservation provider mail into reservation/payment mutations; those messages stay `UNKNOWN` and require manual staff review.
+- Booking email autonomy is double opt-in: a backend kill switch plus a manager-enabled source. It never auto-applies payments, modifications, cancellations, guest messages, or unknown events.
+- Automatic new-booking creation requires an owner-configured sender-domain allowlist, Gmail SPF/DKIM pass evidence by default, a provider reference, a 0.95 minimum confidence floor, non-conflicting duplicate evidence, one active property/provider room mapping, and an assignable mapped room. Email text alone is never sender authority.
+- Booking email extraction and decisions are stored as JSON evidence; manager notifications contain bounded decision metadata, not raw bodies or guest details. `managerReviewNotifiedAt` is claimed before notification creation so polling replays do not create notification storms.
+- Changing `autoProcessSafeEvents` or its active threshold requires manager or administrator authority. Historical backfill and reprocess are always review-only, even when live autonomy is enabled.
 - Staff accounts lock after three failed login attempts. Admin password reset is the approved unlock path and must clear failed attempts without exposing password hashes or prior passwords.
 - In server mode, the HTTP-only backend session is the identity authority. Do not persist the authenticated user, role, email, session token, or legacy auth token in browser storage; stale bootstrap responses must not override a newer login or logout.
 - Server onboarding may persist a credential-free draft only. Admin password and confirmation values remain memory-only, and legacy onboarding keys that may contain credentials are removed before and after setup.
@@ -192,7 +196,7 @@ OTA status crosses a strict provider-adapter contract boundary. The public DTO u
 - No CAPTCHA or 2FA bypass.
 - No real OTA write execution without dry-run removal, selector verification, and account-owner approval.
 - No production claim for email delivery unless a real provider is configured and tested.
-- No production claim that historical bookings are loaded into operational reservations until imported Booking Email Events are reviewed and approved through the PMS.
+- No production autonomy claim until Gmail identity, trusted sender domains, SPF/DKIM evidence, real provider templates, OTA room mappings, assigned-room board state, duplicate behavior, and low-confidence manager notification are proven in the target environment. Historical imports still require review.
 - No launch-ready claim from local tests alone.
 - No production satang-authority claim before reconciliation and rollback proof.
 - No claim that legacy iCal tokens are removed in an environment until the migration is applied there and a key-only postcondition check passes.

@@ -15,6 +15,7 @@ export interface BookingEmailParsedDetails {
   checkIn?: string
   checkOut?: string
   roomType?: string
+  externalRoomType?: string
   adults?: number
   children?: number
   childAges?: number[]
@@ -56,6 +57,24 @@ export interface BookingEmailEvent {
   reservationId?: string
   reservationConfirmation?: string
   duplicateOfEventId?: string
+  automationDecision?: {
+    version?: string
+    stage?: 'EXTRACTED' | 'EVALUATING' | 'REVIEW_REQUIRED' | 'AUTO_APPLIED' | 'AUTO_LINKED_DUPLICATE' | 'AUTO_LINKED_EXISTING' | 'ERROR' | string
+    confidence?: number
+    corroborationCount?: number
+    corroboratingEventIds?: string[]
+    conflictingFields?: string[]
+    blockers?: string[]
+    provider?: string
+    channelMappingIds?: string[]
+    resolvedRoomTypeId?: string
+    resolvedRoomTypeCode?: string
+    assignedRoomId?: string
+    reservationId?: string
+    duplicateOfEventId?: string | null
+    evaluatedAt?: string
+  }
+  managerReviewNotifiedAt?: string
   sourceEmailId?: string
   parsedDetails?: BookingEmailParsedDetails
   createdAt?: string
@@ -101,6 +120,19 @@ export interface BookingEmailStatus {
   processedToday: number
   errors: number
   ignored: number
+  automation?: {
+    version: string
+    requested: boolean
+    configured: boolean
+    operationalMutationsEnabled: boolean
+    autoAssignRooms: boolean
+    notifyManager: boolean
+    requireAuthenticationResults: boolean
+    requireCorroboration: boolean
+    minimumConfidence: number
+    trustedSenderDomainCount: number
+    missing: string[]
+  }
   sources: BookingEmailSource[]
   message?: string
 }

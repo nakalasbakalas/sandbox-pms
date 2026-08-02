@@ -684,6 +684,8 @@ async function createRoomStatusLog(tx, room, toStatus, actor, notes) {
 
 const DEFAULT_BOOKING_EMAIL_MAILBOX = 'booking@sandboxhotel.com'
 const BOOKING_EMAIL_DEFAULT_REVIEW_THRESHOLD = 0.85
+const BOOKING_EMAIL_AUTONOMY_VERSION = 'booking-email-autonomy-v1'
+const BOOKING_EMAIL_MIN_AUTONOMOUS_CONFIDENCE = 0.95
 const BOOKING_EMAIL_GMAIL_MISSING_CREDENTIALS_MESSAGE = 'Gmail API OAuth credentials are not configured for this server.'
 const LOGIN_FAILURE_LOCK_LIMIT = 3
 const VALID_BOOKING_EMAIL_STATUSES = ['NEEDS_REVIEW', 'PROCESSED', 'ERROR', 'IGNORED']
@@ -711,6 +713,44 @@ function primaryBookingMailbox() {
 
 function primaryBookingMailboxFromEnv(env = process.env) {
   return String(env.BOOKING_EMAIL_PRIMARY_MAILBOX || DEFAULT_BOOKING_EMAIL_MAILBOX).trim().toLowerCase()
+}
+
+function bookingEmailEnvFlag(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback
+  return ['1', 'true', 'yes', 'on', 'enabled'].includes(String(value).trim().toLowerCase())
+}
+
+function bookingEmailTrustedSenderDomains(env = process.env) {
+  return [...new Set(String(env.BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS || '')
+    .split(/[\s,]+/)
+    .map((domain) => domain.trim().toLowerCase().replace(/^@/, '').replace(/^\.+|\.+$/g, ''))
+    .filter((domain) => /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)))]
+}
+
+export function bookingEmailAutomationPolicy(env = process.env) {
+  const requested = bookingEmailEnvFlag(env.BOOKING_EMAIL_AUTONOMY_ENABLED)
+  const trustedSenderDomains = bookingEmailTrustedSenderDomains(env)
+  const configured = requested && trustedSenderDomains.length > 0
+  const requestedConfidence = Number(env.BOOKING_EMAIL_AUTONOMY_MIN_CONFIDENCE)
+  const minimumConfidence = Number.isFinite(requestedConfidence)
+    ? Math.min(0.99, Math.max(BOOKING_EMAIL_MIN_AUTONOMOUS_CONFIDENCE, requestedConfidence))
+    : BOOKING_EMAIL_MIN_AUTONOMOUS_CONFIDENCE
+  const missing = []
+  if (requested && trustedSenderDomains.length === 0) missing.push('BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS')
+
+  return {
+    version: BOOKING_EMAIL_AUTONOMY_VERSION,
+    requested,
+    configured,
+    operationalMutationsEnabled: configured,
+    autoAssignRooms: configured && bookingEmailEnvFlag(env.BOOKING_EMAIL_AUTO_ASSIGN_ROOMS, true),
+    notifyManager: bookingEmailEnvFlag(env.BOOKING_EMAIL_NOTIFY_MANAGER, true),
+    requireAuthenticationResults: bookingEmailEnvFlag(env.BOOKING_EMAIL_REQUIRE_AUTHENTICATION_RESULTS, true),
+    requireCorroboration: bookingEmailEnvFlag(env.BOOKING_EMAIL_REQUIRE_CORROBORATION, false),
+    minimumConfidence,
+    trustedSenderDomains,
+    missing,
+  }
 }
 
 function gmailScopeList(env = process.env) {
@@ -844,10 +884,45 @@ function normalizeRoomTypeCode(value) {
   return text.replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 16) || undefined
 }
 
+function normalizedBookingEmailMatchValue(value) {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '')
+}
+
+function bookingEmailSenderDomain(sender) {
+  return String(sender || '').toLowerCase().match(/@([a-z0-9.-]+\.[a-z]{2,})\b/i)?.[1] || null
+}
+
+function domainMatchesTrustedSender(domain, trustedDomains) {
+  const normalized = String(domain || '').trim().toLowerCase().replace(/^@/, '').replace(/^\.+|\.+$/g, '')
+  return Boolean(normalized && trustedDomains.some((trusted) => normalized === trusted || normalized.endsWith(`.${trusted}`)))
+}
+
+export function bookingEmailAuthenticationPass(rawHeaders, trustedDomains) {
+  const value = String(safeJsonObject(rawHeaders).authenticationResults || '').toLowerCase()
+  if (!value) return false
+  const authenticatedDomains = [
+    ...[...value.matchAll(/\bdkim=pass\b[^;\r\n]*(?:header\.d|header\.i)=@?([a-z0-9.-]+\.[a-z]{2,})\b/g)].map((match) => match[1]),
+    ...[...value.matchAll(/\bspf=pass\b[^;\r\n]*smtp\.mailfrom=(?:[^@\s;<>]+@)?([a-z0-9.-]+\.[a-z]{2,})\b/g)].map((match) => match[1]),
+    ...[...value.matchAll(/\bdmarc=pass\b[^;\r\n]*header\.from=([a-z0-9.-]+\.[a-z]{2,})\b/g)].map((match) => match[1]),
+  ]
+  return authenticatedDomains.some((domain) => domainMatchesTrustedSender(domain, trustedDomains))
+}
+
+function bookingEmailChannelProvider(event) {
+  const source = normalizeBookingSourceFromEmail(event.sender, event.sourceName)
+  if (source === 'BOOKING_COM') return 'BOOKING_COM'
+  if (source === 'AGODA') return 'AGODA'
+  if (source === 'EXPEDIA') return 'EXPEDIA'
+  if (source === 'AIRBNB') return 'AIRBNB'
+  if (source === 'TRIP') return 'TRIP'
+  return null
+}
+
 function normalizeBookingSourceFromEmail(sender, sourceName) {
   const text = `${sender || ''} ${sourceName || ''}`.toLowerCase()
   if (text.includes('booking.com') || text.includes('bookingcom')) return 'BOOKING_COM'
   if (text.includes('agoda')) return 'AGODA'
+  if (text.includes('trip.com') || text.includes('tripcom') || text.includes('ctrip')) return 'TRIP'
   if (text.includes('expedia')) return 'EXPEDIA'
   if (text.includes('airbnb')) return 'AIRBNB'
   return 'EMAIL'
@@ -999,10 +1074,12 @@ export function parseBookingEmailDetails(input = {}) {
   const checkOut = dateKeyOrUndefined(input.checkOut || parsedInput.checkOut)
     || parseDateFromText(['check out', 'check-out', 'checkout', 'departure'], combined)
     || stayDateRange?.end
-  const roomType = normalizeRoomTypeCode(input.roomType || parsedInput.roomType)
-    || normalizeRoomTypeCode(firstMatch([
+  const externalRoomType = normalizeNullableString(input.externalRoomType || parsedInput.externalRoomType)
+    || firstMatch([
       /\b(?:room type|room category|accommodation|unit type)\s*[:#-]?\s*([A-Za-z][A-Za-z0-9 /&'()-]{2,80}?)(?=\s+(?:adults?|children|check(?:\s*|-)?in|arrival|check(?:\s*|-)?out|departure|amount|total|payment|special requests?|notes?|booking|reservation|reference)\b|$)/i,
-    ], combined))
+    ], combined)
+  const roomType = normalizeRoomTypeCode(input.roomType || parsedInput.roomType)
+    || normalizeRoomTypeCode(externalRoomType)
     || (/\bdouble\b/i.test(combined) ? 'DOUBLE' : /\btwin\b/i.test(combined) ? 'TWIN' : undefined)
   const money = parseMoney(combined)
   const amount = Number(input.amount ?? parsedInput.amount ?? money.amount)
@@ -1044,6 +1121,7 @@ export function parseBookingEmailDetails(input = {}) {
     checkIn,
     checkOut,
     roomType,
+    externalRoomType: externalRoomType || undefined,
     adults: Number.isInteger(adults) && adults > 0 ? adults : 1,
     children: Number.isInteger(children) && children >= 0 ? children : 0,
     amount: Number.isFinite(amount) && amount > 0 ? roundMoney(amount) : undefined,
@@ -1151,6 +1229,8 @@ function bookingEmailEventResponse(event) {
     reservationId: event.reservationId || undefined,
     reservationConfirmation: event.reservation?.confirmationCode || undefined,
     duplicateOfEventId: event.duplicateOfEventId || undefined,
+    automationDecision: safeJsonObject(event.automationDecision),
+    managerReviewNotifiedAt: isoOrUndefined(event.managerReviewNotifiedAt),
     sourceEmailId: event.sourceMessageId || undefined,
     parsedDetails,
     createdAt: isoOrUndefined(event.createdAt),
@@ -1320,6 +1400,8 @@ export async function fetchGmailEventsForSource(source, options = {}) {
         rawHeaders: {
           messageId: gmailHeader(message, 'message-id'),
           date: gmailHeader(message, 'date'),
+          authenticationResults: gmailHeader(message, 'authentication-results'),
+          replyTo: gmailHeader(message, 'reply-to'),
         },
       })
     }
@@ -1375,6 +1457,50 @@ async function findDuplicateBookingEmailEvent(tx, sourceId, parsed, input, event
   return null
 }
 
+function bookingEmailCorroborationValue(field, value) {
+  if (field === 'amount') {
+    const amount = Number(value)
+    return Number.isFinite(amount) ? roundMoney(amount).toFixed(2) : ''
+  }
+  return normalizedBookingEmailMatchValue(value)
+}
+
+async function findBookingEmailCorroboration(tx, propertyId, parsed, eventId) {
+  if (!parsed.channelRef || parsed.eventType === 'UNKNOWN') return { count: 0, eventIds: [], conflicts: [] }
+  const candidates = await tx.bookingEmailEvent.findMany({
+    where: {
+      id: eventId ? { not: eventId } : undefined,
+      propertyId,
+      channelRef: parsed.channelRef,
+      eventType: parsed.eventType,
+    },
+    orderBy: { receivedAt: 'asc' },
+    take: 25,
+  })
+  const target = safeJsonObject(parsed.details)
+  const corroborating = []
+  const conflicts = new Set()
+  for (const candidate of candidates) {
+    const candidateDetails = safeJsonObject(candidate.parsedDetails)
+    const candidateConflicts = []
+    for (const field of ['guestName', 'checkIn', 'checkOut', 'roomType', 'amount']) {
+      const left = bookingEmailCorroborationValue(field, target[field])
+      const right = bookingEmailCorroborationValue(field, candidateDetails[field] ?? candidate[field])
+      if (left && right && left !== right) candidateConflicts.push(field)
+    }
+    if (candidateConflicts.length > 0) {
+      candidateConflicts.forEach((field) => conflicts.add(field))
+      continue
+    }
+    corroborating.push(candidate.id)
+  }
+  return {
+    count: corroborating.length,
+    eventIds: corroborating.slice(0, 10),
+    conflicts: [...conflicts],
+  }
+}
+
 async function findReservationForBookingEmailEvent(tx, event, details = safeJsonObject(event.parsedDetails)) {
   if (event.reservationId) {
     const reservation = await tx.reservation.findFirst({
@@ -1420,12 +1546,14 @@ async function findReservationForBookingEmailEvent(tx, event, details = safeJson
 async function buildBookingEmailEventData(tx, source, input, existingEventId = undefined) {
   const parsed = parseBookingEmailDetails(input)
   const duplicateEvent = await findDuplicateBookingEmailEvent(tx, source.id, parsed, input, existingEventId)
+  const corroboration = await findBookingEmailCorroboration(tx, source.propertyId, parsed, existingEventId)
   const sourceMessageId = normalizeNullableString(input.sourceMessageId || input.sourceEmailId || input.gmailMessageId || input.messageId)
   const status = normalizeBookingEmailStatus(input.status, 'NEEDS_REVIEW')
+  const confidence = Math.min(0.99, roundMoney(Number(input.confidence ?? parsed.confidence) + Math.min(0.04, corroboration.count * 0.02)))
   const reviewReason = [
     normalizeNullableString(input.reviewReason),
     parsed.reviewReason,
-    duplicateEvent ? `Possible duplicate of email event ${duplicateEvent.id}.` : null,
+    corroboration.conflicts.length > 0 ? `Conflicting duplicate evidence for ${corroboration.conflicts.join(', ')}.` : null,
   ].filter(Boolean).join(' ') || null
 
   return {
@@ -1442,7 +1570,7 @@ async function buildBookingEmailEventData(tx, source, input, existingEventId = u
     receivedAt: input.receivedAt ? new Date(input.receivedAt) : new Date(),
     eventType: parsed.eventType,
     status,
-    confidence: Number(input.confidence ?? parsed.confidence),
+    confidence,
     channelRef: parsed.channelRef,
     guestName: parsed.details.guestName || null,
     checkIn: parsed.details.checkIn ? dateFromKey(parsed.details.checkIn) : null,
@@ -1458,6 +1586,16 @@ async function buildBookingEmailEventData(tx, source, input, existingEventId = u
     reviewReason,
     errorReason: normalizeNullableString(input.errorReason),
     parsedDetails: parsed.details,
+    automationDecision: {
+      version: BOOKING_EMAIL_AUTONOMY_VERSION,
+      stage: 'EXTRACTED',
+      confidence,
+      corroborationCount: corroboration.count,
+      corroboratingEventIds: corroboration.eventIds,
+      conflictingFields: corroboration.conflicts,
+      duplicateOfEventId: duplicateEvent?.id || null,
+      evaluatedAt: new Date().toISOString(),
+    },
     rawHeaders: safeJsonObject(input.rawHeaders),
     rawText: normalizeNullableString(input.rawText || input.body || input.snippet),
     duplicateOfEventId: duplicateEvent?.id || null,
@@ -1467,6 +1605,11 @@ async function buildBookingEmailEventData(tx, source, input, existingEventId = u
 async function upsertBookingEmailEvent(tx, source, input) {
   const data = await buildBookingEmailEventData(tx, source, input)
   if (data.sourceMessageId) {
+    const existing = await tx.bookingEmailEvent.findFirst({
+      where: { sourceId: source.id, sourceMessageId: data.sourceMessageId },
+      include: bookingEmailEventInclude(),
+    })
+    if (existing && ['PROCESSED', 'IGNORED'].includes(existing.status)) return existing
     return tx.bookingEmailEvent.upsert({
       where: {
         sourceId_sourceMessageId: {
@@ -1476,7 +1619,6 @@ async function upsertBookingEmailEvent(tx, source, input) {
       },
       update: {
         ...data,
-        status: data.status === 'PROCESSED' ? 'PROCESSED' : undefined,
       },
       create: data,
       include: bookingEmailEventInclude(),
@@ -1580,7 +1722,7 @@ async function reservationInputFromBookingEmailEvent(tx, event, details) {
   }
 }
 
-async function approveNewBookingEmailEvent(tx, event, details, actor) {
+async function approveNewBookingEmailEvent(tx, event, details, actor, options = {}) {
   const duplicateReservation = await findReservationForBookingEmailEvent(tx, event, details)
   if (duplicateReservation) {
     await tx.bookingEmailEvent.update({
@@ -1594,15 +1736,22 @@ async function approveNewBookingEmailEvent(tx, event, details, actor) {
     throw new PmsValidationError(`Reservation ${duplicateReservation.confirmationCode} already appears to match this email.`, 409)
   }
 
-  const reservation = await createReservationInTransaction(tx, await reservationInputFromBookingEmailEvent(tx, event, details), actor)
+  const reservationInput = await reservationInputFromBookingEmailEvent(tx, event, details)
+  if (options.assignedRoomId) reservationInput.assignedRoomId = options.assignedRoomId
+  const reservation = await createReservationInTransaction(tx, reservationInput, actor)
   const updated = await tx.bookingEmailEvent.update({
     where: { id: event.id },
     data: {
       status: 'PROCESSED',
       reservationId: reservation.id,
-      completedAction: `Created reservation ${reservation.confirmationCode}.`,
+      completedAction: options.autonomous
+        ? `Autonomously created reservation ${reservation.confirmationCode} and assigned Room ${reservation.assignedRoom?.number}.`
+        : `Created reservation ${reservation.confirmationCode}.`,
       reviewReason: null,
       errorReason: null,
+      parsedDetails: details,
+      roomType: normalizeRoomTypeCode(details.roomType) || event.roomType,
+      automationDecision: options.automationDecision || event.automationDecision,
       processedAt: new Date(),
       processedBy: actorName(actor),
     },
@@ -1616,6 +1765,8 @@ async function approveNewBookingEmailEvent(tx, event, details, actor) {
     reservationId: reservation.id,
     confirmationCode: reservation.confirmationCode,
     sourceMessageId: event.sourceMessageId,
+    autonomous: Boolean(options.autonomous),
+    assignedRoomId: reservation.assignedRoomId,
   })
   return updated
 }
@@ -3102,8 +3253,20 @@ export async function listBookingEmailSources(prisma, actor) {
   })
 }
 
+function assertBookingEmailAutonomyConfiguration(actor, input, existing = null) {
+  const nextAutoProcess = input.autoProcessSafeEvents === undefined
+    ? Boolean(existing?.autoProcessSafeEvents)
+    : Boolean(input.autoProcessSafeEvents)
+  const changesAutonomy = input.autoProcessSafeEvents !== undefined
+    || (nextAutoProcess && input.reviewThreshold !== undefined)
+  if (changesAutonomy && !['ADMIN', 'MANAGER'].includes(String(actor?.role || '').toUpperCase())) {
+    throw new PmsValidationError('Manager or administrator authority is required to change booking-email automation.', 403)
+  }
+}
+
 export async function createBookingEmailSource(prisma, input, actor) {
   return prisma.$transaction(async (tx) => {
+    assertBookingEmailAutonomyConfiguration(actor, input)
     const property = await getProperty(tx, actor)
     const mailbox = String(input.mailbox || '').trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mailbox)) {
@@ -3151,6 +3314,7 @@ export async function updateBookingEmailSource(prisma, sourceId, input, actor) {
     const property = await getProperty(tx, actor)
     const existing = await tx.bookingEmailSource.findFirst({ where: { id: sourceId, propertyId: property.id } })
     if (!existing) throw new PmsValidationError('Booking email source was not found.', 404)
+    assertBookingEmailAutonomyConfiguration(actor, input, existing)
     const reviewThreshold = input.reviewThreshold === undefined ? existing.reviewThreshold : Number(input.reviewThreshold)
     if (!Number.isFinite(reviewThreshold) || reviewThreshold < 0 || reviewThreshold > 1) {
       throw new PmsValidationError('Review threshold must be between 0 and 1.')
@@ -3189,6 +3353,7 @@ export async function getBookingEmailStatus(prisma, actor) {
     const enabledSources = sources.filter((source) => source.enabled)
     const gmailEnabled = enabledSources.some((source) => source.provider === 'GMAIL')
     const gmailCredentials = bookingEmailGmailCredentialStatus()
+    const automation = bookingEmailAutomationPolicy()
     const configured = enabledSources.length > 0 && (!gmailEnabled || gmailCredentials.configured)
     const lastSyncAt = sources.map((source) => source.lastSyncAt).filter(Boolean).sort((a, b) => b - a)[0]
     return {
@@ -3231,6 +3396,19 @@ export async function getBookingEmailStatus(prisma, actor) {
       processedToday,
       errors,
       ignored,
+      automation: {
+        version: automation.version,
+        requested: automation.requested,
+        configured: automation.configured,
+        operationalMutationsEnabled: automation.operationalMutationsEnabled,
+        autoAssignRooms: automation.autoAssignRooms,
+        notifyManager: automation.notifyManager,
+        requireAuthenticationResults: automation.requireAuthenticationResults,
+        requireCorroboration: automation.requireCorroboration,
+        minimumConfidence: automation.minimumConfidence,
+        trustedSenderDomainCount: automation.trustedSenderDomains.length,
+        missing: automation.missing,
+      },
       sources: sources.map(bookingEmailSourceResponse),
       message: configured
         ? undefined
@@ -3273,24 +3451,238 @@ export async function getBookingEmailEvent(prisma, eventId, actor) {
   return bookingEmailEventResponse(event)
 }
 
-async function autoProcessBookingEmailEvent(tx, event, source, actor) {
-  if (!source.autoProcessSafeEvents) return event
+async function resolveBookingEmailRoomMapping(tx, event, details) {
+  const provider = bookingEmailChannelProvider(event)
+  if (!provider) {
+    return { blocker: 'The sender does not map to a configured OTA provider.' }
+  }
+  const externalRoomType = normalizeNullableString(details.externalRoomType)
+  if (!externalRoomType) {
+    return { provider, blocker: 'The OTA room label was not extracted, so an authoritative room mapping cannot be selected.' }
+  }
+  const matchValue = normalizedBookingEmailMatchValue(externalRoomType)
+  const mappings = await tx.channelMapping.findMany({
+    where: {
+      active: true,
+      channel: {
+        propertyId: event.propertyId,
+        provider,
+        active: true,
+      },
+    },
+    orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+  })
+  const matchingMappings = mappings.filter((mapping) => (
+    normalizedBookingEmailMatchValue(mapping.externalRoomTypeId) === matchValue
+    || normalizedBookingEmailMatchValue(mapping.externalRoomTypeName) === matchValue
+  ))
+  const roomTypeIds = [...new Set(matchingMappings.map((mapping) => mapping.roomTypeId))]
+  if (matchingMappings.length === 0) {
+    return { provider, blocker: `No active ${provider} room mapping matches "${externalRoomType}".` }
+  }
+  if (roomTypeIds.length !== 1) {
+    return { provider, blocker: `The ${provider} room label matches multiple PMS room types.` }
+  }
+  const roomType = await tx.roomType.findFirst({
+    where: { id: roomTypeIds[0], propertyId: event.propertyId },
+  })
+  if (!roomType) return { provider, blocker: 'The mapped PMS room type no longer exists.' }
+  const roomIds = [...new Set(matchingMappings.flatMap((mapping) => Array.isArray(mapping.roomIds) ? mapping.roomIds : []))]
+  if (roomIds.length === 0) return { provider, blocker: 'The OTA room mapping does not contain any operational PMS rooms.' }
+  return {
+    provider,
+    roomType,
+    roomIds,
+    mappingIds: matchingMappings.map((mapping) => mapping.id),
+    externalRoomType,
+  }
+}
+
+async function findAssignableBookingEmailRoom(tx, event, roomType, roomIds, details) {
+  const candidates = await tx.room.findMany({
+    where: {
+      id: { in: roomIds },
+      propertyId: event.propertyId,
+      roomTypeId: roomType.id,
+      operationalStatus: 'AVAILABLE',
+    },
+    orderBy: [{ floor: 'asc' }, { number: 'asc' }, { id: 'asc' }],
+  })
+  const reservationCandidate = {
+    id: `booking-email-candidate:${event.id}`,
+    propertyId: event.propertyId,
+    roomTypeId: roomType.id,
+    checkIn: dateFromKey(details.checkIn),
+    checkOut: dateFromKey(details.checkOut),
+  }
+  for (const room of candidates) {
+    try {
+      return await validateRoomAssignable(tx, reservationCandidate, room.id)
+    } catch {
+      // Try the next mapped room. The authoritative validator is repeated during reservation creation.
+    }
+  }
+  return null
+}
+
+async function recordBookingEmailManagerReview(tx, event, decision, actor, policy) {
+  const reviewReason = event.reviewReason || decision.blockers[0] || 'Booking email automation could not safely apply this event.'
+  const updated = await tx.bookingEmailEvent.update({
+    where: { id: event.id },
+    data: {
+      status: event.status === 'ERROR' ? 'ERROR' : 'NEEDS_REVIEW',
+      reviewReason,
+      automationDecision: decision,
+    },
+    include: bookingEmailEventInclude(),
+  })
+  if (!policy.notifyManager || event.managerReviewNotifiedAt) return updated
+
+  const notifiedAt = new Date()
+  const claim = await tx.bookingEmailEvent.updateMany({
+    where: { id: event.id, managerReviewNotifiedAt: null },
+    data: { managerReviewNotifiedAt: notifiedAt },
+  })
+  if (claim.count === 0) return updated
+  const reference = event.channelRef ? ` ${event.channelRef}` : ''
+  await tx.hotelOpsNotification.create({
+    data: {
+      propertyId: event.propertyId,
+      type: 'APPROVAL_REQUEST',
+      channel: 'IN_APP',
+      status: 'SENT',
+      recipientRole: 'HOTEL_MANAGER',
+      title: 'Booking Inbox review required',
+      summary: `Booking email${reference} stayed in review: ${reviewReason}`.slice(0, 500),
+      actionUrl: '/booking-inbox',
+      metadata: {
+        source: 'booking-email',
+        bookingEmailEventId: event.id,
+        eventType: event.eventType,
+        confidence: Number(event.confidence || 0),
+        blockers: decision.blockers,
+        automationVersion: BOOKING_EMAIL_AUTONOMY_VERSION,
+      },
+      sentAt: notifiedAt,
+    },
+  })
+  await createAudit(tx, actor, 'BOOKING_EMAIL_MANAGER_REVIEW_REQUESTED', 'bookingEmailEvent', event.id, {
+    eventType: event.eventType,
+    confidence: Number(event.confidence || 0),
+    blockers: decision.blockers,
+  })
+  return tx.bookingEmailEvent.findUnique({ where: { id: event.id }, include: bookingEmailEventInclude() })
+}
+
+async function autoProcessBookingEmailEvent(tx, event, source, actor, options = {}) {
+  const policy = bookingEmailAutomationPolicy(options.env || process.env)
+  if (!source.autoProcessSafeEvents || !policy.configured) return event
   if (event.status !== 'NEEDS_REVIEW') return event
-  if (event.reviewReason || Number(event.confidence || 0) < source.reviewThreshold) return event
+
   const details = safeJsonObject(event.parsedDetails)
+  const extractionDecision = safeJsonObject(event.automationDecision)
+  const blockers = []
+  const decision = {
+    ...extractionDecision,
+    version: BOOKING_EMAIL_AUTONOMY_VERSION,
+    stage: 'EVALUATING',
+    evaluatedAt: new Date().toISOString(),
+    blockers,
+  }
+
+  if (event.eventType !== 'NEW_BOOKING') blockers.push('Only new-booking events are eligible for autonomous PMS writes.')
+  if (event.reviewReason) blockers.push(event.reviewReason)
+  if (!event.channelRef) blockers.push('A provider reservation reference is required for autonomous processing.')
+  const minimumConfidence = Math.max(policy.minimumConfidence, Number(source.reviewThreshold || 0))
+  if (Number(event.confidence || 0) < minimumConfidence) {
+    blockers.push(`Confidence ${Number(event.confidence || 0).toFixed(2)} is below the autonomous threshold ${minimumConfidence.toFixed(2)}.`)
+  }
+  const senderDomain = bookingEmailSenderDomain(event.sender)
+  if (!domainMatchesTrustedSender(senderDomain, policy.trustedSenderDomains)) {
+    blockers.push('The sender domain is not in the owner-configured trusted sender list.')
+  }
+  if (policy.requireAuthenticationResults && !bookingEmailAuthenticationPass(event.rawHeaders, policy.trustedSenderDomains)) {
+    blockers.push('Gmail authentication results do not prove an approved SPF or DKIM sender domain.')
+  }
+  if (policy.requireCorroboration && Number(extractionDecision.corroborationCount || 0) < 1) {
+    blockers.push('A second consistent provider email is required by the current corroboration policy.')
+  }
+  if (!policy.autoAssignRooms) blockers.push('Autonomous room assignment is disabled.')
+
   try {
-    if (event.eventType === 'NEW_BOOKING') return await approveNewBookingEmailEvent(tx, event, details, actor)
-    if (event.eventType === 'PAYMENT_NOTICE') return await approvePaymentEmailEvent(tx, event, details, actor)
-    return event
+    if (blockers.length > 0) {
+      decision.stage = 'REVIEW_REQUIRED'
+      return recordBookingEmailManagerReview(tx, event, decision, actor, policy)
+    }
+
+    if (event.duplicateOfEventId) {
+      const duplicate = await tx.bookingEmailEvent.findFirst({
+        where: { id: event.duplicateOfEventId, propertyId: event.propertyId },
+        include: bookingEmailEventInclude(),
+      })
+      if (duplicate?.reservationId) {
+        decision.stage = 'AUTO_LINKED_DUPLICATE'
+        decision.reservationId = duplicate.reservationId
+        decision.blockers = []
+        return linkBookingEmailEventToReservation(tx, event, duplicate.reservationId, actor, { automationDecision: decision, parsedDetails: details })
+      }
+    }
+
+    const mapping = await resolveBookingEmailRoomMapping(tx, event, details)
+    if (mapping.blocker) {
+      decision.stage = 'REVIEW_REQUIRED'
+      decision.blockers.push(mapping.blocker)
+      return recordBookingEmailManagerReview(tx, event, decision, actor, policy)
+    }
+    decision.provider = mapping.provider
+    decision.channelMappingIds = mapping.mappingIds
+    decision.resolvedRoomTypeId = mapping.roomType.id
+    decision.resolvedRoomTypeCode = mapping.roomType.code
+
+    const mappedDetails = {
+      ...details,
+      roomType: mapping.roomType.code,
+      externalRoomType: mapping.externalRoomType,
+    }
+    const existingReservation = await findReservationForBookingEmailEvent(tx, event, mappedDetails)
+    if (existingReservation) {
+      decision.stage = 'AUTO_LINKED_EXISTING'
+      decision.reservationId = existingReservation.id
+      decision.blockers = []
+      return linkBookingEmailEventToReservation(tx, event, existingReservation.id, actor, { automationDecision: decision, parsedDetails: mappedDetails })
+    }
+
+    const room = await findAssignableBookingEmailRoom(tx, event, mapping.roomType, mapping.roomIds, mappedDetails)
+    if (!room) {
+      decision.stage = 'REVIEW_REQUIRED'
+      decision.blockers.push('No mapped PMS room is safely assignable for the requested stay dates.')
+      return recordBookingEmailManagerReview(tx, event, decision, actor, policy)
+    }
+
+    decision.stage = 'AUTO_APPLIED'
+    decision.assignedRoomId = room.id
+    decision.blockers = []
+    return approveNewBookingEmailEvent(tx, event, mappedDetails, actor, {
+      assignedRoomId: room.id,
+      autonomous: true,
+      automationDecision: decision,
+    })
   } catch (error) {
-    return tx.bookingEmailEvent.update({
+    const errorReason = redactedCredentialMessage(error instanceof Error ? error.message : String(error))
+    const failed = await tx.bookingEmailEvent.update({
       where: { id: event.id },
       data: {
         status: 'ERROR',
-        errorReason: error instanceof Error ? error.message : String(error),
+        errorReason,
+        automationDecision: {
+          ...decision,
+          stage: 'ERROR',
+          blockers: [...new Set([...decision.blockers, errorReason])],
+        },
       },
       include: bookingEmailEventInclude(),
     })
+    return recordBookingEmailManagerReview(tx, failed, safeJsonObject(failed.automationDecision), actor, policy)
   }
 }
 
@@ -3329,7 +3721,7 @@ export async function syncBookingEmail(prisma, input = {}, actor, options = {}) 
     const events = []
     for (const inputEvent of importedEvents) {
       const event = await upsertBookingEmailEvent(tx, currentSource, inputEvent)
-      events.push(reviewOnly ? event : await autoProcessBookingEmailEvent(tx, event, currentSource, actor))
+      events.push(reviewOnly ? event : await autoProcessBookingEmailEvent(tx, event, currentSource, actor, options))
     }
     await tx.bookingEmailSource.update({
       where: { id: currentSource.id },
@@ -3358,7 +3750,7 @@ export async function syncBookingEmail(prisma, input = {}, actor, options = {}) 
   }
 }
 
-async function linkBookingEmailEventToReservation(tx, event, reservationId, actor) {
+async function linkBookingEmailEventToReservation(tx, event, reservationId, actor, options = {}) {
   const reservation = await tx.reservation.findFirst({
     where: { id: reservationId, propertyId: event.propertyId },
     include: reservationInclude,
@@ -3378,6 +3770,11 @@ async function linkBookingEmailEventToReservation(tx, event, reservationId, acto
       completedAction: `Linked to reservation ${reservation.confirmationCode}.`,
       reviewReason: null,
       errorReason: null,
+      ...(options.parsedDetails ? {
+        parsedDetails: options.parsedDetails,
+        roomType: normalizeRoomTypeCode(options.parsedDetails.roomType) || event.roomType,
+      } : {}),
+      automationDecision: options.automationDecision || event.automationDecision,
       processedAt: new Date(),
       processedBy: actorName(actor),
     },

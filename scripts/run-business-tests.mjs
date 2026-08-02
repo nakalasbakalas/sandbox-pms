@@ -17,7 +17,7 @@ import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-w
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
-import { assertBookingEmailApprovalContract, bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
+import { assertBookingEmailApprovalContract, bookingEmailAuthenticationPass, bookingEmailAutomationPolicy, bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
 import { createPasswordHash } from '../server/security.mjs'
 import { DATABASE_HEALTH_FAILURE_MESSAGE, databaseHealthFailure } from '../server/health-response.mjs'
 import { getSystemCapabilities } from '../server/capability-service.mjs'
@@ -1604,6 +1604,19 @@ const previewedBookingEmail = previewBookingEmailEvent({
 assert.equal(previewedBookingEmail.eventType, 'NEW_BOOKING', 'booking-email preview classifies booking confirmations')
 assert.equal(previewedBookingEmail.channelRefPresent, true, 'booking-email preview reports reference extraction without exposing the value')
 assert.equal(previewedBookingEmail.stayDatesPresent, true, 'booking-email preview reports stay-date extraction without exposing guest details')
+const bookingAutomationDisabled = bookingEmailAutomationPolicy({})
+assert.equal(bookingAutomationDisabled.configured, false, 'booking-email autonomous writes stay disabled by default')
+const bookingAutomationConfigured = bookingEmailAutomationPolicy({
+  BOOKING_EMAIL_AUTONOMY_ENABLED: 'true',
+  BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS: 'booking.com,agoda.com',
+  BOOKING_EMAIL_AUTONOMY_MIN_CONFIDENCE: '0.80',
+})
+assert.equal(bookingAutomationConfigured.configured, true, 'booking-email autonomy requires explicit enablement and trusted sender domains')
+assert.equal(bookingAutomationConfigured.minimumConfidence, 0.95, 'booking-email autonomy cannot lower the hard confidence floor')
+assert.equal(bookingEmailAuthenticationPass({ authenticationResults: 'mx.google.com; dkim=pass header.d=booking.com' }, ['booking.com']), true, 'booking-email authentication accepts aligned trusted DKIM evidence')
+assert.equal(bookingEmailAuthenticationPass({ authenticationResults: 'mx.google.com; spf=pass smtp.mailfrom=mailer.agoda.com' }, ['agoda.com']), true, 'booking-email authentication accepts a trusted sender subdomain with aligned SPF evidence')
+assert.equal(bookingEmailAuthenticationPass({ authenticationResults: 'mx.google.com; dmarc=pass header.from=trip.com' }, ['trip.com']), true, 'booking-email authentication accepts aligned trusted DMARC evidence')
+assert.equal(bookingEmailAuthenticationPass({ authenticationResults: 'mx.google.com; spf=pass smtp.mailfrom=attacker.test; dkim=fail header.d=booking.com; dmarc=fail header.from=booking.com' }, ['booking.com']), false, 'booking-email authentication rejects a trusted domain that is not attached to a passing mechanism')
 const approvedProviderQuery = approvedBookingEmailProviderQuery()
 assert.match(approvedProviderQuery, /\(from:booking\.com OR from:guest\.booking\.com OR from:agoda\.com OR from:trip\.com OR from:expedia\.com OR from:priceline\.com OR from:airbnb\.com\)/, 'booking-email approved provider query keeps the approved OTA sender scope')
 assert.match(approvedProviderQuery, /-from:ebk\.promo\.hotelpartner@trip\.com/, 'booking-email approved provider query excludes the Trip.com partner-report sender')
@@ -1628,6 +1641,7 @@ for (const fixture of bookingEmailParserFixtures) {
   assert.equal(parsed.details.paymentStatus, fixture.expected.paymentStatus, `${fixture.name} keeps the expected booking-email payment status`)
   assert.equal(parsed.reviewReason, null, `${fixture.name} parses without a review blocker`)
 }
+assert.equal(parseBookingEmailDetails(bookingEmailParserFixtures[0].input).details.externalRoomType, 'Deluxe Double Room', 'booking-email JSON preserves the external OTA room label for authoritative mapping')
 
 for (const fixture of bookingEmailNoiseFixtures) {
   const parsed = parseBookingEmailDetails(fixture.input)
@@ -1679,8 +1693,8 @@ const autoProcessResult = await syncBookingEmail(autoProcessFixture.prisma, {
     { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-auto-process-fixture' },
   ],
 }, duplicateScopeActor, { allowImportedEvents: true })
-assert.equal(autoProcessResult.events[0].status, 'ERROR', 'booking-email auto-process persists async approval failures onto the event')
-assert.match(autoProcessResult.events[0].errorReason || '', /room type/i, 'booking-email auto-process keeps the approval failure reason on the event')
+assert.equal(autoProcessResult.events[0].status, 'NEEDS_REVIEW', 'booking-email source opt-in cannot bypass the server autonomy kill switch')
+assert.equal(autoProcessResult.events[0].automationDecision?.stage, 'EXTRACTED', 'review-first sync still persists structured extraction evidence')
 
 function gmailBody(value) {
   return Buffer.from(value, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
@@ -1717,6 +1731,7 @@ const paginatedGmailEvents = await fetchGmailEventsForSource({
           { name: 'subject', value: `Booking confirmation ${id}` },
           { name: 'date', value: 'Wed, 01 Jul 2026 08:00:00 +0000' },
           { name: 'message-id', value: `<${id}@example.test>` },
+          { name: 'authentication-results', value: 'mx.google.com; dkim=pass header.d=example.test; spf=pass smtp.mailfrom=example.test' },
         ],
         body: {
           data: gmailBody('Guest: Example Guest Check in: 2026-07-10 Check out: 2026-07-12 Double THB 3200'),
@@ -1728,6 +1743,7 @@ const paginatedGmailEvents = await fetchGmailEventsForSource({
 assert.equal(paginatedGmailEvents.length, 2, 'booking-email Gmail fetch follows bounded pagination')
 assert.equal(gmailListPageRequests, 2, 'booking-email Gmail fetch requests additional pages when needed')
 assert.equal(paginatedGmailEvents[0].sourceMessageId, 'gmail-page-1', 'booking-email Gmail fetch keeps source message ids for dedupe')
+assert.match(paginatedGmailEvents[0].rawHeaders.authenticationResults, /dkim=pass/, 'booking-email Gmail fetch preserves authentication evidence for autonomous sender verification')
 
 const bookingEmailForm = bookingEmailWorkflow.bookingEmailDetailsForm({
   id: 'email-event-1',

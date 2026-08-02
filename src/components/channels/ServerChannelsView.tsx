@@ -25,7 +25,7 @@ import { useAuth } from '@/hooks/use-auth'
 import { createPmsIdempotencyKey, pmsApi } from '@/lib/pms-api-client'
 import type { SystemCapabilityRegistry } from '@/types/system-capabilities'
 
-type ChannelProvider = 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB'
+type ChannelProvider = 'BOOKING_COM' | 'AGODA' | 'TRIP' | 'EXPEDIA' | 'AIRBNB'
 
 type ServerIcalChannel = {
   id: string
@@ -108,6 +108,7 @@ const EMPTY_MAPPING_DRAFT: MappingDraft = {
 const CHANNEL_CATALOG: Array<Omit<ServerChannel, 'persisted'>> = [
   { key: 'booking', provider: 'BOOKING_COM', name: 'Booking.com' },
   { key: 'agoda', provider: 'AGODA', name: 'Agoda' },
+  { key: 'trip', provider: 'TRIP', name: 'Trip.com' },
   { key: 'expedia', provider: 'EXPEDIA', name: 'Expedia' },
   { key: 'airbnb', provider: 'AIRBNB', name: 'Airbnb' },
 ]

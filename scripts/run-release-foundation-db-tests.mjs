@@ -17,6 +17,7 @@ import {
   checkOutReservation,
   getBookingEmailEvent,
   listGuests,
+  syncBookingEmail,
   updateGuest,
   updateReservationGuest,
   updateHousekeepingStatus,
@@ -1024,6 +1025,117 @@ try {
   assert.equal(modifiedReservation.checkOut.toISOString().slice(0, 10), '2030-03-04')
   assert.equal(modifiedReservation.adults, 1)
   assert.equal(modifiedReservation.ratePerNightSatang, 10_000n)
+
+  const autonomousTripChannel = await prisma.channel.create({
+    data: {
+      propertyId: fixtureA.property.id,
+      provider: 'TRIP',
+      name: `Trip.com booking-email autonomy ${runId}`,
+      active: true,
+      sandboxMode: true,
+      syncEnabled: false,
+    },
+  })
+  const autonomousTripRoomLabel = `Trip Deluxe ${runId}`
+  const autonomousTripMapping = await createChannelMapping(
+    prisma,
+    { ...managerContextA, idempotencyKey: `booking-email-trip-mapping:${runId}` },
+    {
+      channelId: autonomousTripChannel.id,
+      externalRoomTypeId: `TRIP-ROOM-${runId}`,
+      externalRoomTypeName: autonomousTripRoomLabel,
+      roomTypeId: fixtureA.roomType.id,
+      roomIds: [fixtureA.room.id],
+      active: true,
+      reason: 'Map the disposable Trip.com booking email fixture to authoritative room inventory.',
+    },
+  )
+  const autonomousSource = await prisma.bookingEmailSource.create({
+    data: {
+      propertyId: fixtureA.property.id,
+      name: `Autonomous booking source ${runId}`,
+      provider: 'GMAIL',
+      mailbox: `booking-autonomy-${runId}@example.test`,
+      enabled: true,
+      autoProcessSafeEvents: true,
+      reviewThreshold: 0.95,
+    },
+  })
+  const autonomousReference = `TRIP-AUTO-${runId}`
+  const autonomousResult = await syncBookingEmail(prisma, {
+    sourceId: autonomousSource.id,
+    reviewOnly: false,
+    events: [{
+      sourceMessageId: `gmail-trip-auto-${runId}`,
+      sender: 'Trip.com <reservations@notify.example.test>',
+      recipient: autonomousSource.mailbox,
+      subject: `New booking confirmed ${autonomousReference}`,
+      receivedAt: new Date(),
+      rawText: `Lead guest: Autonomous Fixture Booking reference: ${autonomousReference} Check-in date: 2042-07-12 Check-out date: 2042-07-14 Room type: ${autonomousTripRoomLabel} Adults: 2 Children: 0 Total amount: THB 6400 Payment received.`,
+      rawHeaders: {
+        messageId: `<gmail-trip-auto-${runId}@example.test>`,
+        authenticationResults: 'mx.google.com; dkim=pass header.d=example.test; spf=pass smtp.mailfrom=example.test',
+      },
+    }],
+  }, managerActorA, {
+    allowImportedEvents: true,
+    providerVerified: true,
+    env: {
+      BOOKING_EMAIL_AUTONOMY_ENABLED: 'true',
+      BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS: 'example.test',
+      BOOKING_EMAIL_AUTO_ASSIGN_ROOMS: 'true',
+      BOOKING_EMAIL_REQUIRE_AUTHENTICATION_RESULTS: 'true',
+      BOOKING_EMAIL_NOTIFY_MANAGER: 'true',
+    },
+  })
+  assert.equal(autonomousResult.events[0].status, 'PROCESSED', 'trusted high-confidence new booking is autonomously processed')
+  assert.equal(autonomousResult.events[0].automationDecision.stage, 'AUTO_APPLIED', 'autonomous booking stores its policy decision evidence')
+  const autonomousReservation = await prisma.reservation.findFirst({
+    where: { propertyId: fixtureA.property.id, channelRef: autonomousReference },
+  })
+  assert.equal(autonomousReservation.assignedRoomId, fixtureA.room.id, 'autonomous booking is assigned only to the OTA-mapped PMS room')
+  assert.equal(autonomousReservation.source, 'TRIP', 'Trip.com booking email retains the authoritative reservation source')
+  assert.equal(autonomousResult.events[0].automationDecision.channelMappingIds.includes(autonomousTripMapping.id), true, 'autonomous booking records the room mapping used')
+  assert.equal(await prisma.hotelOpsNotification.count({ where: { propertyId: fixtureA.property.id, metadata: { path: ['bookingEmailEventId'], equals: autonomousResult.events[0].id } } }), 0, 'successful autonomous booking does not create a manager-review notification')
+
+  const lowConfidenceReference = `TRIP-REVIEW-${runId}`
+  const lowConfidenceInput = {
+    sourceMessageId: `gmail-trip-review-${runId}`,
+    sender: 'Trip.com <reservations@notify.example.test>',
+    recipient: autonomousSource.mailbox,
+    subject: `New booking confirmed ${lowConfidenceReference}`,
+    receivedAt: new Date(),
+    rawText: `Lead guest: Review Fixture Booking reference: ${lowConfidenceReference} Check-in date: 2042-08-12 Check-out date: 2042-08-14 Adults: 2 Children: 0.`,
+    rawHeaders: {
+      messageId: `<gmail-trip-review-${runId}@example.test>`,
+      authenticationResults: 'mx.google.com; dkim=pass header.d=example.test; spf=pass smtp.mailfrom=example.test',
+    },
+  }
+  const autonomyEnv = {
+    BOOKING_EMAIL_AUTONOMY_ENABLED: 'true',
+    BOOKING_EMAIL_TRUSTED_SENDER_DOMAINS: 'example.test',
+    BOOKING_EMAIL_AUTO_ASSIGN_ROOMS: 'true',
+    BOOKING_EMAIL_REQUIRE_AUTHENTICATION_RESULTS: 'true',
+    BOOKING_EMAIL_NOTIFY_MANAGER: 'true',
+  }
+  const lowConfidenceResult = await syncBookingEmail(prisma, {
+    sourceId: autonomousSource.id,
+    reviewOnly: false,
+    events: [lowConfidenceInput],
+  }, managerActorA, { allowImportedEvents: true, providerVerified: true, env: autonomyEnv })
+  assert.equal(lowConfidenceResult.events[0].status, 'NEEDS_REVIEW', 'low-confidence or incomplete booking stays out of autonomous PMS writes')
+  assert.ok(lowConfidenceResult.events[0].managerReviewNotifiedAt, 'low-confidence booking records durable manager-notification evidence')
+  const managerNotificationWhere = {
+    propertyId: fixtureA.property.id,
+    metadata: { path: ['bookingEmailEventId'], equals: lowConfidenceResult.events[0].id },
+  }
+  assert.equal(await prisma.hotelOpsNotification.count({ where: managerNotificationWhere }), 1, 'low-confidence booking creates one manager-review notification')
+  await syncBookingEmail(prisma, {
+    sourceId: autonomousSource.id,
+    reviewOnly: false,
+    events: [lowConfidenceInput],
+  }, managerActorA, { allowImportedEvents: true, providerVerified: true, env: autonomyEnv })
+  assert.equal(await prisma.hotelOpsNotification.count({ where: managerNotificationWhere }), 1, 'replayed mailbox sync does not duplicate the manager-review notification')
 
   const guestCommandReservation = await createReservationFixture(fixtureA, 'GUEST-COMMAND')
   const guestAuditBefore = await prisma.auditLog.count({ where: { entityId: guestCommandReservation.reservation.id } })

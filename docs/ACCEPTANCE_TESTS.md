@@ -89,6 +89,12 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 - Booking-email backfill defaults to the approved provider query and excludes known Trip.com partner-report, Agoda partner-invoice, and Booking.com security noise unless an explicit owner-approved query override is supplied.
 - Booking-email duplicate review ignores different event types that share a booking reference, but still flags same-type/provider-message replays as duplicates.
 - Booking-email review/error reprocess keeps output redacted, reparses only the selected queue events, and returns them to `NEEDS_REVIEW` without auto-approval.
+- Booking-email near-live scheduler defaults to review-only and switches to controlled autonomy only when the global policy is configured; a source opt-in alone cannot enable writes.
+- Only trusted, Gmail-authenticated, 95%+ `NEW_BOOKING` events with no parser/duplicate conflict can auto-apply; payment, modification, cancellation, guest-message, and unknown events remain review-gated.
+- External OTA room labels resolve through one active property/provider `ChannelMapping`; the selected room must be in the mapping, match the PMS room type, be operationally available, and have no reservation or inventory overlap.
+- Trip.com is represented consistently as `TRIP` in booking source and channel mapping records.
+- Successful autonomous booking creation stores `AUTO_APPLIED` decision evidence, creates one reservation, reserves its room dates, and appears assigned on the Booking Board. A matched duplicate links to the existing reservation instead of creating another.
+- Low-confidence, unauthenticated, conflicting, unmapped, or no-room events remain reviewable and create one durable manager notification; replaying the same Gmail message does not duplicate that notification.
 - Credentialed auth/RBAC proof helper reads approved users from stdin or an untracked local file, logs in and out through the real backend session APIs, masks login identifiers, keeps cookies in memory only, omits response bodies except bounded role/status fields, and rejects mutating denial probes unless explicitly owner-enabled.
 - Staff login locks persistently on the third failed attempt, locked users cannot authenticate, and an admin password reset clears failed attempts and lock state.
 - Hotel Ops Gmail email delivery is opt-in, backend-only, updates notification status to `SENT` or `FAILED`, and redacts provider failures.

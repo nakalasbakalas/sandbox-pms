@@ -6,7 +6,7 @@ import { operationalReasonForEvidence, operationalReasonSchema } from './operati
 import { deriveServerScopedSecret } from './security.mjs'
 
 const ACTIVE_FEED_STATUSES = ['PENDING', 'CONFIRMED', 'HOLD', 'CHECKED_IN']
-const ICAL_PROVIDERS = ['BOOKING_COM', 'AGODA', 'EXPEDIA', 'AIRBNB', 'ICAL']
+const ICAL_PROVIDERS = ['BOOKING_COM', 'AGODA', 'TRIP', 'EXPEDIA', 'AIRBNB', 'ICAL']
 const PROVIDER_LABELS = {
   BOOKING_COM: 'Booking.com',
   AGODA: 'Agoda',
