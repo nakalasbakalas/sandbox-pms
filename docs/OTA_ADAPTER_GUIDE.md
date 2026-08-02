@@ -218,4 +218,6 @@ Provider proof requires a separately approved account, safe test dates/inventory
 
 Booking.com, Agoda, and Trip.com reservation emails may be used as inbound PMS evidence for reservation extraction and for proposing an external room-category label. This is not an OTA API read, provider inventory acknowledgement, rate sync, or proof that the provider currently sells the mapped inventory.
 
+Agoda's Gmail text representation may collapse the visual bilingual table to one line. The deterministic parser bounds values between known adjacent provider labels, treats `Booking ID ... - CANCELLED` as cancellation evidence, and does not treat policy boilerplate as modification intent. Reprocess regenerates rather than inherits external room labels before they enter mapping suggestions.
+
 Channel Manager may prefill an audited room-mapping draft from PII-free observed-label aggregates. An authorized manager must still verify the exact provider label and choose the property-owned PMS room type/room ids. The suggestion endpoint never creates or activates a mapping and never performs a provider write. Real OTA inventory/rate synchronization remains separately disabled and provider-unproven.

@@ -222,6 +222,8 @@ npm.cmd run booking-email:reprocess -- --confirm
 npm.cmd run booking-email:deep-scan -- --limit 500 --strict
 ```
 
+Reprocess rebuilds extraction from stored canonical email text and does not reuse the prior derived `parsedDetails` JSON. Agoda confirmation bodies may be stored as one whitespace-collapsed line even when Gmail displays a table; verify that provider labels still resolve and that `Booking ID ... - CANCELLED` subjects remain cancellations.
+
 If strict scan still fails on `NEW_BOOKING` rows with missing stay dates, inspect whether the sample is real reservation mail or OTA partner/security noise before widening parser heuristics.
 11. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
 
