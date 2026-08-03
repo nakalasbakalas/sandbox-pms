@@ -142,6 +142,8 @@ BOOKING_EMAIL_REQUIRE_AUTHENTICATION_RESULTS=true
 BOOKING_EMAIL_NOTIFY_MANAGER=true
 ```
 
+If Gmail reports a user-rate limit, do not manually retry. The scheduler enters `BACKOFF`, exposes `rateLimitUntil` in status, and skips ticks until Google's retry time. If the deployed version lacks this behavior, set `BOOKING_EMAIL_NEAR_LIVE_ENABLED=false`, restart the service, and wait through the full retry window before testing once.
+
 Keep `BOOKING_EMAIL_REQUIRE_CORROBORATION=false` unless the owner requires a second consistent provider email before any automatic creation. Activation is incomplete until Gmail profile proof, real provider-message parser proof, every active OTA room mapping, a safe test booking, Booking Board assignment, and manager notification behavior are verified in the target environment.
 
 Historical booking mailbox capture:

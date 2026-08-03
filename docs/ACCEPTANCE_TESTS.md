@@ -2,6 +2,15 @@
 
 This file maps the package acceptance criteria to current repo evidence.
 
+## Booking email Gmail quota backoff
+
+- Force the Gmail sync adapter to return a user-rate-limit error containing a retry timestamp.
+- Expected: the first run enters `BACKOFF`, and `rateLimitUntil` matches the provider timestamp.
+- Trigger another scheduled run before that timestamp.
+- Expected: the run is skipped with `gmail_rate_limited` and the Gmail adapter is not called.
+- Advance past the retry timestamp and run again.
+- Expected: Gmail is called once, successful sync clears `rateLimitUntil`, and normal scheduling resumes.
+
 ## Parser
 
 - `Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.`

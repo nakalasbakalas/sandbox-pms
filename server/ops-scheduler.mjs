@@ -20,6 +20,7 @@ const SYSTEM_BOOKING_EMAIL_ACTOR = Object.freeze({
 })
 
 const SCHEDULED_BOOKING_EMAIL_PROVIDERS = new Set(['gmail', 'forwarded-mailbox'])
+const DEFAULT_GMAIL_RATE_LIMIT_BACKOFF_SECONDS = 15 * 60
 
 export function isBookingEmailSourceSchedulable(source = {}) {
   const provider = String(source.provider || 'gmail').trim().toLowerCase()
@@ -40,6 +41,18 @@ function addMinutes(date, minutes) {
 
 function addSeconds(date, seconds) {
   return new Date(date.getTime() + seconds * 1_000).toISOString()
+}
+
+function gmailRateLimitUntil(error, currentDate) {
+  const message = String(error?.message || error || '')
+  if (!/(?:\b429\b|rateLimitExceeded|RESOURCE_EXHAUSTED|user-rate limit)/i.test(message)) return null
+
+  const retryAfter = message.match(/retry after\s+([0-9T:.+-]+Z)/i)?.[1]
+  const parsedRetryAt = retryAfter ? Date.parse(retryAfter) : Number.NaN
+  if (Number.isFinite(parsedRetryAt) && parsedRetryAt > currentDate.getTime()) {
+    return new Date(parsedRetryAt).toISOString()
+  }
+  return addSeconds(currentDate, DEFAULT_GMAIL_RATE_LIMIT_BACKOFF_SECONDS)
 }
 
 function envEnabled(value) {
@@ -111,6 +124,7 @@ function initialBookingEmailState(policy) {
     lastCommandCount: null,
     lastErrorCount: null,
     lastError: null,
+    rateLimitUntil: null,
   }
 }
 
@@ -220,6 +234,20 @@ export function createHotelOpsScanScheduler(options = {}) {
       return { skipped: true, reason: 'already_running', status: getStatus() }
     }
 
+    const runStartedAt = now()
+    const rateLimitUntil = Date.parse(emailState.rateLimitUntil || '')
+    if (Number.isFinite(rateLimitUntil) && rateLimitUntil > runStartedAt.getTime()) {
+      emailState.status = 'BACKOFF'
+      emailState.nextRunAt = emailState.rateLimitUntil
+      return {
+        skipped: true,
+        reason: 'gmail_rate_limited',
+        retryAt: emailState.rateLimitUntil,
+        status: getStatus(),
+      }
+    }
+    emailState.rateLimitUntil = null
+
     bookingEmailRunning = true
     emailState.status = 'RUNNING'
     emailState.lastError = null
@@ -277,6 +305,8 @@ export function createHotelOpsScanScheduler(options = {}) {
           })
         } catch (error) {
           const message = redactSchedulerError(error)
+          const retryAt = gmailRateLimitUntil(error, now())
+          if (retryAt) emailState.rateLimitUntil = retryAt
           errorCount += 1
           sourceResults.push({
             sourceId: source.id,
@@ -286,10 +316,17 @@ export function createHotelOpsScanScheduler(options = {}) {
             error: message,
           })
           logger.error?.(`Near-live booking email sync failed for ${source.mailbox || source.id}:`, message)
+          if (retryAt) break
         }
       }
 
-      emailState.status = errorCount === 0 ? 'SUCCEEDED' : importedCount > 0 ? 'PARTIAL' : 'FAILED'
+      emailState.status = emailState.rateLimitUntil
+        ? 'BACKOFF'
+        : errorCount === 0
+          ? 'SUCCEEDED'
+          : importedCount > 0
+            ? 'PARTIAL'
+            : 'FAILED'
       emailState.lastRunAt = now().toISOString()
       emailState.lastSourceCount = enabledSources.length
       emailState.lastSkippedSourceCount = skippedSourceCount
@@ -323,7 +360,7 @@ export function createHotelOpsScanScheduler(options = {}) {
     } finally {
       bookingEmailRunning = false
       if (emailState.enabled && bookingEmailTimer) {
-        emailState.nextRunAt = addSeconds(now(), emailState.intervalSeconds)
+        emailState.nextRunAt = emailState.rateLimitUntil || addSeconds(now(), emailState.intervalSeconds)
       }
     }
   }
