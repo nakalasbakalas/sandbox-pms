@@ -517,6 +517,39 @@ async function run() {
   releaseSlowSync()
   await firstRun
 
+  let quotaNow = new Date('2026-07-10T12:00:00.000Z')
+  let quotaSyncCalls = 0
+  const quotaScheduler = createHotelOpsScanScheduler({
+    env: bookingEmailEnv(),
+    prisma: {},
+    listBookingSources: async () => [{ id: 'quota-source', mailbox: 'quota@example.com', provider: 'gmail', enabled: true }],
+    syncBooking: async () => {
+      quotaSyncCalls += 1
+      if (quotaSyncCalls === 1) {
+        throw new Error('User-rate limit exceeded. Retry after 2026-07-10T12:15:00.000Z')
+      }
+      return { events: [], opsCommandEvents: [] }
+    },
+    processEmailCommands: async () => [],
+    submitEmailCommand: async () => ({ task: { id: 'unused' } }),
+    logger: { log() {}, error() {} },
+    now: () => quotaNow,
+  })
+  const quotaFailure = await quotaScheduler.runBookingEmailOnce('quota-test')
+  assert.equal(quotaFailure.skipped, false)
+  assert.equal(quotaFailure.status.bookingEmail.status, 'BACKOFF')
+  assert.equal(quotaFailure.status.bookingEmail.rateLimitUntil, '2026-07-10T12:15:00.000Z')
+  const quotaSkipped = await quotaScheduler.runBookingEmailOnce('quota-test')
+  assert.equal(quotaSkipped.skipped, true)
+  assert.equal(quotaSkipped.reason, 'gmail_rate_limited')
+  assert.equal(quotaSyncCalls, 1)
+  quotaNow = new Date('2026-07-10T12:15:01.000Z')
+  const quotaRecovered = await quotaScheduler.runBookingEmailOnce('quota-test')
+  assert.equal(quotaRecovered.skipped, false)
+  assert.equal(quotaRecovered.status.bookingEmail.status, 'SUCCEEDED')
+  assert.equal(quotaRecovered.status.bookingEmail.rateLimitUntil, null)
+  assert.equal(quotaSyncCalls, 2)
+
   const policy = getChannelSyncV2Policy({ CHANNEL_MANAGER_PROVIDER: 'channex' })
   assert.equal(policy.outboundAvailability.mode, 'manual_queue')
   assert.equal(policy.outboundAvailability.autoDispatch, false)
