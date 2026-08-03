@@ -17,7 +17,7 @@ import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-w
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
-import { assertBookingEmailApprovalContract, bookingEmailAuthenticationPass, bookingEmailAutomationPolicy, bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
+import { assertBookingEmailApprovalContract, bookingEmailAuthenticationPass, bookingEmailAutomationPolicy, bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, getBookingEmailStatus, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
 import { createPasswordHash } from '../server/security.mjs'
 import { DATABASE_HEALTH_FAILURE_MESSAGE, databaseHealthFailure } from '../server/health-response.mjs'
 import { getSystemCapabilities } from '../server/capability-service.mjs'
@@ -1462,6 +1462,11 @@ const gmailConnectionFail = await testBookingEmailGmailConnection({
 })
 assert.equal(gmailConnectionFail.status, 'fail', 'booking-email Gmail connection test reports provider failures')
 assert.equal(gmailConnectionFail.message.includes('gmail-access-fixture'), false, 'booking-email Gmail connection test redacts provider failures')
+assert.doesNotMatch(
+  getBookingEmailStatus.toString(),
+  /testBookingEmailGmailConnection/,
+  'booking-email status reads are passive and cannot consume Gmail quota',
+)
 let gmailRefreshRequestBody = null
 const refreshedGmailToken = await resolveBookingEmailGmailAccessToken({
   env: {

@@ -10,6 +10,8 @@ This file maps the package acceptance criteria to current repo evidence.
 - Expected: the run is skipped with `gmail_rate_limited` and the Gmail adapter is not called.
 - Advance past the retry timestamp and run again.
 - Expected: Gmail is called once, successful sync clears `rateLimitUntil`, and normal scheduling resumes.
+- Read `GET /api/booking-email/status` repeatedly before, during, and after backoff.
+- Expected: credential/configuration state is returned without invoking the Gmail connection-test function or extending the provider retry window.
 
 ## Parser
 

@@ -3685,7 +3685,9 @@ export async function getBookingEmailStatus(prisma, actor) {
             connectionTest: {
               checked: false,
               status: gmailCredentials.configured ? 'not_tested' : 'not_configured',
-              message: gmailCredentials.configured ? 'Gmail API connection test was not run yet.' : gmailCredentials.remediation,
+              message: gmailCredentials.configured
+                ? 'Passive status check only. Gmail is contacted by mailbox sync or an explicit connection diagnostic.'
+                : gmailCredentials.remediation,
             },
           }
         : {
@@ -3737,9 +3739,6 @@ export async function getBookingEmailStatus(prisma, actor) {
         : `Primary booking mailbox ${primaryBookingMailbox()} is registered, but Gmail API OAuth credentials are not configured on the server. ${gmailCredentials.remediation || ''}`.trim(),
     }
   })
-  if (status.credentialMode === 'access_token' || status.credentialMode === 'refresh_token') {
-    status.credentialStatus.connectionTest = await testBookingEmailGmailConnection()
-  }
   return status
 }
 
