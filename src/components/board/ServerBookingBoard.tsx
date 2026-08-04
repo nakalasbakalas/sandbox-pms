@@ -27,9 +27,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NewReservationDialog, type NewReservationData } from '@/components/board/NewReservationDialog'
 import { useAuth } from '@/hooks/use-auth'
+import { useDensity } from '@/hooks/use-density'
 import { useNavigation } from '@/hooks/use-navigation'
 import { useServerBookingBoard } from '@/hooks/use-server-booking-board'
 import { capabilityEnabled, useSystemCapabilities } from '@/hooks/use-system-capabilities'
+import { getBookingBoardLayout, getBookingBoardStayGeometry } from '@/lib/booking-board-layout'
 import { getBangkokDateKey } from '@/lib/hotel/business-rules'
 import { isDefinitivePmsApiError, pmsApi } from '@/lib/pms-api-client'
 import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
@@ -47,7 +49,6 @@ import type {
 } from '@/types/server-booking-board'
 
 const RANGE_OPTIONS: BookingBoardRangeDays[] = [7, 14, 30]
-const ROOM_COLUMN_WIDTH = 176
 
 function hotelToday() {
   return startOfDay(parseISO(getBangkokDateKey(new Date())))
@@ -87,32 +88,37 @@ function roomStatusTone(room: ServerBookingBoardRoom) {
   return 'border-slate-300 bg-slate-50 text-slate-700'
 }
 
+function roomStatusDotTone(room: ServerBookingBoardRoom) {
+  if (room.operationalStatus !== 'AVAILABLE') return 'bg-red-500'
+  if (room.currentStatus.includes('DIRTY')) return 'bg-amber-500'
+  if (room.currentStatus === 'INSPECTED' || room.currentStatus.includes('CLEAN')) return 'bg-emerald-500'
+  return 'bg-slate-400'
+}
+
 function positionReservations(
   reservations: ServerBookingBoardReservation[],
   rangeStart: Date,
   days: number,
   dayWidth: number,
 ): PositionedReservation[] {
-  const rangeEnd = addDays(rangeStart, days)
   const visible = reservations
-    .filter((reservation) => {
-      const checkIn = startOfDay(parseISO(reservation.checkIn))
-      const checkOut = startOfDay(parseISO(reservation.checkOut))
-      return checkIn < rangeEnd && checkOut > rangeStart
-    })
-    .map((reservation) => {
-      const rawStart = differenceInCalendarDays(startOfDay(parseISO(reservation.checkIn)), rangeStart)
-      const rawEnd = differenceInCalendarDays(startOfDay(parseISO(reservation.checkOut)), rangeStart)
-      const start = Math.max(0, rawStart)
-      const end = Math.min(days, Math.max(start + 1, rawEnd))
-      return {
+    .flatMap((reservation) => {
+      const geometry = getBookingBoardStayGeometry(
+        reservation.checkIn,
+        reservation.checkOut,
+        rangeStart,
+        days,
+      )
+      if (!geometry) return []
+
+      return [{
         ...reservation,
-        left: start * dayWidth,
-        width: Math.max(dayWidth * 0.7, (end - start) * dayWidth),
+        left: geometry.leftUnits * dayWidth,
+        width: Math.max(dayWidth * 0.5, (geometry.rightUnits - geometry.leftUnits) * dayWidth),
         lane: 0,
-        _start: start,
-        _end: end,
-      }
+        _start: geometry.leftUnits,
+        _end: geometry.rightUnits,
+      }]
     })
     .sort((a, b) => a._start - b._start || a._end - b._end)
 
@@ -154,6 +160,7 @@ export function ServerBookingBoard() {
   const { hasPermission, hasAnyPermission } = useAuth()
   const { registry, loading: capabilitiesLoading } = useSystemCapabilities()
   const { navigate } = useNavigation()
+  const { density, isCompact } = useDensity()
   const canCreate = hasPermission('create:reservation')
   const canEdit = hasPermission('edit:reservation')
   const canCancel = hasPermission('cancel:reservation')
@@ -171,7 +178,8 @@ export function ServerBookingBoard() {
     || canEditGuest
     || canPostCharge
     || canViewCashier
-  const dayWidth = days === 30 ? 56 : days === 14 ? 76 : 96
+  const boardLayout = getBookingBoardLayout(days, density)
+  const { dayWidth, roomColumnWidth } = boardLayout
   const dateColumns = useMemo(
     () => Array.from({ length: days }, (_, index) => addDays(range.start, index)),
     [days, range.start],
@@ -644,36 +652,50 @@ export function ServerBookingBoard() {
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto" data-testid="server-booking-board">
-          <div style={{ minWidth: ROOM_COLUMN_WIDTH + days * dayWidth }}>
+          <div style={{ minWidth: roomColumnWidth + days * dayWidth }}>
             <div
               className="sticky top-0 z-30 grid border-b bg-background/95 shadow-sm backdrop-blur"
-              style={{ gridTemplateColumns: `${ROOM_COLUMN_WIDTH}px repeat(${days}, ${dayWidth}px)` }}
+              style={{ gridTemplateColumns: `${roomColumnWidth}px repeat(${days}, ${dayWidth}px)` }}
             >
-              <div className="sticky left-0 z-40 flex items-end border-r bg-background px-3 py-2 text-xs font-semibold text-muted-foreground">
-                Room / type
+              <div className={`sticky left-0 z-40 flex border-r bg-background font-semibold text-muted-foreground ${isCompact ? 'h-5 items-center px-2 text-[10px]' : 'items-end px-3 py-2 text-xs'}`}>
+                {isCompact ? 'Room' : 'Room / type'}
               </div>
               {dateColumns.map((date) => (
                 <div
                   key={date.toISOString()}
-                  className={`border-r px-1 py-2 text-center ${isSameDay(date, hotelToday()) ? 'bg-primary/10 text-primary' : ''}`}
+                  className={`border-r text-center ${isCompact ? 'flex h-5 items-center justify-center gap-1 px-1' : 'px-1 py-2'} ${isSameDay(date, hotelToday()) ? 'bg-primary/10 text-primary' : ''}`}
                 >
-                  <div className="text-[10px] uppercase text-muted-foreground">{format(date, 'EEE')}</div>
-                  <div className="text-sm font-semibold">{format(date, 'd')}</div>
-                  <div className="text-[10px] text-muted-foreground">{format(date, 'MMM')}</div>
+                  {isCompact ? (
+                    <>
+                      <span className="truncate text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {format(date, days === 30 ? 'd' : 'EEE d')}
+                      </span>
+                      {days === 7 && <span className="text-[8px] text-muted-foreground">{format(date, 'MMM')}</span>}
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-[10px] uppercase text-muted-foreground">{format(date, 'EEE')}</div>
+                      <div className="text-sm font-semibold">{format(date, 'd')}</div>
+                      <div className="text-[10px] text-muted-foreground">{format(date, 'MMM')}</div>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
 
             {groups.map((group) => (
               <section key={group.id}>
-                <div className="sticky left-0 z-20 flex h-8 items-center border-b bg-muted px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <div className={`sticky left-0 z-20 flex items-center border-b bg-muted px-3 font-semibold uppercase tracking-wide text-muted-foreground ${isCompact ? 'h-6 text-[10px]' : 'h-8 text-xs'}`}>
                   {group.name} · {group.rooms.length}
                 </div>
                 {group.rooms.map((room) => {
                   const positioned = positionReservations(reservationsByRoom.get(room.id) || [], range.start, days, dayWidth)
                   const roomBlocks = blocksByRoom.get(room.id) || []
                   const lanes = Math.max(1, ...positioned.map((reservation) => reservation.lane + 1))
-                  const rowHeight = Math.max(54, 12 + lanes * 34)
+                  const rowHeight = Math.max(
+                    boardLayout.rowMinHeight,
+                    boardLayout.rowBaseHeight + lanes * boardLayout.laneStep,
+                  )
                   const selectedRoomTypeMatches = !selectedReservation
                     || selectedReservation.roomTypeId === room.roomType.id
                     || selectedReservation.roomTypeCode === room.roomType.code
@@ -684,24 +706,37 @@ export function ServerBookingBoard() {
                       data-board-room-id={room.id}
                       className="grid border-b bg-background hover:bg-muted/20"
                       style={{
-                        gridTemplateColumns: `${ROOM_COLUMN_WIDTH}px ${days * dayWidth}px`,
+                        gridTemplateColumns: `${roomColumnWidth}px ${days * dayWidth}px`,
                         minHeight: rowHeight,
                       }}
                     >
-                      <div className="sticky left-0 z-20 flex items-center justify-between gap-2 border-r bg-background px-3 py-2 shadow-[2px_0_3px_-3px_rgba(0,0,0,0.35)]">
-                        <div className="min-w-0">
-                          <div className="font-semibold">Room {room.number}</div>
-                          <div className="text-[10px] text-muted-foreground">Floor {room.floor}</div>
-                        </div>
-                        <span className={`max-w-[78px] rounded border px-1.5 py-0.5 text-right text-[9px] font-medium uppercase leading-tight ${roomStatusTone(room)}`}>
-                          {roomStatusLabel(room)}
-                        </span>
+                      <div
+                        className={`sticky left-0 z-20 flex items-center justify-between border-r bg-background shadow-[2px_0_3px_-3px_rgba(0,0,0,0.35)] ${isCompact ? 'gap-1 px-1.5 py-0' : 'gap-2 px-3 py-2'}`}
+                        title={`Room ${room.number} · Floor ${room.floor} · ${roomStatusLabel(room)}`}
+                      >
+                        {isCompact ? (
+                          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                            <span className={`size-2 shrink-0 rounded-full ${roomStatusDotTone(room)}`} aria-hidden="true" />
+                            <span className="truncate text-xs font-semibold">Room {room.number}</span>
+                            <span className="sr-only">Floor {room.floor}, {roomStatusLabel(room)}</span>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="min-w-0">
+                              <div className="font-semibold">Room {room.number}</div>
+                              <div className="text-[10px] text-muted-foreground">Floor {room.floor}</div>
+                            </div>
+                            <span className={`max-w-[78px] rounded border px-1.5 py-0.5 text-right text-[9px] font-medium uppercase leading-tight ${roomStatusTone(room)}`}>
+                              {roomStatusLabel(room)}
+                            </span>
+                          </>
+                        )}
                         {canEdit && selectedReservation && (
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="h-7 px-2 text-[10px]"
+                            className={isCompact ? 'h-5 px-1.5 text-[9px]' : 'h-7 px-2 text-[10px]'}
                             data-board-room-action={room.id}
                             disabled={
                               mutationInFlight
@@ -747,10 +782,11 @@ export function ServerBookingBoard() {
                             </>
                           )
                           const selected = reservation.id === selectedReservationId
-                          const className = `absolute z-[2] flex h-7 items-center gap-1 overflow-hidden rounded border px-2 text-[11px] shadow-sm ${reservationColor(reservation.status)} ${selected ? 'ring-2 ring-primary ring-offset-1' : ''}`
+                          const className = `absolute z-[2] flex items-center gap-1 overflow-hidden rounded border shadow-sm ${isCompact ? 'px-1.5 text-[9px]' : 'px-2 text-[11px]'} ${reservationColor(reservation.status)} ${selected ? 'ring-2 ring-primary ring-offset-1' : ''}`
                           const style = {
                             left: reservation.left + 2,
-                            top: 6 + reservation.lane * 34,
+                            top: boardLayout.reservationInset + reservation.lane * boardLayout.laneStep,
+                            height: boardLayout.reservationHeight,
                             width: Math.max(38, reservation.width - 4),
                           }
                           const title = `${reservation.guestName} · ${format(parseISO(reservation.checkIn), 'd MMM')} to ${format(parseISO(reservation.checkOut), 'd MMM')} · ${reservation.status.replaceAll('_', ' ')}`
