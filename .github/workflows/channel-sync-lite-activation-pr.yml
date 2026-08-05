@@ -1,0 +1,59 @@
+name: Channel sync lite activation proof
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: channel-sync-lite-production-activation
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    name: Verify OAuth, deploy, enable polling, and prove review-only sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_ID: srv-d6ns31h4tr6s73c9i8g0
+      TARGET_COMMIT: 1ec748f24861b4821d96205d70f4807fe4df85bf
+      EXPECTED_MAILBOX: booking@sandboxhotel.com
+      PUBLIC_HEALTH_URL: https://book.sandboxhotel.com/healthz?deep=1
+
+    steps:
+      - name: Check out activation branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Require Render API secret
+        shell: bash
+        run: |
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "RENDER_API_KEY is not configured as a repository Actions secret." >&2
+            exit 1
+          fi
+          echo "Render credential is present and remains masked."
+
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: Execute guarded activation
+        run: node scripts/activate-channel-sync-lite.mjs
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-sync-lite-activation-evidence
+          path: activation-evidence/
+          if-no-files-found: warn
+          retention-days: 14
