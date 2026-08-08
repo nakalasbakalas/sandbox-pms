@@ -3,7 +3,7 @@
 **Status:** IN_PROGRESS
 **Baseline SHA:** `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`
 **Current branch:** `codex/final-core-closure`
-**Current HEAD:** `1cfc6f8abc7716efeba5be78c0ede8ce13a2b4dc`
+**Current HEAD:** `c8c2b05e507dc945d2683fbbbd04a990b20acd80`
 **Last updated:** 2026-08-08 (Asia/Bangkok)
 
 ## Gates
@@ -12,8 +12,8 @@
 |---|---|---|---|---|---|
 | F00 | Freeze and ledger | COMPLETE | `1cfc6f8` | `git fetch origin --prune`; exact baseline confirmed | Setup kit remains untracked by design during ledger-only commit |
 | F01 | Privacy response reconnaissance | COMPLETE | read-only | packet-bounded `rg` scout; exposure paths mapped | Booking-email sync response permission path needs confirmation during F02 |
-| F02 | Role-specific response projections | IN_PROGRESS |  |  |  |
-| F03 | Audited sensitive-access endpoints | NOT_STARTED |  |  |  |
+| F02 | Role-specific response projections | COMPLETE | `c8c2b05` | `test:privacy-projections`; Cashier/Board projection tests; typecheck; lint; diff check | Live/provider proof not attempted |
+| F03 | Audited sensitive-access endpoints | IN_PROGRESS |  |  |  |
 | F04 | Independent privacy review | NOT_STARTED |  |  |  |
 | F05 | Float-authoritative money map | NOT_STARTED |  |  |  |
 | F06 | Read-only money reconciliation | NOT_STARTED |  |  |  |
@@ -34,11 +34,11 @@
 
 ## Active task
 
-**Task:** F02
-**Owner/agent:** Privacy implementation writer
-**Allowed files:** `server/pms-response-projections.mjs`, `server/pms-service.mjs`, `server/index.mjs`, `server/rbac.mjs`, focused privacy tests, and required package script wiring
-**Focused validation:** focused projection tests, `npm.cmd run typecheck`, `npm.cmd run lint`, `git diff --check`
-**Next exact action:** Replace broad reservation/guest/sync response graphs with explicit role-aware allowlisted DTOs and regression coverage.
+**Task:** F03
+**Owner/agent:** Sensitive-access implementation writer
+**Allowed files:** privacy projection/service/routes/RBAC, focused sensitive-access tests, and the two packet-required PII evidence documents
+**Focused validation:** sensitive-access negative tests, `npm.cmd run typecheck`, `npm.cmd run lint`, `git diff --check`
+**Next exact action:** Add reason-gated, permission-gated, property-scoped, audited identity/raw-email/payment-reference endpoints with minimal responses.
 
 ## Decisions
 
