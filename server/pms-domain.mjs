@@ -1,3 +1,5 @@
+import { parseSatang, satangToBahtNumber } from './money.mjs'
+
 export const HOTEL_TIME_ZONE = 'Asia/Bangkok'
 
 export const SANDBOX_RULES = {
@@ -140,6 +142,64 @@ export function calculateStayPricing(input) {
     extraGuestFee,
     childFee,
     total: roundMoney(roomSubtotal + extraGuestFee + childFee),
+  }
+}
+
+export function calculateStayPricingSatang(input) {
+  const { nights } = validateStayInput(input)
+  const adults = Number(input.adults)
+  const childAges = Array.isArray(input.childAges) ? input.childAges.map(Number) : []
+  const standardOccupancy = Number(input.standardOccupancy ?? SANDBOX_RULES.standardOccupancy)
+  const maxOccupancy = Number(input.maxOccupancy ?? SANDBOX_RULES.maxOccupancy)
+  const ratePerNightSatang = parseSatang(input.ratePerNightSatang, 'ratePerNightSatang')
+  const extraGuestFeePerNightSatang = parseSatang(input.extraGuestFeePerNightSatang, 'extraGuestFeePerNightSatang')
+  const childSharingFeePerNightSatang = parseSatang(input.childSharingFeePerNightSatang, 'childSharingFeePerNightSatang')
+
+  if (!Number.isInteger(adults) || adults < 1) throw new PmsValidationError('At least one adult is required.')
+  if (ratePerNightSatang <= 0n) throw new PmsValidationError('Rate per night must be greater than zero.')
+  if (extraGuestFeePerNightSatang < 0n || childSharingFeePerNightSatang < 0n) {
+    throw new PmsValidationError('Guest fees cannot be negative.')
+  }
+  if (!Number.isInteger(standardOccupancy) || standardOccupancy < 1) {
+    throw new PmsValidationError('Standard occupancy must be at least one guest.')
+  }
+  if (!Number.isInteger(maxOccupancy) || maxOccupancy < standardOccupancy) {
+    throw new PmsValidationError('Maximum occupancy must be at least the standard occupancy.')
+  }
+  if (childAges.some((age) => !Number.isInteger(age) || age < 0)) {
+    throw new PmsValidationError('Child ages must be valid non-negative numbers.')
+  }
+
+  const totalGuests = adults + childAges.length
+  if (totalGuests > maxOccupancy) {
+    throw new PmsValidationError(`Maximum occupancy is ${maxOccupancy} guests per room.`)
+  }
+
+  const extraAdults = Math.max(0, adults - standardOccupancy)
+  const chargedChildren = childAges.filter((age) =>
+    age > SANDBOX_RULES.childFreeMaxAge && age <= SANDBOX_RULES.childSharingMaxAge
+  ).length
+  const roomSubtotalSatang = ratePerNightSatang * BigInt(nights)
+  const extraGuestFeeSatang = BigInt(extraAdults * nights) * extraGuestFeePerNightSatang
+  const childFeeSatang = BigInt(chargedChildren * nights) * childSharingFeePerNightSatang
+  const calculatedTotalSatang = roomSubtotalSatang + extraGuestFeeSatang + childFeeSatang
+  const totalSatang = input.totalAmountSatang === null || input.totalAmountSatang === undefined || input.totalAmountSatang === ''
+    ? calculatedTotalSatang
+    : parseSatang(input.totalAmountSatang, 'totalAmountSatang')
+  if (totalSatang <= 0n) throw new PmsValidationError('Stay total must be greater than zero.')
+
+  return {
+    nights,
+    ratePerNightSatang,
+    roomSubtotalSatang,
+    extraGuestFeeSatang,
+    childFeeSatang,
+    calculatedTotalSatang,
+    totalSatang,
+    roomSubtotal: satangToBahtNumber(roomSubtotalSatang, 'room subtotal'),
+    extraGuestFee: satangToBahtNumber(extraGuestFeeSatang, 'extra guest fee'),
+    childFee: satangToBahtNumber(childFeeSatang, 'child fee'),
+    total: satangToBahtNumber(totalSatang, 'stay total'),
   }
 }
 

@@ -33,6 +33,8 @@ type ReportReservation = Partial<Reservation> & {
   roomType?: { id?: string; code?: string; name?: string }
   assignedRoom?: { id?: string; number?: string }
   folio?: ReportFolio | null
+  totalAmountSatang?: string | null
+  depositAmountSatang?: string | null
 }
 
 type ReportGuest = Partial<Guest> & {
@@ -56,8 +58,11 @@ type ReportFolio = {
   total?: number
   paid?: number
   balance?: number
-  charges?: Array<{ category?: string; date?: string; createdAt?: string; amount?: number; total?: number }>
-  payments?: Array<{ amount?: number; createdAt?: string; receivedAt?: string }>
+  totalSatang?: string | null
+  paidSatang?: string | null
+  balanceSatang?: string | null
+  charges?: Array<{ category?: string; date?: string; createdAt?: string; amount?: number; total?: number; amountSatang?: string | null; totalSatang?: string | null }>
+  payments?: Array<{ amount?: number; amountSatang?: string | null; createdAt?: string; receivedAt?: string }>
 }
 
 type ServerSnapshot = {
@@ -107,6 +112,30 @@ function safeDivide(numerator: number, denominator: number): number {
 
 function roundMoney(amount: number): number {
   return Math.round((amount + Number.EPSILON) * 100) / 100
+}
+
+function bahtFallbackSatang(value: unknown, label: string): bigint {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) throw new TypeError(`${label} is not valid money.`)
+  return BigInt(Math.round((amount + Number.EPSILON) * 100))
+}
+
+function exactSatang(value: unknown, legacyValue: unknown, label: string): bigint {
+  if (value !== null && value !== undefined && value !== '') {
+    const text = String(value)
+    if (!/^-?\d+$/.test(text)) throw new TypeError(`${label} exact satang is invalid.`)
+    return BigInt(text)
+  }
+  if (SERVER_API_ENABLED) throw new TypeError(`${label} exact satang is required in server mode.`)
+  return bahtFallbackSatang(legacyValue ?? 0, label)
+}
+
+function satangNumber(value: bigint): number {
+  return Number(value) / 100
+}
+
+function exactRatio(numerator: bigint, denominator: bigint): number {
+  return denominator > 0n ? Number(numerator) / Number(denominator) : 0
 }
 
 function normalizeStatus(status: unknown): string {
@@ -192,19 +221,48 @@ function guestNameFromReservation(reservation: ReportReservation): string {
   return `${firstName} ${lastName}`.trim() || 'Guest record'
 }
 
-function reservationTotal(reservation: ReportReservation): number {
-  return Number(reservation.totalAmount || reservation.folio?.total || 0)
+function reservationTotalSatang(reservation: ReportReservation): bigint {
+  return exactSatang(
+    reservation.totalAmountSatang ?? reservation.folio?.totalSatang,
+    reservation.totalAmount ?? reservation.folio?.total ?? 0,
+    `reservation ${reservation.id} total`,
+  )
 }
 
-function reservationPaid(reservation: ReportReservation): number {
+function reservationPaidSatang(reservation: ReportReservation): bigint {
   const payments = reservation.folio?.payments || []
-  if (typeof reservation.folio?.paid === 'number') return reservation.folio.paid
-  return payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+  if (reservation.folio?.paidSatang !== null && reservation.folio?.paidSatang !== undefined) {
+    return exactSatang(reservation.folio.paidSatang, reservation.folio.paid, `reservation ${reservation.id} paid`)
+  }
+  if (payments.length > 0) {
+    return payments.reduce((sum, payment) => sum + exactSatang(payment.amountSatang, payment.amount, `reservation ${reservation.id} payment`), 0n)
+  }
+  return exactSatang(undefined, reservation.folio?.paid ?? 0, `reservation ${reservation.id} paid`)
 }
 
-function reservationBalance(reservation: ReportReservation): number {
-  if (typeof reservation.folio?.balance === 'number') return reservation.folio.balance
-  return Math.max(0, reservationTotal(reservation) - reservationPaid(reservation))
+function reservationBalanceSatang(reservation: ReportReservation): bigint {
+  if (reservation.folio?.balanceSatang !== null && reservation.folio?.balanceSatang !== undefined) {
+    return exactSatang(reservation.folio.balanceSatang, reservation.folio.balance, `reservation ${reservation.id} balance`)
+  }
+  const balance = reservationTotalSatang(reservation) - reservationPaidSatang(reservation)
+  return balance > 0n ? balance : 0n
+}
+
+function reservationNightSatang(reservation: ReportReservation, day: Date): bigint {
+  const nights = reservationNights(reservation)
+  if (nights <= 0) return 0n
+  const checkIn = toDate(reservation.checkIn)
+  if (!checkIn) return 0n
+  const index = Math.round((startOfLocalDay(day).getTime() - startOfLocalDay(checkIn).getTime()) / 86_400_000)
+  const total = reservationTotalSatang(reservation)
+  const divisor = BigInt(nights)
+  const base = total / divisor
+  const remainder = total % divisor
+  return base + (remainder > 0n && BigInt(index) < remainder ? 1n : 0n)
+}
+
+function reservationDepositSatang(reservation: ReportReservation): bigint {
+  return exactSatang(reservation.depositAmountSatang, reservation.depositAmount ?? 0, `reservation ${reservation.id} deposit`)
 }
 
 function realRoomCount(rooms: ReportRoom[]): number {
@@ -286,31 +344,32 @@ function generateOperationsData(dateRange: DateRange, rooms: ReportRoom[], reser
   }
 }
 
-function generateRevenueData(dateRange: DateRange, rooms: ReportRoom[], reservations: ReportReservation[]): RevenueReport {
+export function generateRevenueData(dateRange: DateRange, rooms: ReportRoom[], reservations: ReportReservation[]): RevenueReport {
   const days = daysForRange(dateRange)
   const roomCount = realRoomCount(rooms)
   const revenueReservations = reservations.filter((reservation) => SOLD_RESERVATION_STATUSES.has(reservationStatus(reservation)))
 
   const dailyStats: DailyRevenueStat[] = days.map((date) => {
     const reservationsForNight = revenueReservations.filter((reservation) => reservationCoversNight(reservation, date))
-    const roomRevenue = reservationsForNight.reduce((sum, reservation) => {
-      const nights = reservationNights(reservation)
-      return sum + safeDivide(reservationTotal(reservation), nights)
-    }, 0)
-    const extrasRevenue = revenueReservations.reduce((sum, reservation) => {
+    const roomRevenueSatang = reservationsForNight.reduce((sum, reservation) => sum + reservationNightSatang(reservation, date), 0n)
+    const extrasRevenueSatang = revenueReservations.reduce((sum, reservation) => {
       const charges = reservation.folio?.charges || []
       return sum + charges
         .filter((charge) => normalizeStatus(charge.category) !== 'ROOM' && dateKey(charge.date || charge.createdAt) === dateKey(date))
-        .reduce((chargeSum, charge) => chargeSum + Number(charge.total ?? charge.amount ?? 0), 0)
-    }, 0)
+        .reduce((chargeSum, charge) => chargeSum + exactSatang(charge.totalSatang ?? charge.amountSatang, charge.total ?? charge.amount ?? 0, `reservation ${reservation.id} extra charge`), 0n)
+    }, 0n)
     const roomsSold = reservationsForNight.length
-    const totalRevenue = roomRevenue + extrasRevenue
+    const totalRevenueSatang = roomRevenueSatang + extrasRevenueSatang
+    const roomRevenue = satangNumber(roomRevenueSatang)
 
     return {
       date,
-      roomRevenue: roundMoney(roomRevenue),
-      extrasRevenue: roundMoney(extrasRevenue),
-      totalRevenue: roundMoney(totalRevenue),
+      roomRevenueSatang: roomRevenueSatang.toString(),
+      extrasRevenueSatang: extrasRevenueSatang.toString(),
+      totalRevenueSatang: totalRevenueSatang.toString(),
+      roomRevenue,
+      extrasRevenue: satangNumber(extrasRevenueSatang),
+      totalRevenue: satangNumber(totalRevenueSatang),
       roomsSold,
       roomsAvailable: roomCount,
       adr: roundMoney(safeDivide(roomRevenue, roomsSold)),
@@ -319,28 +378,31 @@ function generateRevenueData(dateRange: DateRange, rooms: ReportRoom[], reservat
     }
   })
 
-  const totalRevenue = roundMoney(dailyStats.reduce((sum, stat) => sum + stat.totalRevenue, 0))
-  const roomRevenue = roundMoney(dailyStats.reduce((sum, stat) => sum + stat.roomRevenue, 0))
-  const extrasRevenue = roundMoney(dailyStats.reduce((sum, stat) => sum + stat.extrasRevenue, 0))
+  const totalRevenueSatang = dailyStats.reduce((sum, stat) => sum + BigInt(stat.totalRevenueSatang), 0n)
+  const roomRevenueSatang = dailyStats.reduce((sum, stat) => sum + BigInt(stat.roomRevenueSatang), 0n)
+  const extrasRevenueSatang = dailyStats.reduce((sum, stat) => sum + BigInt(stat.extrasRevenueSatang), 0n)
+  const totalRevenue = satangNumber(totalRevenueSatang)
+  const roomRevenue = satangNumber(roomRevenueSatang)
+  const extrasRevenue = satangNumber(extrasRevenueSatang)
   const totalRoomNights = dailyStats.reduce((sum, stat) => sum + stat.roomsSold, 0)
   const avgOccupancy = safeDivide(dailyStats.reduce((sum, stat) => sum + stat.occupancyRate, 0), dailyStats.length)
 
-  const roomTypeBuckets = new Map<string, { roomTypeName: string; roomsSold: number; revenue: number }>()
-  const channelBuckets = new Map<string, { reservations: number; revenue: number }>()
+  const roomTypeBuckets = new Map<string, { roomTypeName: string; roomsSold: number; revenueSatang: bigint }>()
+  const channelBuckets = new Map<string, { reservations: number; revenueSatang: bigint }>()
 
   for (const reservation of revenueReservations.filter((item) => reservationsInRange([item], dateRange).length > 0)) {
     const nights = reservationNights(reservation)
-    const total = reservationTotal(reservation)
+    const totalSatang = reservationTotalSatang(reservation)
     const roomTypeKey = roomTypeId(reservation)
-    const roomTypeBucket = roomTypeBuckets.get(roomTypeKey) || { roomTypeName: roomTypeName(reservation), roomsSold: 0, revenue: 0 }
+    const roomTypeBucket = roomTypeBuckets.get(roomTypeKey) || { roomTypeName: roomTypeName(reservation), roomsSold: 0, revenueSatang: 0n }
     roomTypeBucket.roomsSold += nights
-    roomTypeBucket.revenue += total
+    roomTypeBucket.revenueSatang += totalSatang
     roomTypeBuckets.set(roomTypeKey, roomTypeBucket)
 
     const channel = sourceLabel(reservation.source)
-    const channelBucket = channelBuckets.get(channel) || { reservations: 0, revenue: 0 }
+    const channelBucket = channelBuckets.get(channel) || { reservations: 0, revenueSatang: 0n }
     channelBucket.reservations += 1
-    channelBucket.revenue += total
+    channelBucket.revenueSatang += totalSatang
     channelBuckets.set(channel, channelBucket)
   }
 
@@ -348,6 +410,9 @@ function generateRevenueData(dateRange: DateRange, rooms: ReportRoom[], reservat
     period: periodForRange(dateRange),
     dailyStats,
     summary: {
+      totalRevenueSatang: totalRevenueSatang.toString(),
+      roomRevenueSatang: roomRevenueSatang.toString(),
+      extrasRevenueSatang: extrasRevenueSatang.toString(),
       totalRevenue,
       roomRevenue,
       extrasRevenue,
@@ -355,28 +420,37 @@ function generateRevenueData(dateRange: DateRange, rooms: ReportRoom[], reservat
       avgRevPAR: roundMoney(safeDivide(totalRevenue, days.length * roomCount)),
       avgOccupancy,
       totalRoomNights,
-      outstandingBalance: roundMoney(revenueReservations.reduce((sum, reservation) => sum + reservationBalance(reservation), 0)),
-      depositsCollected: roundMoney(revenueReservations.reduce((sum, reservation) => sum + (reservation.depositPaid ? Number(reservation.depositAmount || 0) : 0), 0)),
-      depositsPending: roundMoney(revenueReservations.reduce((sum, reservation) => sum + (!reservation.depositPaid ? Number(reservation.depositAmount || 0) : 0), 0)),
-      refundsIssued: roundMoney(Math.abs(revenueReservations.reduce((sum, reservation) => {
+      outstandingBalanceSatang: revenueReservations.reduce((sum, reservation) => sum + reservationBalanceSatang(reservation), 0n).toString(),
+      depositsCollectedSatang: revenueReservations.reduce((sum, reservation) => sum + (reservation.depositPaid ? reservationDepositSatang(reservation) : 0n), 0n).toString(),
+      depositsPendingSatang: revenueReservations.reduce((sum, reservation) => sum + (!reservation.depositPaid ? reservationDepositSatang(reservation) : 0n), 0n).toString(),
+      refundsIssuedSatang: (-revenueReservations.reduce((sum, reservation) => {
         const payments = reservation.folio?.payments || []
-        return sum + payments.filter((payment) => Number(payment.amount || 0) < 0).reduce((paymentSum, payment) => paymentSum + Number(payment.amount || 0), 0)
-      }, 0))),
+        return sum + payments.map((payment) => exactSatang(payment.amountSatang, payment.amount, `reservation ${reservation.id} payment`)).filter((amount) => amount < 0n).reduce((paymentSum, amount) => paymentSum + amount, 0n)
+      }, 0n)).toString(),
+      outstandingBalance: satangNumber(revenueReservations.reduce((sum, reservation) => sum + reservationBalanceSatang(reservation), 0n)),
+      depositsCollected: satangNumber(revenueReservations.reduce((sum, reservation) => sum + (reservation.depositPaid ? reservationDepositSatang(reservation) : 0n), 0n)),
+      depositsPending: satangNumber(revenueReservations.reduce((sum, reservation) => sum + (!reservation.depositPaid ? reservationDepositSatang(reservation) : 0n), 0n)),
+      refundsIssued: satangNumber(-revenueReservations.reduce((sum, reservation) => {
+        const payments = reservation.folio?.payments || []
+        return sum + payments.map((payment) => exactSatang(payment.amountSatang, payment.amount, `reservation ${reservation.id} payment`)).filter((amount) => amount < 0n).reduce((paymentSum, amount) => paymentSum + amount, 0n)
+      }, 0n)),
     },
     byRoomType: Array.from(roomTypeBuckets.entries()).map(([id, bucket]) => ({
       roomTypeId: id,
       roomTypeName: bucket.roomTypeName,
       roomsSold: bucket.roomsSold,
-      revenue: roundMoney(bucket.revenue),
-      adr: roundMoney(safeDivide(bucket.revenue, bucket.roomsSold)),
+      revenueSatang: bucket.revenueSatang.toString(),
+      revenue: satangNumber(bucket.revenueSatang),
+      adr: roundMoney(safeDivide(satangNumber(bucket.revenueSatang), bucket.roomsSold)),
       occupancyRate: safeDivide(bucket.roomsSold, days.length * Math.max(1, rooms.filter((room) => room.roomType?.id === id || room.roomType?.code === id).length || 1)),
     })),
     byChannel: Array.from(channelBuckets.entries()).map(([channel, bucket]) => ({
       channel,
       reservations: bucket.reservations,
-      revenue: roundMoney(bucket.revenue),
-      adr: roundMoney(safeDivide(bucket.revenue, bucket.reservations)),
-      percentage: safeDivide(bucket.revenue, totalRevenue) * 100,
+      revenueSatang: bucket.revenueSatang.toString(),
+      revenue: satangNumber(bucket.revenueSatang),
+      adr: roundMoney(safeDivide(satangNumber(bucket.revenueSatang), bucket.reservations)),
+      percentage: exactRatio(bucket.revenueSatang, totalRevenueSatang) * 100,
     })),
   }
 }
@@ -388,21 +462,23 @@ function generateReservationData(dateRange: DateRange, reservations: ReportReser
   )
   const bookingPace: BookingPaceStat[] = days.map((date) => {
     const reservationsBooked = reservations.filter((reservation) => dateKey(reservation.createdAt) === dateKey(date))
+    const totalValueSatang = reservationsBooked.reduce((sum, reservation) => sum + reservationTotalSatang(reservation), 0n)
     return {
       bookingDate: date,
       reservationsBooked: reservationsBooked.length,
       roomNightsBooked: reservationsBooked.reduce((sum, reservation) => sum + reservationNights(reservation), 0),
-      totalValue: roundMoney(reservationsBooked.reduce((sum, reservation) => sum + reservationTotal(reservation), 0)),
+      totalValue: satangNumber(totalValueSatang),
+      totalValueSatang: totalValueSatang.toString(),
     }
   })
 
-  const sourceBuckets = new Map<string, { reservations: number; roomNights: number; revenue: number; cancellations: number }>()
+  const sourceBuckets = new Map<string, { reservations: number; roomNights: number; revenueSatang: bigint; cancellations: number }>()
   for (const reservation of reservationsInRange(reservations, dateRange)) {
     const source = sourceLabel(reservation.source)
-    const bucket = sourceBuckets.get(source) || { reservations: 0, roomNights: 0, revenue: 0, cancellations: 0 }
+    const bucket = sourceBuckets.get(source) || { reservations: 0, roomNights: 0, revenueSatang: 0n, cancellations: 0 }
     bucket.reservations += 1
     bucket.roomNights += reservationNights(reservation)
-    bucket.revenue += reservationTotal(reservation)
+    bucket.revenueSatang += reservationTotalSatang(reservation)
     bucket.cancellations += reservationStatus(reservation) === 'CANCELLED' ? 1 : 0
     sourceBuckets.set(source, bucket)
   }
@@ -445,8 +521,9 @@ function generateReservationData(dateRange: DateRange, reservations: ReportReser
       source,
       reservations: bucket.reservations,
       roomNights: bucket.roomNights,
-      revenue: roundMoney(bucket.revenue),
-      adr: roundMoney(safeDivide(bucket.revenue, bucket.roomNights)),
+      revenue: satangNumber(bucket.revenueSatang),
+      revenueSatang: bucket.revenueSatang.toString(),
+      adr: roundMoney(safeDivide(satangNumber(bucket.revenueSatang), bucket.roomNights)),
       cancellations: bucket.cancellations,
       cancellationRate: safeDivide(bucket.cancellations, bucket.reservations),
     })),
@@ -513,7 +590,7 @@ function generateChannelData(dateRange: DateRange, reservations: ReportReservati
   const scopedReservations = reservationsInRange(reservations, dateRange).filter((reservation) =>
     ACTIVE_RESERVATION_STATUSES.has(reservationStatus(reservation))
   )
-  const channelBuckets = new Map<string, ChannelPerformance>()
+  const channelBuckets = new Map<string, Omit<ChannelPerformance, 'revenue' | 'revenueSatang' | 'adr'> & { revenueSatangValue: bigint }>()
 
   for (const reservation of scopedReservations) {
     const channel = sourceLabel(reservation.source)
@@ -521,25 +598,27 @@ function generateChannelData(dateRange: DateRange, reservations: ReportReservati
       channel,
       reservations: 0,
       roomNights: 0,
-      revenue: 0,
-      adr: 0,
+      revenueSatangValue: 0n,
       cancellations: 0,
       modifications: 0,
       avgLeadTime: 0,
     }
     current.reservations += 1
     current.roomNights += reservationNights(reservation)
-    current.revenue += reservationTotal(reservation)
+    current.revenueSatangValue += reservationTotalSatang(reservation)
     channelBuckets.set(channel, current)
   }
 
   const byChannel = Array.from(channelBuckets.values()).map((channel) => ({
     ...channel,
-    revenue: roundMoney(channel.revenue),
-    adr: roundMoney(safeDivide(channel.revenue, channel.roomNights)),
+    revenueSatang: channel.revenueSatangValue.toString(),
+    revenue: satangNumber(channel.revenueSatangValue),
+    adr: roundMoney(safeDivide(satangNumber(channel.revenueSatangValue), channel.roomNights)),
   }))
-  const totalChannelRevenue = byChannel.reduce((sum, channel) => sum + channel.revenue, 0)
-  const directRevenue = byChannel.find((channel) => channel.channel === 'Direct')?.revenue || 0
+  const totalChannelRevenueSatang = byChannel.reduce((sum, channel) => sum + BigInt(channel.revenueSatang), 0n)
+  const directRevenueSatang = BigInt(byChannel.find((channel) => channel.channel === 'Direct')?.revenueSatang || '0')
+  const totalChannelRevenue = satangNumber(totalChannelRevenueSatang)
+  const directRevenue = satangNumber(directRevenueSatang)
   const syncHealth: ChannelSyncHealth[] = byChannel.map((channel) => ({
     channel: channel.channel,
     lastSyncTime: normalizeRange(dateRange).to,
@@ -550,7 +629,7 @@ function generateChannelData(dateRange: DateRange, reservations: ReportReservati
     conflicts: 0,
     unmappedRooms: 0,
   }))
-  const mostPerforming = byChannel.reduce<ChannelPerformance | null>((best, channel) => {
+  const mostPerforming = byChannel.reduce<(typeof byChannel)[number] | null>((best, channel) => {
     if (!best || channel.revenue > best.revenue) return channel
     return best
   }, null)
@@ -561,9 +640,10 @@ function generateChannelData(dateRange: DateRange, reservations: ReportReservati
     syncHealth,
     summary: {
       totalChannelReservations: byChannel.reduce((sum, channel) => sum + channel.reservations, 0),
-      totalChannelRevenue: roundMoney(totalChannelRevenue),
-      directBookingPercentage: safeDivide(directRevenue, totalChannelRevenue) * 100,
-      otaBookingPercentage: safeDivide(totalChannelRevenue - directRevenue, totalChannelRevenue) * 100,
+      totalChannelRevenue,
+      totalChannelRevenueSatang: totalChannelRevenueSatang.toString(),
+      directBookingPercentage: exactRatio(directRevenueSatang, totalChannelRevenueSatang) * 100,
+      otaBookingPercentage: exactRatio(totalChannelRevenueSatang - directRevenueSatang, totalChannelRevenueSatang) * 100,
       avgChannelADR: roundMoney(safeDivide(totalChannelRevenue, byChannel.reduce((sum, channel) => sum + channel.roomNights, 0))),
       avgDirectADR: roundMoney(safeDivide(directRevenue, byChannel.find((channel) => channel.channel === 'Direct')?.roomNights || 0)),
       mostPerformingChannel: mostPerforming?.channel || 'No channel data',
@@ -629,12 +709,14 @@ function generateGuestData(dateRange: DateRange, guests: ReportGuest[], reservat
     .map(([guestId, guestReservations]) => {
       const guest = reportGuests.find((item) => item.id === guestId)
       const sortedReservations = [...guestReservations].sort((a, b) => dateKey(b.checkOut).localeCompare(dateKey(a.checkOut)))
+      const totalRevenueSatang = guestReservations.reduce((sum, reservation) => sum + reservationTotalSatang(reservation), 0n)
       return {
         guestId,
         guestName: guest ? guestName(guest) : guestNameFromReservation(guestReservations[0]),
         totalStays: guestReservations.length,
         totalNights: guestReservations.reduce((sum, reservation) => sum + reservationNights(reservation), 0),
-        totalRevenue: roundMoney(guestReservations.reduce((sum, reservation) => sum + reservationTotal(reservation), 0)),
+        totalRevenue: satangNumber(totalRevenueSatang),
+        totalRevenueSatang: totalRevenueSatang.toString(),
         lastStayDate: toDate(sortedReservations[0]?.checkOut) || normalizeRange(dateRange).to,
       }
     })

@@ -9,6 +9,7 @@ import {
   satangToBahtNumber,
   stringifyJsonWithBigInt,
 } from '../server/money.mjs'
+import { calculateStayPricingSatang } from '../server/pms-domain.mjs'
 import { createPayment } from '../server/pms-service.mjs'
 
 assert.equal(bahtToSatang('1234.56'), 123456n)
@@ -22,10 +23,58 @@ assert.throws(
   /must represent the same value/,
 )
 assert.equal(moneyReadAuthority({ MONEY_READ_AUTHORITY: 'satang' }), 'satang')
-assert.equal(moneyReadAuthority({ MONEY_READ_AUTHORITY: 'invalid' }), 'legacy_float')
+assert.throws(
+  () => moneyReadAuthority({ MONEY_READ_AUTHORITY: 'invalid' }),
+  /must be one of: legacy_float, satang/,
+  'unknown authority values are rejected for runtime and preflight callers',
+)
 assert.equal(readMoneySatang({ amount: 1.23, amountSatang: 124n }, 'amount', 'amountSatang', { MONEY_READ_AUTHORITY: 'legacy_float' }), 123n)
 assert.equal(readMoneySatang({ amount: 1.23, amountSatang: 124n }, 'amount', 'amountSatang', { MONEY_READ_AUTHORITY: 'satang' }), 124n)
 assert.equal(stringifyJsonWithBigInt({ amountSatang: 3005n }), '{"amountSatang":"3005"}')
+
+const exactPricingBase = {
+  checkIn: '2026-08-10',
+  adults: 2,
+  childAges: [],
+  standardOccupancy: 2,
+  maxOccupancy: 4,
+  ratePerNightSatang: '75000',
+  extraGuestFeePerNightSatang: '30000',
+  childSharingFeePerNightSatang: '30000',
+}
+assert.equal(
+  calculateStayPricingSatang({ ...exactPricingBase, checkOut: '2026-08-11' }).totalSatang,
+  75_000n,
+  'one THB 750 night prices exactly',
+)
+assert.equal(
+  calculateStayPricingSatang({ ...exactPricingBase, checkOut: '2026-08-12' }).totalSatang,
+  150_000n,
+  'multi-night pricing multiplies exact satang',
+)
+assert.equal(
+  calculateStayPricingSatang({ ...exactPricingBase, checkOut: '2026-08-11', adults: 3 }).extraGuestFeeSatang,
+  30_000n,
+  'extra-adult fees use the exact property shadow',
+)
+assert.equal(
+  calculateStayPricingSatang({ ...exactPricingBase, checkOut: '2026-08-11', childAges: [8] }).childFeeSatang,
+  30_000n,
+  'child-sharing fees use the exact property shadow',
+)
+const oddExplicitTotal = calculateStayPricingSatang({
+  ...exactPricingBase,
+  checkOut: '2026-08-12',
+  ratePerNightSatang: '5001',
+  totalAmountSatang: '10001',
+})
+assert.equal(oddExplicitTotal.calculatedTotalSatang, 10_002n)
+assert.equal(oddExplicitTotal.totalSatang, 10_001n, 'an explicit odd booking total is not rebuilt from a rounded uniform nightly rate')
+assert.throws(
+  () => calculateStayPricingSatang({ ...exactPricingBase, checkOut: '2026-08-11', childSharingFeePerNightSatang: null }),
+  /childSharingFeePerNightSatang.*(?:required|base-10 satang integer)/,
+  'exact pricing rejects a missing fee shadow',
+)
 
 function paymentFixture({ status = 'OPEN', balanceSatang = 10_000n, failSerializableOnce = false } = {}) {
   const payments = []

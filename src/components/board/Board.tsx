@@ -154,6 +154,8 @@ interface BoardFolioCharge {
   subtotal: number
   tax: number
   total: number
+  unitPriceSatang?: string
+  totalSatang?: string
   postedBy: string
 }
 
@@ -162,6 +164,7 @@ interface BoardFolioPayment {
   date: Date
   method: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'ONLINE' | 'OTHER'
   amount: number
+  amountSatang?: string
   reference?: string
   receivedBy: string
 }
@@ -181,12 +184,33 @@ interface BoardFolio {
   total: number
   paid: number
   balance: number
+  subtotalSatang?: string
+  taxSatang?: string
+  totalSatang?: string
+  paidSatang?: string
+  balanceSatang?: string
   createdAt: Date
   updatedAt: Date
   closedAt?: Date
 }
 
 const BOARD_ROOM_LABEL_WIDTH = 136
+
+function boardSatang(value: unknown, legacy: unknown, label: string): bigint {
+  if (value !== null && value !== undefined && value !== '') {
+    const text = String(value)
+    if (!/^-?\d+$/.test(text)) throw new TypeError(`${label} exact satang is invalid.`)
+    return BigInt(text)
+  }
+  if (SERVER_API_ENABLED) throw new TypeError(`${label} exact satang is required in server mode.`)
+  const numberValue = Number(legacy || 0)
+  if (!Number.isFinite(numberValue)) throw new TypeError(`${label} is invalid.`)
+  return BigInt(Math.round((numberValue + Number.EPSILON) * 100))
+}
+
+function boardMoneyNumber(value: bigint) {
+  return Number(value) / 100
+}
 
 function getTimelineMinCellWidth(dateCount: number) {
   if (dateCount >= 30) return 58
@@ -635,9 +659,12 @@ function createBoardFolioFromRoom(room: BoardRoomCard): BoardFolio {
   const reservationId = primaryReservationId(room)
   const checkIn = room.checkIn ? new Date(room.checkIn) : new Date()
   const checkOut = room.checkOut ? new Date(room.checkOut) : undefined
-  const roomTotal = Math.max(0, room.reservation?.totalAmount ?? room.balanceDue ?? 0)
-  const balance = Math.max(0, room.balanceDue ?? room.reservation?.balanceDue ?? roomTotal)
-  const paid = Math.max(0, roomTotal - balance)
+  const roomTotalSatang = boardSatang(room.reservation?.totalAmountSatang, room.reservation?.totalAmount ?? room.balanceDue ?? 0, 'board reservation total')
+  const balanceSatang = boardSatang(room.balanceDueSatang ?? room.reservation?.balanceDueSatang, room.balanceDue ?? room.reservation?.balanceDue ?? boardMoneyNumber(roomTotalSatang), 'board reservation balance')
+  const paidSatang = roomTotalSatang > balanceSatang ? roomTotalSatang - balanceSatang : 0n
+  const roomTotal = boardMoneyNumber(roomTotalSatang)
+  const balance = boardMoneyNumber(balanceSatang)
+  const paid = boardMoneyNumber(paidSatang)
   const nights = checkOut ? Math.max(1, nightsBetween(checkIn, checkOut)) : 1
   const roomRate = nights > 0 ? roundMoney(roomTotal / nights) : roomTotal
   const updatedAt = room.lastUpdatedAt ? new Date(room.lastUpdatedAt) : new Date()
@@ -660,6 +687,8 @@ function createBoardFolioFromRoom(room: BoardRoomCard): BoardFolio {
       subtotal: roomTotal,
       tax: 0,
       total: roomTotal,
+      unitPriceSatang: (roomTotalSatang / BigInt(nights)).toString(),
+      totalSatang: roomTotalSatang.toString(),
       postedBy: 'Front desk',
     }] : [],
     payments: paid > 0 ? [{
@@ -667,6 +696,7 @@ function createBoardFolioFromRoom(room: BoardRoomCard): BoardFolio {
       date: updatedAt,
       method: room.depositStatus === 'PAID' ? 'CASH' : 'BANK_TRANSFER',
       amount: paid,
+      amountSatang: paidSatang.toString(),
       reference: room.depositStatus === 'PAID' ? 'Deposit recorded' : undefined,
       receivedBy: 'Front desk',
     }] : [],
@@ -675,6 +705,11 @@ function createBoardFolioFromRoom(room: BoardRoomCard): BoardFolio {
     total: roomTotal,
     paid,
     balance,
+    subtotalSatang: roomTotalSatang.toString(),
+    taxSatang: '0',
+    totalSatang: roomTotalSatang.toString(),
+    paidSatang: paidSatang.toString(),
+    balanceSatang: balanceSatang.toString(),
     createdAt: checkIn,
     updatedAt,
     closedAt: balance <= 0 && room.status === 'VACANT_DIRTY' ? updatedAt : undefined,
@@ -689,25 +724,28 @@ function billingSummaryForRoom(
 ): ReservationBillingSummary {
   const folio = mergeBoardFolios(canonicalFolios, cashierFolios).find((candidate) => folioMatchesRoom(candidate, room))
     || createBoardFolioFromRoom(room)
-  const activeCharges = (folio.charges || []).filter((charge) => charge.category !== 'ROOM')
-  const extraPersonTotal = activeCharges
+  const authoritativeFolio = SERVER_API_ENABLED && !folio.totalSatang
+    ? createBoardFolioFromRoom(room)
+    : folio
+  const activeCharges = (authoritativeFolio.charges || []).filter((charge) => charge.category !== 'ROOM')
+  const extraPersonSatang = activeCharges
     .filter((charge) => charge.category === 'EXTRA_GUEST' || charge.category === 'CHILD')
-    .reduce((sum, charge) => sum + Number(charge.total || 0), 0)
-  const extrasTotal = activeCharges
+    .reduce((sum, charge) => sum + boardSatang(charge.totalSatang, charge.total, `board charge ${charge.id}`), 0n)
+  const extrasSatang = activeCharges
     .filter((charge) => charge.category !== 'EXTRA_GUEST' && charge.category !== 'CHILD')
-    .reduce((sum, charge) => sum + Number(charge.total || 0), 0)
-  const roomTotal = (folio.charges || [])
+    .reduce((sum, charge) => sum + boardSatang(charge.totalSatang, charge.total, `board charge ${charge.id}`), 0n)
+  const roomTotalSatang = (authoritativeFolio.charges || [])
     .filter((charge) => charge.category === 'ROOM')
-    .reduce((sum, charge) => sum + Number(charge.total || 0), 0)
+    .reduce((sum, charge) => sum + boardSatang(charge.totalSatang, charge.total, `board room charge ${charge.id}`), 0n)
 
   return {
     currency,
-    roomTotal: roomTotal || room.reservation?.totalAmount,
-    extraPersonTotal: roundMoney(extraPersonTotal),
-    extrasTotal: roundMoney(extrasTotal),
-    total: roundMoney(Number(folio.total || 0)),
-    received: roundMoney(Number(folio.paid || 0)),
-    outstanding: roundMoney(Number(folio.balance || 0)),
+    roomTotal: boardMoneyNumber(roomTotalSatang || boardSatang(room.reservation?.totalAmountSatang, room.reservation?.totalAmount, 'board room total')),
+    extraPersonTotal: boardMoneyNumber(extraPersonSatang),
+    extrasTotal: boardMoneyNumber(extrasSatang),
+    total: boardMoneyNumber(boardSatang(authoritativeFolio.totalSatang, authoritativeFolio.total, 'board folio total')),
+    received: boardMoneyNumber(boardSatang(authoritativeFolio.paidSatang, authoritativeFolio.paid, 'board folio paid')),
+    outstanding: boardMoneyNumber(boardSatang(authoritativeFolio.balanceSatang, authoritativeFolio.balance, 'board folio balance')),
     items: activeCharges.map((charge) => ({
       id: charge.id,
       date: charge.date,
@@ -832,7 +870,30 @@ export function Board() {
   const refreshServerBoard = useCallback(async () => {
     if (!SERVER_API_ENABLED) return
     const board = await pmsApi<{ ok: true; data: unknown }>('/api/front-desk/board', authToken)
-    setRooms(mapServerBoardRooms(board.data))
+    const mapped = mapServerBoardRooms(board.data)
+    const rawReservations = new Map((board.data as any)?.reservations?.map((reservation: any) => [reservation.assignedRoomId, reservation]) || [])
+    setRooms(mapped.map((room) => {
+      const reservation: any = rawReservations.get(room.roomId)
+      if (!reservation) return room
+      const balanceSatang = String(reservation.folio?.balanceSatang ?? '')
+      const totalAmountSatang = String(reservation.totalAmountSatang ?? '')
+      if (!/^-?\d+$/.test(balanceSatang) || !/^-?\d+$/.test(totalAmountSatang)) {
+        throw new TypeError(`Board reservation ${reservation.id} is missing exact financial shadows.`)
+      }
+      return {
+        ...room,
+        balanceDue: boardMoneyNumber(BigInt(balanceSatang)),
+        balanceDueSatang: balanceSatang,
+        reservation: room.reservation ? {
+          ...room.reservation,
+          totalAmount: boardMoneyNumber(BigInt(totalAmountSatang)),
+          totalAmountSatang,
+          balanceDue: boardMoneyNumber(BigInt(balanceSatang)),
+          balanceDueSatang: balanceSatang,
+          paidAmountSatang: String(reservation.folio?.paidSatang ?? ''),
+        } : undefined,
+      }
+    }))
   }, [authToken, setRooms])
 
   const stats = useMemo(() => calculateBoardStats(rooms), [rooms])

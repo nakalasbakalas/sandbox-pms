@@ -179,7 +179,16 @@ import {
   updateRoomType,
   updateSetupRoom,
   updateUser,
+  viewFullPaymentReference,
+  viewRawBookingEmail,
+  viewReservationSensitiveIdentity,
 } from './pms-service.mjs'
+import {
+  projectBookingEmailSyncHttpResponse,
+  projectGuestResponse,
+  projectPaymentMutationResponse,
+  projectReservationResponse,
+} from './pms-response-projections.mjs'
 
 loadEnvDefaults()
 
@@ -1684,7 +1693,7 @@ async function handleApi(request, response, url) {
         idempotencyKey: body.payment.idempotencyKey || context.idempotencyKey,
       },
     } : body, user)
-    sendJson(response, 201, { ok: true, data: reservation, message: `Walk-in checked in to Room ${reservation.assignedRoom?.number}.` })
+    sendJson(response, 201, { ok: true, data: projectReservationResponse(reservation, user), message: `Walk-in checked in to Room ${reservation.assignedRoom?.number}.` })
     return true
   }
 
@@ -1701,17 +1710,18 @@ async function handleApi(request, response, url) {
       env: process.env,
       submitCommand: submitOpsCommand,
     })
+    const httpResult = projectBookingEmailSyncHttpResponse(result, user)
     sendJson(response, 200, {
       ok: true,
-      data: result.status,
-      events: result.events,
+      data: httpResult.status,
+      events: httpResult.events,
       hotelOpsCommands: {
         enabled: emailOpsCommandIntakeStatus(process.env).enabled,
         accepted: opsCommandResults.filter((item) => item.status === 'accepted').length,
         skipped: opsCommandResults.filter((item) => item.status === 'skipped').length,
         errors: opsCommandResults.filter((item) => item.status === 'error').length,
       },
-      message: `Booking email sync processed ${result.events.length} event${result.events.length === 1 ? '' : 's'}.`,
+      message: `Booking email sync processed ${httpResult.events.length} event${httpResult.events.length === 1 ? '' : 's'}.`,
     })
     return true
   }
@@ -1735,6 +1745,13 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'GET') {
     requirePermission(user, 'view:reservations')
     sendJson(response, 200, { ok: true, data: await getBookingEmailEvent(db, params.id, user) })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/raw-view$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'view:raw-booking-email')
+    sendJson(response, 200, { ok: true, data: await viewRawBookingEmail(db, params.id, await readJson(request), user) })
     return true
   }
 
@@ -1883,13 +1900,20 @@ async function handleApi(request, response, url) {
     return true
   }
 
+  params = routeParam(url.pathname, /^\/api\/cashier\/payments\/(?<id>[^/]+)\/reference-view$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'view:full-payment-reference')
+    sendJson(response, 200, { ok: true, data: await viewFullPaymentReference(db, params.id, await readJson(request), user) })
+    return true
+  }
+
   if (url.pathname === '/api/reservations' && request.method === 'POST') {
     requirePermission(user, 'create:reservation')
     const reservation = await createReservation(db, await readJson(request), user, {
       idempotencyKey: context.idempotencyKey,
       requireIdempotency: true,
     })
-    sendJson(response, reservation.idempotentReplay ? 200 : 201, { ok: true, data: reservation, message: reservation.idempotentReplay ? `Existing reservation ${reservation.confirmationCode} returned.` : `Reservation ${reservation.confirmationCode} created.` })
+    sendJson(response, reservation.idempotentReplay ? 200 : 201, { ok: true, data: projectReservationResponse(reservation, user), message: reservation.idempotentReplay ? `Existing reservation ${reservation.confirmationCode} returned.` : `Reservation ${reservation.confirmationCode} created.` })
     return true
   }
 
@@ -1911,7 +1935,14 @@ async function handleApi(request, response, url) {
     }, user, {
       idempotencyKey: context.idempotencyKey,
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: `Reservation ${reservation.confirmationCode} updated.` })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: `Reservation ${reservation.confirmationCode} updated.` })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/reservations\/(?<id>[^/]+)\/identity-view$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'view:sensitive-identity')
+    sendJson(response, 200, { ok: true, data: await viewReservationSensitiveIdentity(db, params.id, await readJson(request), user) })
     return true
   }
 
@@ -1932,7 +1963,7 @@ async function handleApi(request, response, url) {
       ...body,
       ...(expectedTokens.length ? { expectedGuestUpdatedAt: String(expectedTokens[0]) } : {}),
     }, user, { idempotencyKey: context.idempotencyKey })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Guest profile updated.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Guest profile updated.' })
     return true
   }
 
@@ -1952,7 +1983,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Room assigned successfully.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Room assigned successfully.' })
     return true
   }
 
@@ -1981,7 +2012,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Check-in complete. Room is now occupied.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Check-in complete. Room is now occupied.' })
     return true
   }
 
@@ -2010,7 +2041,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Check-out complete. Room has been sent to housekeeping.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Check-out complete. Room has been sent to housekeeping.' })
     return true
   }
 
@@ -2030,7 +2061,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Reservation cancelled.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Reservation cancelled.' })
     return true
   }
 
@@ -2050,7 +2081,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Reservation marked as no-show.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Reservation marked as no-show.' })
     return true
   }
 
@@ -2075,14 +2106,15 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/payments' && request.method === 'POST') {
     requirePermission(user, 'process:payment')
     const body = await readJson(request)
-    const payment = await createPayment(db, {
+    const paymentResult = await createPayment(db, {
       ...body,
       idempotencyKey: body.idempotencyKey || context.idempotencyKey,
     }, user)
-    sendJson(response, payment.idempotentReplay ? 200 : 201, {
+    const payment = projectPaymentMutationResponse(paymentResult)
+    sendJson(response, paymentResult.idempotentReplay ? 200 : 201, {
       ok: true,
       data: payment,
-      message: payment.idempotentReplay ? 'Existing payment returned for this idempotency key.' : 'Payment recorded.',
+      message: paymentResult.idempotentReplay ? 'Existing payment returned for this idempotency key.' : 'Payment recorded.',
     })
     return true
   }
@@ -2124,7 +2156,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       requireIdempotency: true,
     })
-    sendJson(response, guest.idempotentReplay ? 200 : 201, { ok: true, data: guest, message: guest.idempotentReplay ? 'Existing guest profile returned.' : 'Guest profile created.' })
+    sendJson(response, guest.idempotentReplay ? 200 : 201, { ok: true, data: projectGuestResponse(guest, user), message: guest.idempotentReplay ? 'Existing guest profile returned.' : 'Guest profile created.' })
     return true
   }
 
@@ -2132,7 +2164,7 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'PATCH') {
     requirePermission(user, 'edit:reservation')
     const guest = await updateGuest(db, params.id, await readJson(request), user)
-    sendJson(response, 200, { ok: true, data: guest, message: 'Guest profile updated.' })
+    sendJson(response, 200, { ok: true, data: projectGuestResponse(guest, user), message: 'Guest profile updated.' })
     return true
   }
 

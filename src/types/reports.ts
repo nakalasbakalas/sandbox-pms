@@ -71,6 +71,9 @@ export interface RevenueReport {
 
 export interface DailyRevenueStat {
   date: Date
+  roomRevenueSatang: string
+  extrasRevenueSatang: string
+  totalRevenueSatang: string
   roomRevenue: number
   extrasRevenue: number
   totalRevenue: number
@@ -82,6 +85,13 @@ export interface DailyRevenueStat {
 }
 
 export interface RevenueSummary {
+  totalRevenueSatang: string
+  roomRevenueSatang: string
+  extrasRevenueSatang: string
+  outstandingBalanceSatang: string
+  depositsCollectedSatang: string
+  depositsPendingSatang: string
+  refundsIssuedSatang: string
   totalRevenue: number
   roomRevenue: number
   extrasRevenue: number
@@ -100,6 +110,7 @@ export interface RoomTypeRevenue {
   roomTypeName: string
   roomsSold: number
   revenue: number
+  revenueSatang: string
   adr: number
   occupancyRate: number
 }
@@ -108,6 +119,7 @@ export interface ChannelRevenue {
   channel: string
   reservations: number
   revenue: number
+  revenueSatang: string
   adr: number
   percentage: number
 }
@@ -129,6 +141,7 @@ export interface BookingPaceStat {
   reservationsBooked: number
   roomNightsBooked: number
   totalValue: number
+  totalValueSatang: string
 }
 
 export interface LeadTimeDistribution {
@@ -157,6 +170,7 @@ export interface SourceBreakdown {
   reservations: number
   roomNights: number
   revenue: number
+  revenueSatang: string
   adr: number
   cancellations: number
   cancellationRate: number
@@ -227,6 +241,7 @@ export interface ChannelPerformance {
   reservations: number
   roomNights: number
   revenue: number
+  revenueSatang: string
   adr: number
   cancellations: number
   modifications: number
@@ -247,6 +262,7 @@ export interface ChannelSyncHealth {
 export interface ChannelSummary {
   totalChannelReservations: number
   totalChannelRevenue: number
+  totalChannelRevenueSatang: string
   directBookingPercentage: number
   otaBookingPercentage: number
   avgChannelADR: number
@@ -287,6 +303,7 @@ export interface RepeatGuestStat {
   totalStays: number
   totalNights: number
   totalRevenue: number
+  totalRevenueSatang: string
   lastStayDate: Date
 }
 

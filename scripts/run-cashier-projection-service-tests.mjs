@@ -109,7 +109,7 @@ assert.deepEqual(projection.folios, [{
     postedAt: new Date('2026-07-19T01:30:00.000Z'),
     method: 'CARD',
     amountSatang: '4500',
-    reference: 'CARD-123',
+    reference: '••••-123',
     receivedBy: 'Cashier A',
   }],
   subtotalSatang: '12345',

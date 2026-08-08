@@ -47,6 +47,18 @@ export function satangToApiString(value) {
   return parseSatang(value).toString()
 }
 
+export function divideSatang(value, divisor, label = 'Money amount') {
+  const satang = parseSatang(value, label)
+  const denominator = BigInt(divisor)
+  if (denominator <= 0n) throw new TypeError(`${label} divisor must be greater than zero.`)
+  const negative = satang < 0n
+  const absolute = negative ? -satang : satang
+  const quotient = absolute / denominator
+  const remainder = absolute % denominator
+  const rounded = quotient + (remainder * 2n >= denominator ? 1n : 0n)
+  return negative ? -rounded : rounded
+}
+
 export function resolveMoneyInput(input, legacyField = 'amount', satangField = `${legacyField}Satang`) {
   const hasSatang = input?.[satangField] !== undefined && input?.[satangField] !== null && input?.[satangField] !== ''
   const hasLegacy = input?.[legacyField] !== undefined && input?.[legacyField] !== null && input?.[legacyField] !== ''
@@ -75,7 +87,10 @@ export function dualWriteMoney(legacyField, satangField, value) {
 
 export function moneyReadAuthority(env = process.env) {
   const authority = String(env.MONEY_READ_AUTHORITY || 'legacy_float').trim().toLowerCase()
-  return MONEY_READ_AUTHORITIES.has(authority) ? authority : 'legacy_float'
+  if (!MONEY_READ_AUTHORITIES.has(authority)) {
+    throw new TypeError(`MONEY_READ_AUTHORITY must be one of: ${[...MONEY_READ_AUTHORITIES].join(', ')}.`)
+  }
+  return authority
 }
 
 export function readMoneySatang(record, legacyField, satangField = `${legacyField}Satang`, env = process.env) {
@@ -91,8 +106,20 @@ export function readMoneySatang(record, legacyField, satangField = `${legacyFiel
   return 0n
 }
 
+export function requireMoneySatang(record, legacyField, satangField = `${legacyField}Satang`) {
+  const value = record?.[satangField]
+  if (value === null || value === undefined || value === '') {
+    throw new TypeError(`${satangField} exact money shadow is required.`)
+  }
+  return parseSatang(value, satangField)
+}
+
 export function sumMoneySatang(records, legacyField, satangField = `${legacyField}Satang`, env = process.env) {
   return records.reduce((sum, record) => sum + readMoneySatang(record, legacyField, satangField, env), 0n)
+}
+
+export function sumExactMoneySatang(records, legacyField, satangField = `${legacyField}Satang`) {
+  return records.reduce((sum, record) => sum + requireMoneySatang(record, legacyField, satangField), 0n)
 }
 
 export function stringifyJsonWithBigInt(value) {

@@ -15,6 +15,7 @@ import { canPerformAction, canViewRoute } from '../server/rbac.mjs'
 import { requestSetupToken, requireSetupPermission, setupTokenRequired } from '../server/setup-permission.mjs'
 import { signOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import {
+  activeReservationStatuses,
   calculateStayPricing,
   isSellableRoomNumber,
   normalizePaymentMethod,
@@ -898,11 +899,26 @@ const {
 const prisma = createPrismaClient()
 
 try {
+  const boardWindowStart = new Date('2027-01-10T00:00:00.000Z')
+  const boardWindowEnd = new Date('2027-01-14T00:00:00.000Z')
   const twinRooms = await prisma.room.findMany({
     where: {
       roomType: { code: 'TWIN' },
       operationalStatus: 'AVAILABLE',
       currentStatus: { in: ['VACANT_CLEAN', 'INSPECTED'] },
+      assignedReservations: {
+        none: {
+          status: { in: activeReservationStatuses() },
+          checkIn: { lt: boardWindowEnd },
+          checkOut: { gt: boardWindowStart },
+        },
+      },
+      inventory: {
+        none: {
+          date: { gte: boardWindowStart, lt: boardWindowEnd },
+          status: { in: ['RESERVED', 'HELD', 'BLOCKED', 'OUT_OF_SERVICE'] },
+        },
+      },
     },
     include: { roomType: true },
     orderBy: { number: 'asc' },

@@ -122,6 +122,12 @@ function queryString(values: Record<string, string | number | boolean | null | u
   return query ? `?${query}` : ''
 }
 
+function exactRate(value: unknown, label: string): MoneySatang {
+  const text = String(value ?? '')
+  if (!/^-?\d+$/.test(text)) throw new TypeError(`${label} exact satang is required.`)
+  return text as MoneySatang
+}
+
 export const ratesApi = {
   async listRoomTypes(): Promise<ServerRateRoomType[]> {
     const payload = await pmsApi<{ ok: true; data: Array<{ roomType?: any }> }>('/api/rooms', null)
@@ -129,12 +135,11 @@ export const ratesApi = {
     for (const room of payload.data) {
       const roomType = room.roomType
       if (!roomType?.id || byId.has(roomType.id)) continue
-      const exact = roomType.baseRateSatang ?? Math.round(Number(roomType.baseRate || 0) * 100).toString()
       byId.set(roomType.id, {
         id: String(roomType.id),
         code: String(roomType.code || roomType.id),
         name: String(roomType.name || roomType.code || roomType.id),
-        baseRateSatang: String(exact) as MoneySatang,
+        baseRateSatang: exactRate(roomType.baseRateSatang, `room type ${roomType.id} base rate`),
       })
     }
     return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name))

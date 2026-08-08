@@ -37,6 +37,14 @@ function escapeCSV(value: string | number | Date | undefined | null): string {
   return stringValue
 }
 
+export function formatSatangForCSV(value: string): string {
+  if (!/^-?\d+$/.test(value)) throw new TypeError('Report money must be a base-10 satang integer.')
+  const satang = BigInt(value)
+  const sign = satang < 0n ? '-' : ''
+  const absolute = satang < 0n ? -satang : satang
+  return `${sign}${absolute / 100n}.${(absolute % 100n).toString().padStart(2, '0')}`
+}
+
 export function exportOperationsReportCSV(report: OperationsReport) {
   const headers = [
     'Date',
@@ -114,9 +122,9 @@ export function exportRevenueReportCSV(report: RevenueReport) {
   const rows = report.dailyStats.map(stat => [
     format(stat.date, 'yyyy-MM-dd'),
     format(stat.date, 'EEEE'),
-    stat.roomRevenue.toFixed(2),
-    stat.extrasRevenue.toFixed(2),
-    stat.totalRevenue.toFixed(2),
+    formatSatangForCSV(stat.roomRevenueSatang),
+    formatSatangForCSV(stat.extrasRevenueSatang),
+    formatSatangForCSV(stat.totalRevenueSatang),
     stat.roomsSold,
     stat.roomsAvailable,
     stat.adr.toFixed(2),
@@ -127,17 +135,17 @@ export function exportRevenueReportCSV(report: RevenueReport) {
   const summaryRows = [
     [],
     ['Summary'],
-    ['Total Revenue', report.summary.totalRevenue.toFixed(2)],
-    ['Room Revenue', report.summary.roomRevenue.toFixed(2)],
-    ['Extras Revenue', report.summary.extrasRevenue.toFixed(2)],
+    ['Total Revenue', formatSatangForCSV(report.summary.totalRevenueSatang)],
+    ['Room Revenue', formatSatangForCSV(report.summary.roomRevenueSatang)],
+    ['Extras Revenue', formatSatangForCSV(report.summary.extrasRevenueSatang)],
     ['Average ADR', report.summary.avgADR.toFixed(2)],
     ['Average RevPAR', report.summary.avgRevPAR.toFixed(2)],
     ['Average Occupancy', (report.summary.avgOccupancy * 100).toFixed(1) + '%'],
     ['Total Room Nights', report.summary.totalRoomNights],
-    ['Outstanding Balance', report.summary.outstandingBalance.toFixed(2)],
-    ['Deposits Collected', report.summary.depositsCollected.toFixed(2)],
-    ['Deposits Pending', report.summary.depositsPending.toFixed(2)],
-    ['Refunds Issued', report.summary.refundsIssued.toFixed(2)]
+    ['Outstanding Balance', formatSatangForCSV(report.summary.outstandingBalanceSatang)],
+    ['Deposits Collected', formatSatangForCSV(report.summary.depositsCollectedSatang)],
+    ['Deposits Pending', formatSatangForCSV(report.summary.depositsPendingSatang)],
+    ['Refunds Issued', formatSatangForCSV(report.summary.refundsIssuedSatang)]
   ]
   
   const csv = [
@@ -162,7 +170,7 @@ export function exportReservationReportCSV(report: ReservationReport) {
     format(bp.bookingDate, 'yyyy-MM-dd'),
     bp.reservationsBooked,
     bp.roomNightsBooked,
-    bp.totalValue.toFixed(2)
+    formatSatangForCSV(bp.totalValueSatang)
   ])
   
   const summaryRows = [
@@ -251,7 +259,7 @@ export function exportChannelReportCSV(report: ChannelReport) {
     ch.channel,
     ch.reservations,
     ch.roomNights,
-    ch.revenue.toFixed(2),
+    formatSatangForCSV(ch.revenueSatang),
     ch.adr.toFixed(2),
     ch.cancellations,
     ch.modifications,
@@ -262,7 +270,7 @@ export function exportChannelReportCSV(report: ChannelReport) {
     [],
     ['Summary'],
     ['Total Channel Reservations', report.summary.totalChannelReservations],
-    ['Total Channel Revenue', report.summary.totalChannelRevenue.toFixed(2)],
+    ['Total Channel Revenue', formatSatangForCSV(report.summary.totalChannelRevenueSatang)],
     ['Direct Booking %', report.summary.directBookingPercentage.toFixed(1) + '%'],
     ['OTA Booking %', report.summary.otaBookingPercentage.toFixed(1) + '%'],
     ['Average Channel ADR', report.summary.avgChannelADR.toFixed(2)],

@@ -1,6 +1,6 @@
 # PII governance remediation
 
-Status: ready-to-implement policy and test spec.
+Status: local engineering controls implemented; live staff-role and retention proof remain open.
 
 ## Data inventory
 
@@ -16,40 +16,26 @@ Sensitive data surfaces include:
 
 | Data surface | Admin | Manager | Front desk | Housekeeping | Cashier | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Guest name/phone/email | Yes | Yes | Yes | Limited | Yes | Housekeeping should see only operationally necessary guest name/room. |
+| Guest name/phone/email | Yes | Yes | Yes | Limited name only | No | Housekeeping sees only operationally necessary guest name/room; Cashier uses the allowlisted folio projection. |
 | Nationality / ID number / DOB | Yes | Yes | Yes during check-in | No | No | Mask in lists; reveal in check-in context only. |
 | Raw booking email text/headers | Yes | Yes | No by default | No | No | Staff can review parsed summaries; raw text is elevated access. |
 | Payment references | Yes | Yes | Limited | No | Yes | Mask except last 4/reference suffix in lists. |
 | Guest documents | Yes | Yes | Yes during check-in | No | No | Access should be audited. |
 
-## Implementation patches
+## Implemented engineering controls
 
-1. Add API response modes:
+- Generic reservation, guest, Board, Cashier, and booking-email responses use allowlisted DTOs and do not return full identity numbers, raw email evidence, or full payment references.
+- Elevated access is separate and POST-only, with an endpoint-allowlisted `reasonCode` plus a non-empty operational `reason` in the JSON body:
+  - `POST /api/reservations/:id/identity-view`
+  - `POST /api/booking-email/events/:id/raw-view`
+  - `POST /api/cashier/payments/:id/reference-view`
+- Dedicated permissions follow the approved role matrix: identity for Admin/Manager/Front Desk (Front Desk only for checked-in guests or a pending/confirmed stay active on the property-local date), raw email for Admin/Manager, and full payment reference for Admin/Manager/Cashier.
+- Each lookup is property-scoped and writes an audit row before returning data. Audit rows identify actor, property, entity, requested fields, the controlled `reasonCode`, and `reasonProvided=true`; the free-text reason and sensitive values are never persisted in this audit payload.
+- Raw-email output allowlists the body plus the stored message ID, date, authentication results, and reply-to headers; unrelated or credential-shaped stored header keys are not returned.
 
-```js
-function canViewRawBookingEmail(user) {
-  return canPerformAction(user, 'view:settings') || canPerformAction(user, 'view:financial-reports')
-}
+## Open policy and retention work
 
-function maskIdNumber(value) {
-  const text = String(value || '')
-  if (text.length <= 4) return text ? '••••' : undefined
-  return `${'•'.repeat(Math.max(4, text.length - 4))}${text.slice(-4)}`
-}
-```
-
-2. Booking email event response should default to parsed details only. Raw fields should require explicit `includeRaw=1` and elevated permission.
-
-3. Add audit event whenever raw email/document/ID fields are opened:
-
-```js
-await createAudit(tx, user, 'VIEW_SENSITIVE_FIELD', 'BookingEmailEvent', event.id, {
-  fields: ['rawText', 'rawHeaders'],
-  reason: body.reason || 'operational review',
-})
-```
-
-4. Add retention configuration:
+1. Owner approval is still required before adding retention configuration:
 
 ```env
 BOOKING_EMAIL_RAW_RETENTION_DAYS=90
@@ -57,21 +43,18 @@ GUEST_DOCUMENT_RETENTION_POLICY=owner-approved
 MASK_GUEST_ID_IN_LISTS=true
 ```
 
-5. Add a scheduled/raw-cleanup command after owner approval:
+2. Add a scheduled/raw-cleanup command after owner approval:
 
 ```bash
 node scripts/redact-old-booking-email-raw.mjs --dry-run
 node scripts/redact-old-booking-email-raw.mjs --confirm
 ```
 
-## Required tests
+## Local engineering tests
 
-- Front desk can approve parsed booking event without raw headers/text.
-- Front desk cannot fetch raw booking email text.
-- Manager/admin can fetch raw booking email text with explicit reason.
-- Housekeeping cannot view ID number, DOB, raw booking email, or payment reference.
-- Cashier can view payment method/reference suffix but not raw email or ID documents.
-- Sensitive-view audit records are created.
+- `node scripts/run-privacy-projection-tests.mjs` proves generic DTO redaction.
+- `node scripts/run-sensitive-access-tests.mjs` proves permission denials, endpoint reason-code validation, property isolation, property-timezone stay gating, minimal success DTOs, audit evidence, payment mutation redaction, role-aware booking-email output, and the shared authentication source guard.
+- Credentialed live role checks, staff acceptance, and production audit-row inspection remain open.
 
 ## Operational policy
 

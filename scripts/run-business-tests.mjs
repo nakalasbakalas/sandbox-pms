@@ -27,7 +27,17 @@ import { requestIdFromHeaders, resolveRequestContext } from '../server/request-c
 import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixtures/booking-email-parser-fixtures.mjs'
 import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
-import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
+import {
+  findForbiddenResponseFields,
+  maskLoginIdentifier,
+  normalizeAccessProbe,
+  normalizeExpectedRole,
+  normalizeForbiddenResponseFields,
+  normalizeProofHost,
+  summarizePublicUserForProof,
+  validateDenialProbe,
+  validateFinishRoleMatrix,
+} from './prove-auth-rbac-production.mjs'
 import { assertCloudflareWafProofRequirements, buildCloudflareWafProof, isCloudflareWafProofReady, parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
 import { ensureSandboxCloudflareWafRules, sandboxCloudflareWafDesiredRules } from './ensure-cloudflare-waf-rules.mjs'
 
@@ -987,7 +997,7 @@ assert.deepEqual(
     loginIdentifierMasked: 'f********@e***.com',
     emailPresent: true,
     displayInitials: 'FD',
-    role: 'FRONT-DESK',
+    role: 'FRONT_DESK',
     active: true,
   },
   'auth proof summarizes public user payload without exposing identifiers',
@@ -1000,6 +1010,7 @@ assert.deepEqual(
     path: '/api/users',
     expectStatuses: [403],
     body: undefined,
+    forbiddenResponseFields: [],
   },
   'auth proof allows safe GET denial probes',
 )
@@ -1012,6 +1023,52 @@ assert.throws(
   () => validateDenialProbe({ method: 'GET', path: '/api/users', expectStatus: 200 }),
   /only 401 or 403/,
   'auth proof denial probes can only expect denial statuses',
+)
+assert.equal(normalizeExpectedRole('front-desk'), 'FRONT_DESK', 'auth proof normalizes expected role names')
+assert.throws(() => normalizeExpectedRole('SYSTEM'), /Unsupported proof role/, 'auth proof rejects non-staff proof roles')
+assert.deepEqual(
+  normalizeForbiddenResponseFields(['Token', 'token', ' sessionId ']),
+  ['token', 'sessionid'],
+  'auth proof normalizes and deduplicates forbidden response fields',
+)
+assert.deepEqual(
+  normalizeAccessProbe({
+    path: '/api/rooms',
+    expectStatus: 200,
+    forbiddenResponseFields: ['password', 'sessionToken'],
+  }),
+  {
+    label: 'GET /api/rooms',
+    method: 'GET',
+    path: '/api/rooms',
+    expectStatuses: [200],
+    forbiddenResponseFields: ['password', 'sessiontoken'],
+  },
+  'auth proof normalizes safe authenticated access probes',
+)
+assert.throws(
+  () => normalizeAccessProbe({ method: 'POST', path: '/api/rooms', expectStatus: 200 }),
+  /must use GET or HEAD/,
+  'auth proof rejects mutating authenticated access probes',
+)
+assert.deepEqual(
+  findForbiddenResponseFields({
+    users: [{ profile: { Password: '[fixture]' } }],
+    metadata: { nested: [{ sessionToken: '[fixture]' }] },
+  }, ['password', 'sessionToken']),
+  ['password', 'sessiontoken'],
+  'auth proof recursively scans object and array response keys without returning values',
+)
+const finishRoleUsers = ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING', 'CASHIER'].map((role) => ({ role }))
+assert.deepEqual(
+  validateFinishRoleMatrix(finishRoleUsers),
+  ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING', 'CASHIER'],
+  'auth proof accepts exactly one user for every finish-matrix role',
+)
+assert.throws(
+  () => validateFinishRoleMatrix([...finishRoleUsers.slice(0, 4), { role: 'MANAGER' }]),
+  /exactly one of each required role/,
+  'auth proof rejects missing and duplicate finish-matrix roles',
 )
 
 const cloudflareWafRulesetSummary = summarizeRuleset({

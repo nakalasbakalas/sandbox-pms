@@ -36,6 +36,9 @@ export const ROLE_PERMISSIONS = {
     'create:ops-task',
     'approve:ops-task',
     'manage:ops-settings',
+    'view:sensitive-identity',
+    'view:raw-booking-email',
+    'view:full-payment-reference',
   ],
   MANAGER: [
     'view:board',
@@ -69,6 +72,9 @@ export const ROLE_PERMISSIONS = {
     'view:ops',
     'create:ops-task',
     'approve:ops-task',
+    'view:sensitive-identity',
+    'view:raw-booking-email',
+    'view:full-payment-reference',
   ],
   FRONT_DESK: [
     'view:board',
@@ -88,6 +94,7 @@ export const ROLE_PERMISSIONS = {
     'send:staff-messages',
     'view:ops',
     'create:ops-task',
+    'view:sensitive-identity',
   ],
   HOUSEKEEPING: [
     'view:board',
@@ -109,6 +116,7 @@ export const ROLE_PERMISSIONS = {
     'view:financial-reports',
     'send:staff-messages',
     'view:ops',
+    'view:full-payment-reference',
   ],
   CAFE_STAFF: [
     'view:cashier',

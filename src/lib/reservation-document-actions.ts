@@ -2,6 +2,7 @@ import { differenceInCalendarDays, format } from 'date-fns'
 
 import type { BoardRoomCard } from '@/types/board'
 import { safeCssColor } from '@/lib/html-escape'
+import { SERVER_API_ENABLED } from '@/lib/pms-api-client'
 
 export type ReservationDocumentAction = 'invoice' | 'summary' | 'confirmation' | 'registration-card'
 
@@ -102,9 +103,20 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function readNumber(value: unknown) {
-  const numberValue = Number(value)
-  return Number.isFinite(numberValue) ? numberValue : undefined
+function documentSatang(value: unknown, legacy: unknown, label: string): bigint {
+  if (value !== null && value !== undefined && value !== '') {
+    const text = String(value)
+    if (!/^-?\d+$/.test(text)) throw new TypeError(`${label} exact satang is invalid.`)
+    return BigInt(text)
+  }
+  if (SERVER_API_ENABLED) throw new TypeError(`${label} exact satang is required in server mode.`)
+  const amount = Number(legacy || 0)
+  if (!Number.isFinite(amount)) throw new TypeError(`${label} is invalid.`)
+  return BigInt(Math.round((amount + Number.EPSILON) * 100))
+}
+
+function documentMoney(value: bigint) {
+  return Number(value) / 100
 }
 
 function formatAmount(value: number | undefined, currency: string) {
@@ -227,19 +239,20 @@ function getDocumentData(room: BoardRoomCard, action: ReservationDocumentAction)
   const folio = findStoredFolio(room)
   const folioCharges = Array.isArray(folio?.charges) ? folio.charges : []
   const extraCharges = folioCharges.filter((charge) => charge?.category && charge.category !== 'ROOM')
-  const extraItemsTotal = extraCharges.reduce((sum, charge) => sum + Number(charge?.total || 0), 0)
-  const roomChargeTotal = folioCharges
+  const extraItemsSatang = extraCharges.reduce((sum, charge) => sum + documentSatang(charge?.totalSatang, charge?.total, `document charge ${charge?.id || ''}`), 0n)
+  const roomChargeSatang = folioCharges
     .filter((charge) => charge?.category === 'ROOM')
-    .reduce((sum, charge) => sum + Number(charge?.total || 0), 0)
-  const totalAmount = readNumber(folio?.total) ?? room.reservation?.totalAmount ?? room.balanceDue
-  const balanceDue = readNumber(folio?.balance) ?? room.balanceDue ?? room.reservation?.balanceDue
-  const paidAmount = isFiniteNumber(totalAmount) && isFiniteNumber(balanceDue)
-    ? Math.max(0, totalAmount - balanceDue)
-    : undefined
-  const roomAmount = roomChargeTotal || (isFiniteNumber(totalAmount) ? Math.max(0, totalAmount - extraItemsTotal) : undefined)
-  const ratePerNight = isFiniteNumber(roomAmount) && nights
-    ? roomAmount / nights
-    : undefined
+    .reduce((sum, charge) => sum + documentSatang(charge?.totalSatang, charge?.total, `document room charge ${charge?.id || ''}`), 0n)
+  const totalSatang = documentSatang(folio?.totalSatang ?? room.reservation?.totalAmountSatang, folio?.total ?? room.reservation?.totalAmount ?? room.balanceDue, 'document reservation total')
+  const balanceSatang = documentSatang(folio?.balanceSatang ?? room.balanceDueSatang ?? room.reservation?.balanceDueSatang, folio?.balance ?? room.balanceDue ?? room.reservation?.balanceDue, 'document reservation balance')
+  const paidSatang = totalSatang > balanceSatang ? totalSatang - balanceSatang : 0n
+  const roomAmountSatang = roomChargeSatang || (totalSatang > extraItemsSatang ? totalSatang - extraItemsSatang : 0n)
+  const totalAmount = documentMoney(totalSatang)
+  const balanceDue = documentMoney(balanceSatang)
+  const paidAmount = documentMoney(paidSatang)
+  const roomAmount = documentMoney(roomAmountSatang)
+  const ratePerNight = nights ? documentMoney(roomAmountSatang / BigInt(nights)) : undefined
+  const extraItemsTotal = documentMoney(extraItemsSatang)
   const lineItems: ReservationDocumentLineItem[] = [
     {
       description: `${humanize(room.type)} room ${room.number}`,
@@ -250,8 +263,8 @@ function getDocumentData(room: BoardRoomCard, action: ReservationDocumentAction)
     ...extraCharges.map((charge): ReservationDocumentLineItem => ({
       description: readString(charge?.description, humanize(charge?.category)),
       quantity: Number(charge?.quantity || 1),
-      unitPrice: readNumber(charge?.unitPrice) ?? readNumber(charge?.amount),
-      total: readNumber(charge?.total),
+      unitPrice: documentMoney(documentSatang(charge?.unitPriceSatang ?? charge?.amountSatang, charge?.unitPrice ?? charge?.amount, `document charge ${charge?.id || ''} unit price`)),
+      total: documentMoney(documentSatang(charge?.totalSatang, charge?.total, `document charge ${charge?.id || ''} total`)),
     })),
   ]
 

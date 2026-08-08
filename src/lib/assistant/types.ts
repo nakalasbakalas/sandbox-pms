@@ -68,8 +68,11 @@ export interface AssistantReservation {
   assignedRoomId?: string
   roomNumber?: string
   balanceDue: number
+  balanceDueSatang?: string
   paidAmount?: number
+  paidAmountSatang?: string
   totalAmount?: number
+  totalAmountSatang?: string
   folioId?: string
   folioStatus?: 'OPEN' | 'CLOSED' | 'REFUNDED' | 'VOIDED'
   depositPaid?: boolean
