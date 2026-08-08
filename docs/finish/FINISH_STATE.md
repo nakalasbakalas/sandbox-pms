@@ -3,7 +3,7 @@
 **Status:** IN_PROGRESS
 **Baseline SHA:** `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`
 **Current branch:** `codex/final-core-closure`
-**Current HEAD:** `3a8e216d29ff3ae10865bb1249a1006930c9cfa2`
+**Current HEAD:** `5d9a72f5939397dd0dae000a4afa151a7a0d9afd`
 **Last updated:** 2026-08-08 (Asia/Bangkok)
 
 ## Gates
@@ -16,8 +16,8 @@
 | F03 | Audited sensitive-access endpoints | COMPLETE | `f9154c5` | sensitive-access/privacy/Cashier/property tests; typecheck; lint; diff check | Credentialed deployed-role and production audit proof remain open for F10-F11 |
 | F04 | Independent privacy review | COMPLETE | `02d7419` | reviewer PASS; full Wave 1 typecheck/lint/test/e2e/build/diff gate PASS | Credentialed/live proof remains F10-F11 |
 | F05 | Float-authoritative money map | COMPLETE | read-only | packet-bounded scout mapped exact paths, Float reads, reports/exports, and nullable shadows | Deployed authority and live mismatch counts remain owner/runtime proof |
-| F06 | Read-only money reconciliation | IN_PROGRESS |  |  |  |
-| F07 | Exact-satang core financial reads | NOT_STARTED |  |  |  |
+| F06 | Read-only money reconciliation | COMPLETE | `5d9a72f` | `test:money-reconcile`; typecheck; lint; diff check | Real database reconciliation not run; owner/runtime proof remains open |
+| F07 | Exact-satang core financial reads | IN_PROGRESS |  |  | Production authority/env switch remains owner-gated |
 | F08 | Independent finance review | NOT_STARTED |  |  |  |
 | F09 | Deep-health proof | NOT_STARTED |  |  |  |
 | F10 | Credentialed auth/RBAC proof | NOT_STARTED |  |  | Owner-approved test accounts and target required |
@@ -34,11 +34,11 @@
 
 ## Active task
 
-**Task:** F06
-**Owner/agent:** Exact-money reconciliation writer
-**Allowed files:** one read-only reconciliation script, deterministic fixture tests, and coordinator-owned package script wiring
-**Focused validation:** reconciliation fixtures, production-target refusal, typecheck, lint, diff check
-**Next exact action:** Add `npm.cmd run money:reconcile` as a read-only aggregate null/mismatch audit with BigInt-safe comparisons and no sensitive row output.
+**Task:** F07
+**Owner/agent:** Exact-money implementation writer
+**Allowed files:** mapped core lifecycle/booking-email/financial DTO/report/export/Board/assistant money consumers and focused exact-money tests
+**Focused validation:** Cashier accounting, lifecycle, report/export equality, idempotency, typecheck, lint, diff check
+**Next exact action:** Make core reads and outputs satang-authoritative with base-10 API strings, preserving compatibility only at formatting boundaries; do not switch production env.
 
 ## Decisions
 
