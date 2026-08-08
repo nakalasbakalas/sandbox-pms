@@ -25,12 +25,12 @@ Sensitive data surfaces include:
 ## Implemented engineering controls
 
 - Generic reservation, guest, Board, Cashier, and booking-email responses use allowlisted DTOs and do not return full identity numbers, raw email evidence, or full payment references.
-- Elevated access is separate and POST-only, with a non-empty operational reason in the JSON body:
+- Elevated access is separate and POST-only, with an endpoint-allowlisted `reasonCode` plus a non-empty operational `reason` in the JSON body:
   - `POST /api/reservations/:id/identity-view`
   - `POST /api/booking-email/events/:id/raw-view`
   - `POST /api/cashier/payments/:id/reference-view`
-- Dedicated permissions follow the approved role matrix: identity for Admin/Manager/Front Desk (Front Desk only for active check-in context), raw email for Admin/Manager, and full payment reference for Admin/Manager/Cashier.
-- Each lookup is property-scoped and writes an audit row before returning data. Audit rows identify actor, property, entity, requested fields, and reason without storing the sensitive values.
+- Dedicated permissions follow the approved role matrix: identity for Admin/Manager/Front Desk (Front Desk only for checked-in guests or a pending/confirmed stay active on the property-local date), raw email for Admin/Manager, and full payment reference for Admin/Manager/Cashier.
+- Each lookup is property-scoped and writes an audit row before returning data. Audit rows identify actor, property, entity, requested fields, the controlled `reasonCode`, and `reasonProvided=true`; the free-text reason and sensitive values are never persisted in this audit payload.
 - Raw-email output allowlists the body plus the stored message ID, date, authentication results, and reply-to headers; unrelated or credential-shaped stored header keys are not returned.
 
 ## Open policy and retention work
@@ -53,7 +53,7 @@ node scripts/redact-old-booking-email-raw.mjs --confirm
 ## Local engineering tests
 
 - `node scripts/run-privacy-projection-tests.mjs` proves generic DTO redaction.
-- `node scripts/run-sensitive-access-tests.mjs` proves permission denials, reason validation, property isolation, minimal success DTOs, audit evidence, and the shared authentication source guard.
+- `node scripts/run-sensitive-access-tests.mjs` proves permission denials, endpoint reason-code validation, property isolation, property-timezone stay gating, minimal success DTOs, audit evidence, payment mutation redaction, role-aware booking-email output, and the shared authentication source guard.
 - Credentialed live role checks, staff acceptance, and production audit-row inspection remain open.
 
 ## Operational policy

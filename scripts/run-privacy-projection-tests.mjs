@@ -213,7 +213,7 @@ const syncProjection = projectBookingEmailSyncHttpResponse({
     rawText: forbiddenBody, body: forbiddenBody, rawHeaders: { authorization: forbiddenHeader },
   }],
   opsCommandEvents: [{ id: 'event-a', rawText: forbiddenBody, body: forbiddenBody, rawHeaders: { authorization: forbiddenHeader } }],
-})
+}, actors.admin)
 assert.equal(syncProjection.events[0].parsedDetails.guestName, 'Ada Guest', 'sync HTTP DTO retains parsed operational fields')
 assert.equal('opsCommandEvents' in syncProjection, false, 'sync HTTP DTO never returns internal Hotel Ops command input events')
 assert.equal(serialized(syncProjection).includes(forbiddenBody), false, 'sync HTTP DTO excludes raw email bodies at every nesting level')
@@ -223,7 +223,7 @@ for (const forbiddenKey of ['rawText', 'body', 'rawHeaders', 'rawEmailUrl', 'sou
 }
 
 const indexSource = await readFile(new URL('../server/index.mjs', import.meta.url), 'utf8')
-assert.match(indexSource, /const httpResult = projectBookingEmailSyncHttpResponse\(result\)/, 'booking sync projects its HTTP response after internal command processing')
+assert.match(indexSource, /const httpResult = projectBookingEmailSyncHttpResponse\(result, user\)/, 'booking sync projects its HTTP response for the authenticated actor after internal command processing')
 assert.match(indexSource, /data: httpResult\.status,[\s\S]{0,80}events: httpResult\.events/, 'booking sync serializes only the projected status and events')
 assert.doesNotMatch(indexSource, /data: result\.status,[\s\S]{0,80}events: result\.events/, 'booking sync cannot accidentally serialize the internal raw result')
 

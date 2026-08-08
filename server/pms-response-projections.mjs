@@ -108,6 +108,40 @@ function projectFolio(folio, actor, { includeTransactions = true } = {}) {
   }
 }
 
+export function projectPaymentMutationResponse(result) {
+  const payment = result?.payment ?? {}
+  const folio = result?.folio ?? {}
+  return {
+    payment: {
+      id: payment.id ?? null,
+      folioId: payment.folioId ?? null,
+      amount: payment.amount ?? null,
+      amountSatang: payment.amountSatang ?? null,
+      method: payment.method ?? null,
+      reference: maskSensitiveValue(payment.reference),
+      processedBy: payment.processedBy ?? null,
+      createdAt: payment.createdAt ?? null,
+    },
+    folio: {
+      id: folio.id ?? null,
+      reservationId: folio.reservationId ?? null,
+      subtotal: folio.subtotal ?? 0,
+      subtotalSatang: folio.subtotalSatang ?? 0,
+      tax: folio.tax ?? 0,
+      taxSatang: folio.taxSatang ?? 0,
+      total: folio.total ?? 0,
+      totalSatang: folio.totalSatang ?? 0,
+      paid: folio.paid ?? 0,
+      paidSatang: folio.paidSatang ?? 0,
+      balance: folio.balance ?? 0,
+      balanceSatang: folio.balanceSatang ?? 0,
+      status: folio.status ?? null,
+      createdAt: folio.createdAt ?? null,
+      updatedAt: folio.updatedAt ?? null,
+    },
+  }
+}
+
 export function projectGuestResponse(guest, actor, options = {}) {
   if (!guest) return null
   const canViewContact = canViewGuestContact(actor)
@@ -186,13 +220,34 @@ function projectStringArray(value) {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === 'string') : undefined
 }
 
-export function projectBookingEmailEventResponse(event) {
+export function projectBookingEmailEventResponse(event, actor) {
   const details = event?.parsedDetails && typeof event.parsedDetails === 'object' && !Array.isArray(event.parsedDetails)
     ? event.parsedDetails
     : {}
   const decision = event?.automationDecision && typeof event.automationDecision === 'object' && !Array.isArray(event.automationDecision)
     ? event.automationDecision
     : {}
+
+  if (roleOf(actor) === 'CASHIER' || !['ADMIN', 'MANAGER', 'FRONT_DESK'].includes(roleOf(actor))) {
+    return {
+      id: event?.id,
+      receivedAt: event?.receivedAt,
+      eventType: event?.eventType,
+      status: event?.status,
+      amount: event?.amount,
+      currency: event?.currency,
+      paymentStatus: event?.paymentStatus,
+      reservationId: event?.reservationId,
+      reservationConfirmation: event?.reservationConfirmation,
+      parsedDetails: {
+        amount: details.amount,
+        currency: details.currency,
+        paymentStatus: details.paymentStatus,
+        paymentMethod: details.paymentMethod,
+        paymentReference: maskSensitiveValue(details.paymentReference),
+      },
+    }
+  }
   return {
     id: event?.id,
     sourceId: event?.sourceId,
@@ -336,9 +391,11 @@ function projectBookingEmailStatus(status) {
   }
 }
 
-export function projectBookingEmailSyncHttpResponse(result) {
+export function projectBookingEmailSyncHttpResponse(result, actor) {
   return {
     status: projectBookingEmailStatus(result?.status),
-    events: Array.isArray(result?.events) ? result.events.map(projectBookingEmailEventResponse) : [],
+    events: Array.isArray(result?.events)
+      ? result.events.map((event) => projectBookingEmailEventResponse(event, actor))
+      : [],
   }
 }

@@ -964,16 +964,48 @@ function normalizeBookingEmailAmount(value) {
   return roundMoney(amount)
 }
 
-function requireSensitiveAccessReason(input, label) {
+const SENSITIVE_ACCESS_REASON_CODES = Object.freeze({
+  identity: new Set(['CHECK_IN_VERIFICATION', 'GUEST_RECORD_REVIEW']),
+  rawBookingEmail: new Set(['BOOKING_RECONCILIATION', 'PROVIDER_DISPUTE', 'SECURITY_REVIEW']),
+  paymentReference: new Set(['SETTLEMENT_RECONCILIATION', 'PAYMENT_DISPUTE', 'REFUND_REVIEW']),
+})
+
+function requireSensitiveAccessReason(input, label, allowedReasonCodes) {
   const reason = normalizeNullableString(input?.reason)
   if (!reason) throw new PmsValidationError(`${label} requires an operational reason.`)
   if (reason.length > 500) throw new PmsValidationError(`${label} reason must be 500 characters or fewer.`)
-  return reason
+  const reasonCode = String(input?.reasonCode || '').trim().toUpperCase()
+  if (!allowedReasonCodes.has(reasonCode)) {
+    throw new PmsValidationError(`${label} requires a valid reasonCode.`)
+  }
+  return { reasonCode, reasonProvided: true }
 }
 
-export async function viewReservationSensitiveIdentity(prisma, reservationId, input, actor) {
+function propertyLocalDateKey(value, timeZone) {
+  const date = value instanceof Date ? value : new Date(value)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timeZone || 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function reservationDateKey(value) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  const date = value instanceof Date ? value : new Date(value)
+  return date.toISOString().slice(0, 10)
+}
+
+export async function viewReservationSensitiveIdentity(prisma, reservationId, input, actor, options = {}) {
   requirePermission(actor, 'view:sensitive-identity')
-  const reason = requireSensitiveAccessReason(input, 'Sensitive identity access')
+  const auditReason = requireSensitiveAccessReason(
+    input,
+    'Sensitive identity access',
+    SENSITIVE_ACCESS_REASON_CODES.identity,
+  )
   return prisma.$transaction(async (tx) => {
     const property = await getProperty(tx, actor)
     const reservation = await tx.reservation.findFirst({
@@ -981,6 +1013,8 @@ export async function viewReservationSensitiveIdentity(prisma, reservationId, in
       select: {
         id: true,
         status: true,
+        checkIn: true,
+        checkOut: true,
         guest: {
           select: {
             id: true,
@@ -993,11 +1027,18 @@ export async function viewReservationSensitiveIdentity(prisma, reservationId, in
       },
     })
     if (!reservation?.guest) throw new PmsValidationError('Reservation was not found.', 404)
-    if (normalizeRole(actor?.role) === 'FRONT_DESK' && !['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(reservation.status)) {
-      throw new PmsValidationError('Front desk identity access is limited to active check-in context.', 403)
+    if (normalizeRole(actor?.role) === 'FRONT_DESK') {
+      const today = propertyLocalDateKey(options.now ?? new Date(), property.timezone)
+      const checkIn = reservationDateKey(reservation.checkIn)
+      const checkOut = reservationDateKey(reservation.checkOut)
+      const activeStay = reservation.status === 'CHECKED_IN'
+        || (['PENDING', 'CONFIRMED'].includes(reservation.status) && today >= checkIn && today < checkOut)
+      if (!activeStay) {
+        throw new PmsValidationError('Front desk identity access is limited to active check-in context.', 403)
+      }
     }
     const fields = ['nationality', 'idType', 'idNumber', 'dateOfBirth']
-    await createAudit(tx, actor, 'SENSITIVE_IDENTITY_VIEWED', 'reservation', reservation.id, { fields, reason })
+    await createAudit(tx, actor, 'SENSITIVE_IDENTITY_VIEWED', 'reservation', reservation.id, { fields, ...auditReason })
     return {
       reservationId: reservation.id,
       guestId: reservation.guest.id,
@@ -1013,7 +1054,11 @@ export async function viewReservationSensitiveIdentity(prisma, reservationId, in
 
 export async function viewRawBookingEmail(prisma, eventId, input, actor) {
   requirePermission(actor, 'view:raw-booking-email')
-  const reason = requireSensitiveAccessReason(input, 'Raw booking email access')
+  const auditReason = requireSensitiveAccessReason(
+    input,
+    'Raw booking email access',
+    SENSITIVE_ACCESS_REASON_CODES.rawBookingEmail,
+  )
   return prisma.$transaction(async (tx) => {
     const property = await getProperty(tx, actor)
     const event = await tx.bookingEmailEvent.findFirst({
@@ -1023,7 +1068,7 @@ export async function viewRawBookingEmail(prisma, eventId, input, actor) {
     if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
     const storedHeaders = safeJsonObject(event.rawHeaders)
     const fields = ['rawText', 'rawHeaders.messageId', 'rawHeaders.date', 'rawHeaders.authenticationResults', 'rawHeaders.replyTo']
-    await createAudit(tx, actor, 'RAW_BOOKING_EMAIL_VIEWED', 'bookingEmailEvent', event.id, { fields, reason })
+    await createAudit(tx, actor, 'RAW_BOOKING_EMAIL_VIEWED', 'bookingEmailEvent', event.id, { fields, ...auditReason })
     return {
       eventId: event.id,
       rawText: event.rawText,
@@ -1039,7 +1084,11 @@ export async function viewRawBookingEmail(prisma, eventId, input, actor) {
 
 export async function viewFullPaymentReference(prisma, paymentId, input, actor) {
   requirePermission(actor, 'view:full-payment-reference')
-  const reason = requireSensitiveAccessReason(input, 'Full payment reference access')
+  const auditReason = requireSensitiveAccessReason(
+    input,
+    'Full payment reference access',
+    SENSITIVE_ACCESS_REASON_CODES.paymentReference,
+  )
   return prisma.$transaction(async (tx) => {
     const property = await getProperty(tx, actor)
     const payment = await tx.payment.findFirst({
@@ -1048,7 +1097,7 @@ export async function viewFullPaymentReference(prisma, paymentId, input, actor) 
     })
     if (!payment) throw new PmsValidationError('Payment was not found.', 404)
     const fields = ['reference']
-    await createAudit(tx, actor, 'FULL_PAYMENT_REFERENCE_VIEWED', 'payment', payment.id, { fields, reason })
+    await createAudit(tx, actor, 'FULL_PAYMENT_REFERENCE_VIEWED', 'payment', payment.id, { fields, ...auditReason })
     return { paymentId: payment.id, reference: payment.reference }
   })
 }
@@ -1546,7 +1595,7 @@ function bookingEmailSourceResponse(source) {
   }
 }
 
-function bookingEmailEventResponse(event) {
+function bookingEmailEventResponse(event, actor) {
   const parsedDetails = safeJsonObject(event.parsedDetails)
   return projectBookingEmailEventResponse({
     id: event.id,
@@ -1581,7 +1630,7 @@ function bookingEmailEventResponse(event) {
     parsedDetails,
     createdAt: isoOrUndefined(event.createdAt),
     updatedAt: isoOrUndefined(event.updatedAt),
-  })
+  }, actor)
 }
 
 async function ensurePrimaryBookingEmailSource(tx, actor) {
@@ -3856,7 +3905,7 @@ export async function listBookingEmailEvents(prisma, filters = {}, actor) {
       orderBy: [{ receivedAt: 'desc' }, { createdAt: 'desc' }],
       take: limit,
     })
-    return events.map(bookingEmailEventResponse)
+    return events.map((event) => bookingEmailEventResponse(event, actor))
   })
 }
 
@@ -3867,7 +3916,7 @@ export async function getBookingEmailEvent(prisma, eventId, actor) {
     include: bookingEmailEventInclude(),
   })
   if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
-  return bookingEmailEventResponse(event)
+  return bookingEmailEventResponse(event, actor)
 }
 
 async function resolveBookingEmailRoomMapping(tx, event, details) {
@@ -4188,9 +4237,9 @@ export async function syncBookingEmail(prisma, input = {}, actor, options = {}) 
 
   return {
     status: await getBookingEmailStatus(prisma, actor),
-    events: results.map(bookingEmailEventResponse),
+    events: results.map((event) => bookingEmailEventResponse(event, actor)),
     opsCommandEvents: suppliedEvents && options.providerVerified !== true ? [] : results.map((event) => ({
-      ...bookingEmailEventResponse(event),
+      ...bookingEmailEventResponse(event, actor),
       sourceMessageId: event.sourceMessageId || undefined,
       rawText: event.rawText || undefined,
       body: event.rawText || undefined,
@@ -4290,7 +4339,7 @@ async function approveModificationEmailEvent(prisma, event, details, actor, rese
       include: bookingEmailEventInclude(),
     })
     if (!currentEvent) throw new PmsValidationError('Booking email event was not found.', 404)
-    if (currentEvent.status === 'PROCESSED') return bookingEmailEventResponse(currentEvent)
+    if (currentEvent.status === 'PROCESSED') return bookingEmailEventResponse(currentEvent, actor)
     const updated = await tx.bookingEmailEvent.update({
       where: { id: currentEvent.id },
       data: {
@@ -4314,7 +4363,7 @@ async function approveModificationEmailEvent(prisma, event, details, actor, rese
       sourceMessageId: currentEvent.sourceMessageId,
       reason: normalizedReason,
     })
-    return bookingEmailEventResponse(updated)
+    return bookingEmailEventResponse(updated, actor)
   })
 }
 
@@ -4353,17 +4402,17 @@ export async function approveBookingEmailEvent(prisma, eventId, input = {}, acto
     assertBookingEmailApprovalContract(event.eventType, mode, input, actor)
     if (mode === 'link_reservation') {
       if (!input.reservationId) throw new PmsValidationError('Select a reservation to link this email event.')
-      return bookingEmailEventResponse(await linkBookingEmailEventToReservation(tx, event, input.reservationId, actor))
+      return bookingEmailEventResponse(await linkBookingEmailEventToReservation(tx, event, input.reservationId, actor), actor)
     }
 
     if (event.eventType === 'NEW_BOOKING') {
-      return bookingEmailEventResponse(await approveNewBookingEmailEvent(tx, event, details, actor))
+      return bookingEmailEventResponse(await approveNewBookingEmailEvent(tx, event, details, actor), actor)
     }
     if (event.eventType === 'PAYMENT_NOTICE') {
-      return bookingEmailEventResponse(await approvePaymentEmailEvent(tx, event, details, actor, input.reservationId))
+      return bookingEmailEventResponse(await approvePaymentEmailEvent(tx, event, details, actor, input.reservationId), actor)
     }
     if (event.eventType === 'CANCELLATION') {
-      return bookingEmailEventResponse(await approveCancellationEmailEvent(tx, event, details, actor, input.reservationId, input.reason))
+      return bookingEmailEventResponse(await approveCancellationEmailEvent(tx, event, details, actor, input.reservationId, input.reason), actor)
     }
 
     throw new PmsValidationError('This booking email event must be linked to a reservation before it can be processed.')
@@ -4393,7 +4442,7 @@ export async function rejectBookingEmailEvent(prisma, eventId, input = {}, actor
       reason,
       sourceMessageId: event.sourceMessageId,
     })
-    return bookingEmailEventResponse(updated)
+    return bookingEmailEventResponse(updated, actor)
   })
 }
 
@@ -4436,7 +4485,7 @@ export async function reprocessBookingEmailEvent(prisma, eventId, actor) {
     await createAudit(tx, actor, 'BOOKING_EMAIL_REPROCESSED', 'bookingEmailEvent', event.id, {
       sourceMessageId: event.sourceMessageId,
     })
-    return bookingEmailEventResponse(updated)
+    return bookingEmailEventResponse(updated, actor)
   })
 }
 

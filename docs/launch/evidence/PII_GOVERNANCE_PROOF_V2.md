@@ -2,7 +2,7 @@
 
 Status: open.
 
-Local engineering note (2026-08-08): allowlisted generic DTOs and three separate reason-gated, property-scoped, audited sensitive-access POST paths are implemented and covered by focused service/source tests. This is not credentialed staff-role, deployed-provider, or production audit proof.
+Local engineering note (2026-08-08): allowlisted generic DTOs and three separate endpoint-reason-code-gated, property-scoped, audited sensitive-access POST paths are implemented and covered by focused service/source tests. Payment mutations are projected, booking-email DTOs are role-aware, and Front Desk identity access is property-date constrained. This is not credentialed staff-role, deployed-provider, or production audit proof.
 
 ## Environment
 
@@ -38,10 +38,11 @@ The table above intentionally remains blank until credentialed role-by-role test
 ## Local engineering-control evidence
 
 - [x] Generic reservation/guest responses exclude full identity numbers, raw booking-email fields, and full payment references.
-- [x] Identity access requires `view:sensitive-identity`, a JSON-body reason, active property scope, and a successful audit write.
-- [x] Raw booking-email access requires `view:raw-booking-email`, a JSON-body reason, active property scope, and a successful audit write.
-- [x] Full payment-reference access requires `view:full-payment-reference`, a JSON-body reason, active property scope, and a successful audit write.
-- [x] Focused negative tests cover wrong role, missing reason, cross-property lookup, generic redaction, minimal success responses, and audit payload hygiene.
+- [x] Identity access requires `view:sensitive-identity`, an allowlisted JSON-body `reasonCode`, a non-empty JSON-body reason, active property scope, a property-date-valid Front Desk stay context, and a successful audit write.
+- [x] Raw booking-email access requires `view:raw-booking-email`, an allowlisted JSON-body `reasonCode`, a non-empty JSON-body reason, active property scope, and a successful audit write.
+- [x] Full payment-reference access requires `view:full-payment-reference`, an allowlisted JSON-body `reasonCode`, a non-empty JSON-body reason, active property scope, and a successful audit write.
+- [x] Sensitive-view audits persist the controlled `reasonCode` and `reasonProvided=true`, not the free-text reason.
+- [x] Focused negative tests cover wrong role, missing/invalid reason fields, cross-property lookup, generic redaction, payment mutation redaction, role-aware booking-email output, minimal success responses, and audit payload hygiene.
 - [x] Source checks confirm the three routes are POST-only and behind the shared authentication boundary.
 - [ ] Credentialed `401`/role-denial and allowed-role checks have run in an approved deployed environment.
 - [ ] Production audit rows have been inspected without copying sensitive values into evidence.

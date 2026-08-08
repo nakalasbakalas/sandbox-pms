@@ -186,6 +186,7 @@ import {
 import {
   projectBookingEmailSyncHttpResponse,
   projectGuestResponse,
+  projectPaymentMutationResponse,
   projectReservationResponse,
 } from './pms-response-projections.mjs'
 
@@ -1709,7 +1710,7 @@ async function handleApi(request, response, url) {
       env: process.env,
       submitCommand: submitOpsCommand,
     })
-    const httpResult = projectBookingEmailSyncHttpResponse(result)
+    const httpResult = projectBookingEmailSyncHttpResponse(result, user)
     sendJson(response, 200, {
       ok: true,
       data: httpResult.status,
@@ -2105,14 +2106,15 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/payments' && request.method === 'POST') {
     requirePermission(user, 'process:payment')
     const body = await readJson(request)
-    const payment = await createPayment(db, {
+    const paymentResult = await createPayment(db, {
       ...body,
       idempotencyKey: body.idempotencyKey || context.idempotencyKey,
     }, user)
-    sendJson(response, payment.idempotentReplay ? 200 : 201, {
+    const payment = projectPaymentMutationResponse(paymentResult)
+    sendJson(response, paymentResult.idempotentReplay ? 200 : 201, {
       ok: true,
       data: payment,
-      message: payment.idempotentReplay ? 'Existing payment returned for this idempotency key.' : 'Payment recorded.',
+      message: paymentResult.idempotentReplay ? 'Existing payment returned for this idempotency key.' : 'Payment recorded.',
     })
     return true
   }
