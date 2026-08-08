@@ -3,6 +3,7 @@ import {
   SANDBOX_RULES,
   activeReservationStatuses,
   calculateStayPricing,
+  calculateStayPricingSatang,
   checkedInRoomStatus,
   dateFromKey,
   getBangkokDateKey,
@@ -28,6 +29,7 @@ import {
   bahtToSatang,
   divideSatang,
   dualWriteMoney,
+  moneyReadAuthority,
   parseSatang,
   readMoneySatang,
   requireMoneySatang,
@@ -245,6 +247,8 @@ const RESERVATION_UPDATE_FIELDS = new Set([
   'checkIn',
   'checkOut',
   'ratePerNight',
+  'ratePerNightSatang',
+  'totalAmountSatang',
   'adults',
   'children',
   'childAges',
@@ -326,6 +330,67 @@ function pricingRulesFor(property, roomType) {
     maxOccupancy: roomType?.maxOccupancy ?? SANDBOX_RULES.maxOccupancy,
     extraGuestFeePerNight: property?.extraGuestFee ?? SANDBOX_RULES.extraGuestFeePerNight,
     childSharingFeePerNight: property?.childFee ?? SANDBOX_RULES.childSharingFeePerNight,
+    extraGuestFeePerNightSatang: property?.extraGuestFeeSatang,
+    childSharingFeePerNightSatang: property?.childFeeSatang,
+  }
+}
+
+function pricingSatangInput(exactValue, legacyValue, label, authority) {
+  if (exactValue !== null && exactValue !== undefined && exactValue !== '') {
+    return parseSatang(exactValue, label)
+  }
+  if (authority === 'satang') {
+    throw new PmsValidationError(`${label} exact money shadow is required in satang mode.`, 503)
+  }
+  return bahtToSatang(legacyValue, label)
+}
+
+function calculateAuthoritativeStayPricing(input, property, roomType, env = process.env) {
+  let authority
+  try {
+    authority = moneyReadAuthority(env)
+  } catch (error) {
+    throw new PmsValidationError(error instanceof Error ? error.message : 'Money read authority is invalid.', 503)
+  }
+  const rules = pricingRulesFor(property, roomType)
+  const explicitTotal = input.totalAmountSatang !== null && input.totalAmountSatang !== undefined && input.totalAmountSatang !== ''
+  const explicitRate = input.ratePerNightSatang !== null && input.ratePerNightSatang !== undefined && input.ratePerNightSatang !== ''
+  const ratePerNight = input.ratePerNight ?? roomType?.baseRate
+  const ratePerNightSatang = input.ratePerNightSatang
+    ?? (input.ratePerNight === null || input.ratePerNight === undefined ? roomType?.baseRateSatang : undefined)
+
+  if (authority === 'legacy_float' && !explicitTotal && !explicitRate) {
+    const legacy = calculateStayPricing({ ...input, ratePerNight, ...rules })
+    const legacyRatePerNightSatang = bahtToSatang(ratePerNight, 'ratePerNight')
+    const totalSatang = bahtToSatang(legacy.total, 'totalAmount')
+    return {
+      ...legacy,
+      ratePerNightSatang: legacyRatePerNightSatang,
+      totalSatang,
+      depositAmountSatang: divideSatang(totalSatang * 30n, 100, 'deposit amount'),
+    }
+  }
+
+  const exact = calculateStayPricingSatang({
+    ...input,
+    ...rules,
+    ratePerNightSatang: pricingSatangInput(ratePerNightSatang, ratePerNight, 'ratePerNightSatang', authority),
+    extraGuestFeePerNightSatang: pricingSatangInput(
+      rules.extraGuestFeePerNightSatang,
+      rules.extraGuestFeePerNight,
+      'extraGuestFeeSatang',
+      authority,
+    ),
+    childSharingFeePerNightSatang: pricingSatangInput(
+      rules.childSharingFeePerNightSatang,
+      rules.childSharingFeePerNight,
+      'childFeeSatang',
+      authority,
+    ),
+  })
+  return {
+    ...exact,
+    depositAmountSatang: divideSatang(exact.totalSatang * 30n, 100, 'deposit amount'),
   }
 }
 
@@ -2211,6 +2276,8 @@ async function reservationInputFromBookingEmailEvent(tx, event, details) {
     children: Number(details.children || 0),
     childAges: Array.isArray(details.childAges) ? details.childAges.map(Number) : [],
     ratePerNight,
+    ratePerNightSatang: satangToApiString(ratePerNightSatang),
+    ...(amountSatang !== null ? { totalAmountSatang: satangToApiString(amountSatang) } : {}),
     source: normalizeBookingSourceFromEmail(event.sender, event.sourceName),
     channelRef: event.channelRef || undefined,
     sourceEmailEventId: event.id,
@@ -3257,18 +3324,20 @@ export async function updateReservation(prisma, reservationId, input, actor, opt
     const checkIn = update.checkIn ?? current.checkIn
     const checkOut = update.checkOut ?? current.checkOut
     const ratePerNight = update.ratePerNight ?? current.ratePerNight
+    const ratePerNightSatang = update.ratePerNightSatang ?? current.ratePerNightSatang
     const adults = update.adults ?? current.adults
     const children = update.children ?? current.children
     const childAges = update.childAges ?? current.childAges
     const { checkInKey, checkOutKey } = proposedStay
-    const pricing = calculateStayPricing({
+    const pricing = calculateAuthoritativeStayPricing({
       checkIn,
       checkOut,
       ratePerNight,
+      ratePerNightSatang,
+      totalAmountSatang: update.totalAmountSatang,
       adults,
       childAges,
-      ...pricingRulesFor(property, pricingRoomType),
-    })
+    }, property, pricingRoomType)
 
     await ensureRoomTypeCapacity(tx, property.id, roomTypeId, checkInKey, checkOutKey, current.id)
 
@@ -3296,9 +3365,9 @@ export async function updateReservation(prisma, reservationId, input, actor, opt
         adults: Number(adults),
         children: Number(children || 0),
         childAges: Array.isArray(childAges) ? childAges.map(Number) : [],
-        ...moneyDataFromBaht('ratePerNight', 'ratePerNightSatang', Number(ratePerNight)),
-        ...moneyDataFromBaht('totalAmount', 'totalAmountSatang', pricing.total),
-        ...moneyDataFromBaht('depositAmount', 'depositAmountSatang', roundMoney(pricing.total * 0.3)),
+        ...dualWriteMoney('ratePerNight', 'ratePerNightSatang', pricing.ratePerNightSatang),
+        ...dualWriteMoney('totalAmount', 'totalAmountSatang', pricing.totalSatang),
+        ...dualWriteMoney('depositAmount', 'depositAmountSatang', pricing.depositAmountSatang),
         source: update.source || current.source,
         channelRef: update.channelRef ?? current.channelRef,
         sourceEmailEventId,
@@ -3324,9 +3393,9 @@ export async function updateReservation(prisma, reservationId, input, actor, opt
           where: { id: roomCharge.id },
           data: {
             date: dateFromKey(checkInKey),
-            ...moneyDataFromBaht('amount', 'amountSatang', Number(ratePerNight)),
+            ...dualWriteMoney('amount', 'amountSatang', pricing.ratePerNightSatang),
             quantity: pricing.nights,
-            ...moneyDataFromBaht('total', 'totalSatang', pricing.total),
+            ...dualWriteMoney('total', 'totalSatang', pricing.totalSatang),
           },
         })
       }
@@ -3654,10 +3723,7 @@ async function createReservationInTransaction(tx, input, actor, options = {}) {
       },
     })
     if (!roomType) throw new PmsValidationError('Selected room type was not found.')
-    const pricing = calculateStayPricing({
-      ...input,
-      ...pricingRulesFor(property, roomType),
-    })
+    const pricing = calculateAuthoritativeStayPricing(input, property, roomType)
 
     await ensureRoomTypeCapacity(tx, property.id, roomType.id, checkInKey, checkOutKey)
 
@@ -3676,9 +3742,9 @@ async function createReservationInTransaction(tx, input, actor, options = {}) {
         adults: Number(input.adults),
         children: Number(input.children || 0),
         childAges: Array.isArray(input.childAges) ? input.childAges.map(Number) : [],
-        ...moneyDataFromBaht('ratePerNight', 'ratePerNightSatang', Number(input.ratePerNight)),
-        ...moneyDataFromBaht('totalAmount', 'totalAmountSatang', pricing.total),
-        ...moneyDataFromBaht('depositAmount', 'depositAmountSatang', roundMoney(pricing.total * 0.3)),
+        ...dualWriteMoney('ratePerNight', 'ratePerNightSatang', pricing.ratePerNightSatang),
+        ...dualWriteMoney('totalAmount', 'totalAmountSatang', pricing.totalSatang),
+        ...dualWriteMoney('depositAmount', 'depositAmountSatang', pricing.depositAmountSatang),
         depositPaid: false,
         source: input.source || 'DIRECT',
         channelRef: input.channelRef || null,
@@ -3704,11 +3770,11 @@ async function createReservationInTransaction(tx, input, actor, options = {}) {
     const folio = await tx.folio.create({
       data: {
         reservationId: reservation.id,
-        ...moneyDataFromBaht('subtotal', 'subtotalSatang', pricing.total),
+        ...dualWriteMoney('subtotal', 'subtotalSatang', pricing.totalSatang),
         ...moneyDataFromBaht('tax', 'taxSatang', 0),
-        ...moneyDataFromBaht('total', 'totalSatang', pricing.total),
+        ...dualWriteMoney('total', 'totalSatang', pricing.totalSatang),
         ...moneyDataFromBaht('paid', 'paidSatang', 0),
-        ...moneyDataFromBaht('balance', 'balanceSatang', pricing.total),
+        ...dualWriteMoney('balance', 'balanceSatang', pricing.totalSatang),
       },
     })
 
@@ -3724,15 +3790,15 @@ async function createReservationInTransaction(tx, input, actor, options = {}) {
           dateKey: checkInKey,
           description: roomChargeDescription,
           category: 'ROOM',
-          amountSatang: bahtToSatang(Number(input.ratePerNight)),
+          amountSatang: pricing.ratePerNightSatang,
           quantity: pricing.nights,
         }),
         date: dateFromKey(checkInKey),
         description: roomChargeDescription,
         category: 'ROOM',
-        ...moneyDataFromBaht('amount', 'amountSatang', Number(input.ratePerNight)),
+        ...dualWriteMoney('amount', 'amountSatang', pricing.ratePerNightSatang),
         quantity: pricing.nights,
-        ...moneyDataFromBaht('total', 'totalSatang', pricing.total),
+        ...dualWriteMoney('total', 'totalSatang', pricing.totalSatang),
         createdBy: actorName(actor),
       },
     })
@@ -4375,6 +4441,8 @@ function modificationUpdateFromBookingEmail(event, details, reservation, reason)
       checkOut: update.checkOut || reservation.checkOut,
     })
     update.ratePerNight = satangToBahtNumber(divideSatang(amountSatang, nights, 'modified reservation amount'), 'modified reservation nightly rate')
+    update.ratePerNightSatang = satangToApiString(divideSatang(amountSatang, nights, 'modified reservation amount'))
+    update.totalAmountSatang = satangToApiString(amountSatang)
   }
   return update
 }
@@ -4562,10 +4630,7 @@ export async function createWalkInCheckIn(prisma, input, actor) {
       },
     })
     if (!roomType) throw new PmsValidationError('Selected room type was not found.')
-    const pricing = calculateStayPricing({
-      ...input,
-      ...pricingRulesFor(property, roomType),
-    })
+    const pricing = calculateAuthoritativeStayPricing(input, property, roomType)
 
     await ensureRoomTypeCapacity(tx, property.id, roomType.id, checkInKey, checkOutKey)
 
@@ -4591,9 +4656,9 @@ export async function createWalkInCheckIn(prisma, input, actor) {
         adults: Number(input.adults),
         children: Number(input.children || 0),
         childAges: Array.isArray(input.childAges) ? input.childAges.map(Number) : [],
-        ...moneyDataFromBaht('ratePerNight', 'ratePerNightSatang', Number(input.ratePerNight)),
-        ...moneyDataFromBaht('totalAmount', 'totalAmountSatang', pricing.total),
-        ...moneyDataFromBaht('depositAmount', 'depositAmountSatang', roundMoney(pricing.total * 0.3)),
+        ...dualWriteMoney('ratePerNight', 'ratePerNightSatang', pricing.ratePerNightSatang),
+        ...dualWriteMoney('totalAmount', 'totalAmountSatang', pricing.totalSatang),
+        ...dualWriteMoney('depositAmount', 'depositAmountSatang', pricing.depositAmountSatang),
         depositPaid: false,
         source: 'WALK_IN',
         channelRef: null,
@@ -4632,11 +4697,11 @@ export async function createWalkInCheckIn(prisma, input, actor) {
     const folio = await tx.folio.create({
       data: {
         reservationId: reservation.id,
-        ...moneyDataFromBaht('subtotal', 'subtotalSatang', pricing.total),
+        ...dualWriteMoney('subtotal', 'subtotalSatang', pricing.totalSatang),
         ...moneyDataFromBaht('tax', 'taxSatang', 0),
-        ...moneyDataFromBaht('total', 'totalSatang', pricing.total),
+        ...dualWriteMoney('total', 'totalSatang', pricing.totalSatang),
         ...moneyDataFromBaht('paid', 'paidSatang', 0),
-        ...moneyDataFromBaht('balance', 'balanceSatang', pricing.total),
+        ...dualWriteMoney('balance', 'balanceSatang', pricing.totalSatang),
       },
     })
 
@@ -4652,15 +4717,15 @@ export async function createWalkInCheckIn(prisma, input, actor) {
           dateKey: checkInKey,
           description: roomChargeDescription,
           category: 'ROOM',
-          amountSatang: bahtToSatang(Number(input.ratePerNight)),
+          amountSatang: pricing.ratePerNightSatang,
           quantity: pricing.nights,
         }),
         date: dateFromKey(checkInKey),
         description: roomChargeDescription,
         category: 'ROOM',
-        ...moneyDataFromBaht('amount', 'amountSatang', Number(input.ratePerNight)),
+        ...dualWriteMoney('amount', 'amountSatang', pricing.ratePerNightSatang),
         quantity: pricing.nights,
-        ...moneyDataFromBaht('total', 'totalSatang', pricing.total),
+        ...dualWriteMoney('total', 'totalSatang', pricing.totalSatang),
         createdBy: actorName(actor),
       },
     })
@@ -5466,6 +5531,16 @@ export async function updateGuest(prisma, guestId, input, actor) {
 
 export async function getTodayData(prisma, actor) {
   const property = await getProperty(prisma, actor)
+  const missingExactUnpaidBalances = await prisma.folio.count({
+    where: {
+      reservation: { propertyId: property.id },
+      status: 'OPEN',
+      balanceSatang: null,
+    },
+  })
+  if (missingExactUnpaidBalances > 0) {
+    throw new PmsValidationError('Today data is unavailable because an open folio is missing balanceSatang exact money.', 503)
+  }
   const todayKey = getBangkokDateKey(new Date())
   const today = dateFromKey(todayKey)
   const tomorrow = dateFromKey(nextDateKey(todayKey))

@@ -87,7 +87,10 @@ export function dualWriteMoney(legacyField, satangField, value) {
 
 export function moneyReadAuthority(env = process.env) {
   const authority = String(env.MONEY_READ_AUTHORITY || 'legacy_float').trim().toLowerCase()
-  return MONEY_READ_AUTHORITIES.has(authority) ? authority : 'legacy_float'
+  if (!MONEY_READ_AUTHORITIES.has(authority)) {
+    throw new TypeError(`MONEY_READ_AUTHORITY must be one of: ${[...MONEY_READ_AUTHORITIES].join(', ')}.`)
+  }
+  return authority
 }
 
 export function readMoneySatang(record, legacyField, satangField = `${legacyField}Satang`, env = process.env) {
