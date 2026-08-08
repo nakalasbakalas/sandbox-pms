@@ -1,6 +1,6 @@
 # Staff Workflow Acceptance V2
 
-Status: open.
+Status: owner action required; no staging/live workflow mutation performed.
 
 ## Scope
 
@@ -8,12 +8,12 @@ Manual acceptance for the hotel workflows that automated checks cannot fully pro
 
 ## Environment
 
-- Commit SHA:
-- Deploy ID:
-- Host:
-- Test date/time:
-- Tester(s):
-- Data source: staging / live accepted-risk / disposable
+- Commit SHA: local candidate `12d9572`
+- Deploy ID: not supplied
+- Host: not approved
+- Test date/time: not run
+- Tester(s): not assigned
+- Data source: isolated staging property or owner-approved test dataset required
 
 ## Workflow checklist
 
@@ -38,4 +38,20 @@ Manual acceptance for the hotel workflows that automated checks cannot fully pro
 
 - [ ] Passed
 - [ ] Failed
-- [ ] Accepted risk with owner/date/expiry:
+- [x] Owner action required; local automated tests do not replace staff acceptance.
+
+```text
+OWNER ACTION REQUIRED
+Gate: STAFF WORKFLOW ACCEPTANCE
+Required inputs:
+- isolated staging property or explicitly approved test dataset
+- exact deployed candidate SHA/deploy ID and target host
+- approved ADMIN, MANAGER, FRONT_DESK, HOUSEKEEPING, and CASHIER test accounts
+- named tester(s), cleanup owner, and acceptance date
+- approval to create and clean up the redacted test reservation only through supported PMS workflows
+Execution:
+- complete the single coherent 16-step scenario in docs/finish/CODEX_FINISH_PACKET.md F11
+- record only redacted identifiers, statuses, timestamps, audit/timeline results, and cleanup outcome in this file
+Expected artifact:
+- completed workflow table with tester, host, commit, deploy ID, data source, pass/fail, and no sensitive screenshots
+```
