@@ -3,7 +3,7 @@
 **Status:** IN_PROGRESS
 **Baseline SHA:** `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`
 **Current branch:** `codex/final-core-closure`
-**Current HEAD:** `c8c2b05e507dc945d2683fbbbd04a990b20acd80`
+**Current HEAD:** `f9154c5965d106f21e10ae2cc553cd578b242d45`
 **Last updated:** 2026-08-08 (Asia/Bangkok)
 
 ## Gates
@@ -13,8 +13,8 @@
 | F00 | Freeze and ledger | COMPLETE | `1cfc6f8` | `git fetch origin --prune`; exact baseline confirmed | Setup kit remains untracked by design during ledger-only commit |
 | F01 | Privacy response reconnaissance | COMPLETE | read-only | packet-bounded `rg` scout; exposure paths mapped | Booking-email sync response permission path needs confirmation during F02 |
 | F02 | Role-specific response projections | COMPLETE | `c8c2b05` | `test:privacy-projections`; Cashier/Board projection tests; typecheck; lint; diff check | Live/provider proof not attempted |
-| F03 | Audited sensitive-access endpoints | IN_PROGRESS |  |  |  |
-| F04 | Independent privacy review | NOT_STARTED |  |  |  |
+| F03 | Audited sensitive-access endpoints | COMPLETE | `f9154c5` | sensitive-access/privacy/Cashier/property tests; typecheck; lint; diff check | Credentialed deployed-role and production audit proof remain open for F10-F11 |
+| F04 | Independent privacy review | IN_PROGRESS |  | read-only reviewer active |  |
 | F05 | Float-authoritative money map | NOT_STARTED |  |  |  |
 | F06 | Read-only money reconciliation | NOT_STARTED |  |  |  |
 | F07 | Exact-satang core financial reads | NOT_STARTED |  |  |  |
@@ -34,11 +34,11 @@
 
 ## Active task
 
-**Task:** F03
-**Owner/agent:** Sensitive-access implementation writer
-**Allowed files:** privacy projection/service/routes/RBAC, focused sensitive-access tests, and the two packet-required PII evidence documents
-**Focused validation:** sensitive-access negative tests, `npm.cmd run typecheck`, `npm.cmd run lint`, `git diff --check`
-**Next exact action:** Add reason-gated, permission-gated, property-scoped, audited identity/raw-email/payment-reference endpoints with minimal responses.
+**Task:** F04
+**Owner/agent:** Independent read-only privacy reviewer
+**Allowed files:** Wave 1 diff and direct privacy call paths only
+**Focused validation:** severity-ranked review for leaks, bypasses, property scope, audit safety, test/evidence hygiene, and core API/UI regression
+**Next exact action:** Fix only P0/P1 review findings, then run the Wave 1 full gate.
 
 ## Decisions
 
