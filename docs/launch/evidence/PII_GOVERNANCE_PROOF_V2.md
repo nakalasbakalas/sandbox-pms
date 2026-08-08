@@ -2,6 +2,8 @@
 
 Status: open.
 
+Local engineering note (2026-08-08): allowlisted generic DTOs and three separate reason-gated, property-scoped, audited sensitive-access POST paths are implemented and covered by focused service/source tests. This is not credentialed staff-role, deployed-provider, or production audit proof.
+
 ## Environment
 
 - Commit SHA:
@@ -30,6 +32,19 @@ Status: open.
 | Raw booking email headers |  |  |  |  |  |  |
 | Payment reference full value |  |  |  |  |  |  |
 | Guest document link/file |  |  |  |  |  |  |
+
+The table above intentionally remains blank until credentialed role-by-role testing is performed against an approved environment.
+
+## Local engineering-control evidence
+
+- [x] Generic reservation/guest responses exclude full identity numbers, raw booking-email fields, and full payment references.
+- [x] Identity access requires `view:sensitive-identity`, a JSON-body reason, active property scope, and a successful audit write.
+- [x] Raw booking-email access requires `view:raw-booking-email`, a JSON-body reason, active property scope, and a successful audit write.
+- [x] Full payment-reference access requires `view:full-payment-reference`, a JSON-body reason, active property scope, and a successful audit write.
+- [x] Focused negative tests cover wrong role, missing reason, cross-property lookup, generic redaction, minimal success responses, and audit payload hygiene.
+- [x] Source checks confirm the three routes are POST-only and behind the shared authentication boundary.
+- [ ] Credentialed `401`/role-denial and allowed-role checks have run in an approved deployed environment.
+- [ ] Production audit rows have been inspected without copying sensitive values into evidence.
 
 ## Evidence hygiene checks
 

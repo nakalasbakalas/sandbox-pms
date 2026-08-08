@@ -14,7 +14,7 @@ import {
   validateStayInput,
   PmsValidationError,
 } from './pms-domain.mjs'
-import { canPerformAction } from './rbac.mjs'
+import { canPerformAction, normalizeRole, requirePermission } from './rbac.mjs'
 import { createPasswordHash } from './security.mjs'
 import { recordDomainEvent } from './domain-events.mjs'
 import { chargeIntentFingerprint } from './charge-idempotency.mjs'
@@ -39,7 +39,12 @@ import {
   bookingEmailWorkspaceJsonStatus,
   fetchBookingEmailWorkspaceAnalyses,
 } from './booking-email-workspace-json.mjs'
-import { projectGuestResponse, projectReservationResponse } from './pms-response-projections.mjs'
+import {
+  maskSensitiveValue,
+  projectBookingEmailEventResponse,
+  projectGuestResponse,
+  projectReservationResponse,
+} from './pms-response-projections.mjs'
 
 const reservationInclude = {
   guest: true,
@@ -959,6 +964,95 @@ function normalizeBookingEmailAmount(value) {
   return roundMoney(amount)
 }
 
+function requireSensitiveAccessReason(input, label) {
+  const reason = normalizeNullableString(input?.reason)
+  if (!reason) throw new PmsValidationError(`${label} requires an operational reason.`)
+  if (reason.length > 500) throw new PmsValidationError(`${label} reason must be 500 characters or fewer.`)
+  return reason
+}
+
+export async function viewReservationSensitiveIdentity(prisma, reservationId, input, actor) {
+  requirePermission(actor, 'view:sensitive-identity')
+  const reason = requireSensitiveAccessReason(input, 'Sensitive identity access')
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx, actor)
+    const reservation = await tx.reservation.findFirst({
+      where: { id: reservationId, propertyId: property.id },
+      select: {
+        id: true,
+        status: true,
+        guest: {
+          select: {
+            id: true,
+            nationality: true,
+            idType: true,
+            idNumber: true,
+            dateOfBirth: true,
+          },
+        },
+      },
+    })
+    if (!reservation?.guest) throw new PmsValidationError('Reservation was not found.', 404)
+    if (normalizeRole(actor?.role) === 'FRONT_DESK' && !['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(reservation.status)) {
+      throw new PmsValidationError('Front desk identity access is limited to active check-in context.', 403)
+    }
+    const fields = ['nationality', 'idType', 'idNumber', 'dateOfBirth']
+    await createAudit(tx, actor, 'SENSITIVE_IDENTITY_VIEWED', 'reservation', reservation.id, { fields, reason })
+    return {
+      reservationId: reservation.id,
+      guestId: reservation.guest.id,
+      identity: {
+        nationality: reservation.guest.nationality,
+        idType: reservation.guest.idType,
+        idNumber: reservation.guest.idNumber,
+        dateOfBirth: reservation.guest.dateOfBirth,
+      },
+    }
+  })
+}
+
+export async function viewRawBookingEmail(prisma, eventId, input, actor) {
+  requirePermission(actor, 'view:raw-booking-email')
+  const reason = requireSensitiveAccessReason(input, 'Raw booking email access')
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx, actor)
+    const event = await tx.bookingEmailEvent.findFirst({
+      where: { id: eventId, propertyId: property.id },
+      select: { id: true, rawText: true, rawHeaders: true },
+    })
+    if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
+    const storedHeaders = safeJsonObject(event.rawHeaders)
+    const fields = ['rawText', 'rawHeaders.messageId', 'rawHeaders.date', 'rawHeaders.authenticationResults', 'rawHeaders.replyTo']
+    await createAudit(tx, actor, 'RAW_BOOKING_EMAIL_VIEWED', 'bookingEmailEvent', event.id, { fields, reason })
+    return {
+      eventId: event.id,
+      rawText: event.rawText,
+      rawHeaders: {
+        messageId: storedHeaders.messageId,
+        date: storedHeaders.date,
+        authenticationResults: storedHeaders.authenticationResults,
+        replyTo: storedHeaders.replyTo,
+      },
+    }
+  })
+}
+
+export async function viewFullPaymentReference(prisma, paymentId, input, actor) {
+  requirePermission(actor, 'view:full-payment-reference')
+  const reason = requireSensitiveAccessReason(input, 'Full payment reference access')
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx, actor)
+    const payment = await tx.payment.findFirst({
+      where: { id: paymentId, propertyId: property.id },
+      select: { id: true, reference: true },
+    })
+    if (!payment) throw new PmsValidationError('Payment was not found.', 404)
+    const fields = ['reference']
+    await createAudit(tx, actor, 'FULL_PAYMENT_REFERENCE_VIEWED', 'payment', payment.id, { fields, reason })
+    return { paymentId: payment.id, reference: payment.reference }
+  })
+}
+
 function parseMoney(text) {
   const amountMatch = firstMatch([
     /\b(?:total(?: amount| price)?|amount received|amount paid|payment amount|paid amount|deposit amount)\s*[:#-]?\s*(?:THB\s*)?([0-9][0-9,]*(?:\.\d{1,2})?)\b/i,
@@ -1454,7 +1548,7 @@ function bookingEmailSourceResponse(source) {
 
 function bookingEmailEventResponse(event) {
   const parsedDetails = safeJsonObject(event.parsedDetails)
-  return {
+  return projectBookingEmailEventResponse({
     id: event.id,
     sourceId: event.sourceId || undefined,
     sourceName: event.source?.name || event.sourceName || undefined,
@@ -1487,7 +1581,7 @@ function bookingEmailEventResponse(event) {
     parsedDetails,
     createdAt: isoOrUndefined(event.createdAt),
     updatedAt: isoOrUndefined(event.updatedAt),
-  }
+  })
 }
 
 async function ensurePrimaryBookingEmailSource(tx, actor) {
@@ -2921,7 +3015,7 @@ function cashierFolioProjection(folio) {
       postedAt: payment.createdAt,
       method: payment.method,
       amountSatang: cashierSatangString(payment.amountSatang, `payment ${payment.id} amount`),
-      reference: payment.reference || null,
+      reference: maskSensitiveValue(payment.reference),
       receivedBy: payment.processedBy,
     })),
     subtotalSatang: cashierSatangString(folio.subtotalSatang, `folio ${folio.id} subtotal`),

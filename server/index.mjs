@@ -179,6 +179,9 @@ import {
   updateRoomType,
   updateSetupRoom,
   updateUser,
+  viewFullPaymentReference,
+  viewRawBookingEmail,
+  viewReservationSensitiveIdentity,
 } from './pms-service.mjs'
 import {
   projectBookingEmailSyncHttpResponse,
@@ -1744,6 +1747,13 @@ async function handleApi(request, response, url) {
     return true
   }
 
+  params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/raw-view$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'view:raw-booking-email')
+    sendJson(response, 200, { ok: true, data: await viewRawBookingEmail(db, params.id, await readJson(request), user) })
+    return true
+  }
+
   params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/approve$/)
   if (params && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
@@ -1889,6 +1899,13 @@ async function handleApi(request, response, url) {
     return true
   }
 
+  params = routeParam(url.pathname, /^\/api\/cashier\/payments\/(?<id>[^/]+)\/reference-view$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'view:full-payment-reference')
+    sendJson(response, 200, { ok: true, data: await viewFullPaymentReference(db, params.id, await readJson(request), user) })
+    return true
+  }
+
   if (url.pathname === '/api/reservations' && request.method === 'POST') {
     requirePermission(user, 'create:reservation')
     const reservation = await createReservation(db, await readJson(request), user, {
@@ -1918,6 +1935,13 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
     })
     sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: `Reservation ${reservation.confirmationCode} updated.` })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/reservations\/(?<id>[^/]+)\/identity-view$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'view:sensitive-identity')
+    sendJson(response, 200, { ok: true, data: await viewReservationSensitiveIdentity(db, params.id, await readJson(request), user) })
     return true
   }
 

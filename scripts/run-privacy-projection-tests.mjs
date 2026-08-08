@@ -209,6 +209,7 @@ const syncProjection = projectBookingEmailSyncHttpResponse({
     id: 'event-a', source: 'Primary', sender: 'provider@example.test', receivedAt: '2026-08-01T00:00:00.000Z',
     eventType: 'NEW_BOOKING', status: 'NEEDS_REVIEW', parsedDetails: { guestName: 'Ada Guest', rawText: forbiddenBody },
     automationDecision: { stage: 'REVIEW_REQUIRED', blockers: ['Review required'], rawHeaders: { authorization: forbiddenHeader } },
+    rawEmailUrl: 'https://mail.example.test/raw/provider-message-id', sourceEmailId: 'provider-message-id',
     rawText: forbiddenBody, body: forbiddenBody, rawHeaders: { authorization: forbiddenHeader },
   }],
   opsCommandEvents: [{ id: 'event-a', rawText: forbiddenBody, body: forbiddenBody, rawHeaders: { authorization: forbiddenHeader } }],
@@ -217,7 +218,7 @@ assert.equal(syncProjection.events[0].parsedDetails.guestName, 'Ada Guest', 'syn
 assert.equal('opsCommandEvents' in syncProjection, false, 'sync HTTP DTO never returns internal Hotel Ops command input events')
 assert.equal(serialized(syncProjection).includes(forbiddenBody), false, 'sync HTTP DTO excludes raw email bodies at every nesting level')
 assert.equal(serialized(syncProjection).includes(forbiddenHeader), false, 'sync HTTP DTO excludes raw email headers at every nesting level')
-for (const forbiddenKey of ['rawText', 'body', 'rawHeaders', 'opsCommandEvents']) {
+for (const forbiddenKey of ['rawText', 'body', 'rawHeaders', 'rawEmailUrl', 'sourceEmailId', 'opsCommandEvents']) {
   assert.equal(serialized(syncProjection).includes(`"${forbiddenKey}"`), false, `sync HTTP DTO excludes key ${forbiddenKey}`)
 }
 

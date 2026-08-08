@@ -3,6 +3,13 @@ import { canPerformAction, normalizeRole } from './rbac.mjs'
 const GUEST_CONTACT_ROLES = new Set(['ADMIN', 'MANAGER', 'FRONT_DESK'])
 const RESERVATION_DETAIL_ROLES = new Set(['ADMIN', 'MANAGER', 'FRONT_DESK'])
 
+export function maskSensitiveValue(value) {
+  const text = String(value || '').trim()
+  if (!text) return null
+  if (text.length <= 4) return '••••'
+  return `${'•'.repeat(Math.max(4, text.length - 4))}${text.slice(-4)}`
+}
+
 function roleOf(actor) {
   return normalizeRole(actor?.role)
 }
@@ -209,7 +216,6 @@ export function projectBookingEmailEventResponse(event) {
     completedAction: event?.completedAction,
     reviewReason: event?.reviewReason,
     errorReason: event?.errorReason,
-    rawEmailUrl: event?.rawEmailUrl,
     reservationId: event?.reservationId,
     reservationConfirmation: event?.reservationConfirmation,
     duplicateOfEventId: event?.duplicateOfEventId,
@@ -231,7 +237,6 @@ export function projectBookingEmailEventResponse(event) {
       evaluatedAt: decision.evaluatedAt,
     },
     managerReviewNotifiedAt: event?.managerReviewNotifiedAt,
-    sourceEmailId: event?.sourceEmailId,
     parsedDetails: {
       guestName: details.guestName,
       guestEmail: details.guestEmail,
@@ -247,7 +252,7 @@ export function projectBookingEmailEventResponse(event) {
       currency: details.currency,
       paymentStatus: details.paymentStatus,
       paymentMethod: details.paymentMethod,
-      paymentReference: details.paymentReference,
+      paymentReference: maskSensitiveValue(details.paymentReference),
       specialRequests: details.specialRequests,
       notes: details.notes,
       channelRef: details.channelRef,
