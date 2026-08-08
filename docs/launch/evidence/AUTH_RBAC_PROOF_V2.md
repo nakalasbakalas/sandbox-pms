@@ -8,8 +8,8 @@ Credentialed proof for production/staging staff access. Do not record passwords,
 
 ## Environment
 
-- Commit SHA: local harness candidate `792deff`
-- Deploy ID: not supplied
+- Commit SHA: local candidate `d5631a1` (harness introduced at `792deff`)
+- Deploy ID: production currently `dep-d9osmf9t0dsc73bphp80` on `6fea1ab`; candidate is not deployed
 - Host: proposed/default `https://book.sandboxhotel.com`; owner must confirm target
 - Test date/time: 2026-08-08 Asia/Bangkok (harness validation only)
 - Tester: Codex coordinator
@@ -18,10 +18,10 @@ Credentialed proof for production/staging staff access. Do not record passwords,
 
 | User label | Role | Email/username present? | Active? | Login result | Logout result | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Owner/admin | ADMIN | approved label only | unverified | not run | not run | ignored template has no credential |
-| Manager | MANAGER | approved label only | unverified | not run | not run | ignored template has no credential |
-| Front desk | FRONT_DESK | approved label only | unverified | not run | not run | ignored template has no credential |
-| Housekeeping | HOUSEKEEPING | missing | unverified | not run | not run | owner must supply dedicated approved account |
+| Nick or Tanyatorn | ADMIN | owner/admin labels confirmed; exact login identifier missing | unverified | not run | not run | choose one approved proof account and supply its exact login identifier plus credential out of band |
+| Hotel Manager | MANAGER | label confirmed; exact login identifier missing | unverified | not run | not run | do not infer username from display label |
+| Front Desk | FRONT_DESK | label confirmed; exact login identifier missing | unverified | not run | not run | do not infer username from display label |
+| House Keeping | HOUSEKEEPING | label confirmed; exact login identifier missing | unverified | not run | not run | do not infer username from display label |
 | Cashier | CASHIER | missing | unverified | not run | not run | owner must supply dedicated approved account |
 
 ## Route access matrix

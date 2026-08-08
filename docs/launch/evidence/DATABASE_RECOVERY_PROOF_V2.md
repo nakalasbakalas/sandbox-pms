@@ -4,11 +4,11 @@ Status: owner action required; restore drill not started.
 
 ## Environment
 
-- Commit SHA: local candidate `12d9572`
-- Render service:
-- Render database:
-- Test date/time:
-- Owner:
+- Commit SHA: local candidate `d5631a1`
+- Render service: `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`)
+- Render database: `sandbox-hotel-pms-db-v43m` (`dpg-d6ns2d94tr6s73c9hve0-a`)
+- Test date/time: authenticated inventory/deploy inspection on 2026-08-08
+- Owner: Nick (owner/admin; recovery approval still required)
 - Deputy:
 
 ## Backup/recovery evidence
@@ -23,6 +23,8 @@ Status: owner action required; restore drill not started.
 | Disposable restore test date |  |  |  |
 | Restore test target |  |  | Must not be production. |
 | Restore test result |  |  |  |
+
+Authenticated Render CLI evidence confirmed the production database is available and the current production service is live on deploy `dep-d9osmf9t0dsc73bphp80`, commit `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`. The CLI did not expose recovery-point or retention metadata. No restore was started.
 
 ## Migration safety
 
