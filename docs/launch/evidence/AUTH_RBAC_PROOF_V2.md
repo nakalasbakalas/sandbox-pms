@@ -1,6 +1,6 @@
 # Auth/RBAC Proof V2
 
-Status: owner action required; harness ready, credentialed proof not run.
+Status: owner action required; first credentialed attempt stopped on Admin HTTP 429 before the remaining roles were tested.
 
 ## Scope
 
@@ -11,18 +11,18 @@ Credentialed proof for production/staging staff access. Do not record passwords,
 - Commit SHA: local candidate `d5631a1` (harness introduced at `792deff`)
 - Deploy ID: production currently `dep-d9osmf9t0dsc73bphp80` on `6fea1ab`; candidate is not deployed
 - Host: proposed/default `https://book.sandboxhotel.com`; owner must confirm target
-- Test date/time: 2026-08-08 Asia/Bangkok (harness validation only)
+- Test date/time: 2026-08-08 Asia/Bangkok; one live login attempt, then stop
 - Tester: Codex coordinator
 
 ## Approved user matrix
 
 | User label | Role | Email/username present? | Active? | Login result | Logout result | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Nick or Tanyatorn | ADMIN | owner/admin labels confirmed; exact login identifier missing | unverified | not run | not run | choose one approved proof account and supply its exact login identifier plus credential out of band |
-| Hotel Manager | MANAGER | label confirmed; exact login identifier missing | unverified | not run | not run | do not infer username from display label |
-| Front Desk | FRONT_DESK | label confirmed; exact login identifier missing | unverified | not run | not run | do not infer username from display label |
-| House Keeping | HOUSEKEEPING | label confirmed; exact login identifier missing | unverified | not run | not run | do not infer username from display label |
-| Cashier | CASHIER | missing | unverified | not run | not run | owner must supply dedicated approved account |
+| Nick | ADMIN | supplied out of band; not persisted | unverified | 429, stopped | not run | reset/unlock required before one bounded retry |
+| Hotel Manager | MANAGER | supplied out of band; not persisted | unverified | not run | not run | skipped after Admin throttle/lockout response |
+| Front Desk | FRONT_DESK | supplied out of band; not persisted | unverified | not run | not run | skipped after Admin throttle/lockout response |
+| House Keeping | HOUSEKEEPING | supplied out of band; not persisted | unverified | not run | not run | skipped after Admin throttle/lockout response |
+| Cashier | CASHIER | supplied out of band; not persisted | unverified | not run | not run | skipped after Admin throttle/lockout response |
 
 ## Route access matrix
 
@@ -52,7 +52,9 @@ Credentialed proof for production/staging staff access. Do not record passwords,
 
 - [ ] Passed
 - [ ] Failed
-- [x] Owner action required; no credentialed session was attempted.
+- [x] Owner action required; Admin login returned 429 before a session was created, so no further role login or logout was attempted.
+
+The helper retained no password, cookie, token, username, or response body. The interactive wrapper and temporary redacted/state files were removed after recording this bounded result. Do not retry until another Admin has reset/unlocked Nick or the owner confirms the applicable throttle has cleared.
 
 ## Harness readiness
 
@@ -67,8 +69,9 @@ Credentialed proof for production/staging staff access. Do not record passwords,
 OWNER ACTION REQUIRED
 Gate: AUTH/RBAC
 Required inputs:
-- approved test account for each role: ADMIN, MANAGER, FRONT_DESK, HOUSEKEEPING, CASHIER
-- credentials supplied only in .codex/auth-proof-users.local.json or stdin
+- another Admin resets/unlocks Nick and confirms the account is ready
+- approved test account for each role: ADMIN, MANAGER, FRONT_DESK, HOUSEKEEPING, CASHIER (already supplied out of band for this attempt)
+- credentials supplied through secure interactive stdin; do not place them in files or command arguments
 - approved target host
 - safe access/denial probes and forbidden response-field list for each role
 - for live lockout/throttle proof: a dedicated non-operational account, named reset owner, and approved reset procedure
