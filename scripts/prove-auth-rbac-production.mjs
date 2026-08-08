@@ -7,6 +7,8 @@ const DEFAULT_HOST = 'https://book.sandboxhotel.com'
 const DEFAULT_FIRST_CHECK = { method: 'GET', path: '/api/auth/me', expectStatus: 200 }
 const SAFE_DENIAL_METHODS = new Set(['GET', 'HEAD'])
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+const PROOF_ROLES = new Set(['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING', 'CASHIER', 'CAFE_STAFF'])
+const FINISH_MATRIX_ROLES = ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING', 'CASHIER']
 
 function hasFlag(args, name) {
   return args.includes(name)
@@ -26,6 +28,32 @@ function nullableString(value) {
   if (value === undefined || value === null) return null
   const normalized = String(value).trim()
   return normalized ? normalized : null
+}
+
+export function normalizeExpectedRole(value) {
+  const role = nullableString(value)?.toUpperCase().replace(/[\s-]+/g, '_') || null
+  if (!role) fail('Each proof user requires an expected role.')
+  if (!PROOF_ROLES.has(role)) fail(`Unsupported proof role: ${role}.`)
+  return role
+}
+
+export function validateFinishRoleMatrix(users = []) {
+  if (!Array.isArray(users)) fail('Finish role matrix users must be an array.')
+  const roles = users.map((user) => normalizeExpectedRole(user?.role))
+  const counts = new Map()
+  for (const role of roles) counts.set(role, (counts.get(role) || 0) + 1)
+  const missing = FINISH_MATRIX_ROLES.filter((role) => !counts.has(role))
+  const duplicate = FINISH_MATRIX_ROLES.filter((role) => (counts.get(role) || 0) > 1)
+  const unexpected = [...new Set(roles.filter((role) => !FINISH_MATRIX_ROLES.includes(role)))]
+  if (roles.length !== FINISH_MATRIX_ROLES.length || missing.length || duplicate.length || unexpected.length) {
+    const details = [
+      missing.length ? `missing ${missing.join(', ')}` : null,
+      duplicate.length ? `duplicate ${duplicate.join(', ')}` : null,
+      unexpected.length ? `unexpected ${unexpected.join(', ')}` : null,
+    ].filter(Boolean).join('; ')
+    fail(`Finish role matrix must contain exactly one of each required role: ${FINISH_MATRIX_ROLES.join(', ')}.${details ? ` ${details}.` : ''}`)
+  }
+  return [...FINISH_MATRIX_ROLES]
 }
 
 export function normalizeProofHost(value = DEFAULT_HOST) {
@@ -75,7 +103,7 @@ export function summarizePublicUserForProof(user = {}) {
     loginIdentifierMasked: maskLoginIdentifier(user.username || user.email),
     emailPresent: Boolean(nullableString(user.email)),
     displayInitials: displayInitials(user.displayName),
-    role: nullableString(user.role) ? String(user.role).toUpperCase() : null,
+    role: nullableString(user.role) ? String(user.role).toUpperCase().replace(/[\s-]+/g, '_') : null,
     active: user.active === undefined ? null : Boolean(user.active),
   }
 }
@@ -95,7 +123,54 @@ function normalizeMethod(value) {
 
 function normalizeExpectedStatuses(value, fallback) {
   const values = Array.isArray(value) ? value : [value ?? fallback]
-  return values.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item >= 100 && item <= 599)
+  const statuses = values.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item >= 100 && item <= 599)
+  if (statuses.length === 0) fail('At least one valid expected HTTP status is required.')
+  return statuses
+}
+
+export function normalizeForbiddenResponseFields(value) {
+  if (value === undefined || value === null) return []
+  const values = Array.isArray(value) ? value : [value]
+  if (values.some((field) => !nullableString(field))) fail('Forbidden response fields must be non-empty field names.')
+  const fields = [...new Set(values.map((field) => nullableString(field)?.toLowerCase()).filter(Boolean))]
+  return fields
+}
+
+export function findForbiddenResponseFields(payload, forbiddenFields = []) {
+  const forbidden = new Set(normalizeForbiddenResponseFields(forbiddenFields))
+  const found = new Set()
+  function visit(value) {
+    if (!value || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item)
+      return
+    }
+    for (const [key, child] of Object.entries(value)) {
+      const normalizedKey = key.toLowerCase()
+      if (forbidden.has(normalizedKey)) found.add(normalizedKey)
+      visit(child)
+    }
+  }
+  visit(payload)
+  return [...found].sort()
+}
+
+function normalizeProbeFields(probe) {
+  return normalizeForbiddenResponseFields(probe.forbiddenResponseFields ?? probe.forbidResponseFields)
+}
+
+export function normalizeAccessProbe(probe = {}, { defaultLabel = null } = {}) {
+  const method = normalizeMethod(probe.method)
+  if (!SAFE_DENIAL_METHODS.has(method)) {
+    fail(`Authenticated access probe ${method} ${probe.path || ''} is not allowed. Access probes must use GET or HEAD.`)
+  }
+  return {
+    label: nullableString(probe.label) || defaultLabel || `${method} ${probe.path}`,
+    method,
+    path: normalizePath(probe.path),
+    expectStatuses: normalizeExpectedStatuses(probe.expectStatus ?? probe.expectStatuses, 200),
+    forbiddenResponseFields: normalizeProbeFields(probe),
+  }
 }
 
 export function validateDenialProbe(probe = {}, { allowMutating = false } = {}) {
@@ -113,16 +188,14 @@ export function validateDenialProbe(probe = {}, { allowMutating = false } = {}) 
     path: normalizePath(probe.path),
     expectStatuses,
     body: probe.body === undefined ? undefined : probe.body,
+    forbiddenResponseFields: normalizeProbeFields(probe),
   }
 }
 
 function normalizeFirstCheck(check = DEFAULT_FIRST_CHECK) {
-  return {
-    label: nullableString(check.label) || 'first authenticated API check',
-    method: normalizeMethod(check.method),
-    path: normalizePath(check.path || DEFAULT_FIRST_CHECK.path),
-    expectStatuses: normalizeExpectedStatuses(check.expectStatus ?? check.expectStatuses, DEFAULT_FIRST_CHECK.expectStatus),
-  }
+  return normalizeAccessProbe({ ...check, path: check.path || DEFAULT_FIRST_CHECK.path }, {
+    defaultLabel: 'first authenticated API check',
+  })
 }
 
 function parseSetCookie(headers) {
@@ -184,8 +257,7 @@ async function requestJson({ host, path, method = 'GET', body, jar }) {
 
 function expectStatus(result, expected, context) {
   if (!expected.includes(result.status)) {
-    const providerError = result.payload?.error ? ` ${result.payload.error}` : ''
-    fail(`${context} returned ${result.status}, expected ${expected.join('/')}.\n${redactError(providerError)}`.trim())
+    fail(`${context} returned ${result.status}, expected ${expected.join('/')}.`)
   }
 }
 
@@ -198,12 +270,17 @@ async function runProbe({ host, jar, probe }) {
     jar,
   })
   expectStatus(result, probe.expectStatuses, probe.label)
+  const forbiddenFields = findForbiddenResponseFields(result.payload, probe.forbiddenResponseFields)
+  if (forbiddenFields.length > 0) {
+    fail(`${probe.label} response contained forbidden field names: ${forbiddenFields.join(', ')}.`)
+  }
   return {
     label: probe.label,
     method: probe.method,
     path: probe.path,
     status: result.status,
     expectedStatuses: probe.expectStatuses,
+    forbiddenResponseFieldsChecked: probe.forbiddenResponseFields,
   }
 }
 
@@ -211,6 +288,7 @@ async function proveUser({ host, userInput, allowMutatingDenialProbes }) {
   const identity = nullableString(userInput.identity || userInput.username || userInput.email)
   const password = nullableString(userInput.password)
   if (!identity || !password) fail('Each proof user requires identity and password supplied through the local proof input.')
+  const expectedRole = normalizeExpectedRole(userInput.role)
 
   const jar = new Map()
   const login = await requestJson({
@@ -224,12 +302,24 @@ async function proveUser({ host, userInput, allowMutatingDenialProbes }) {
 
   const me = await requestJson({ host, path: '/api/auth/me', method: 'GET', jar })
   expectStatus(me, [200], `authenticated /api/auth/me for ${maskLoginIdentifier(identity)}`)
+  const actualRole = nullableString(me.payload?.user?.role)
+    ? String(me.payload.user.role).toUpperCase().replace(/[\s-]+/g, '_')
+    : null
+  if (actualRole !== expectedRole) {
+    fail(`Authenticated /api/auth/me role mismatch for ${maskLoginIdentifier(identity)}: expected ${expectedRole}, received ${actualRole || '[missing]'}.`)
+  }
 
   const firstCheck = await runProbe({
     host,
     jar,
     probe: normalizeFirstCheck(userInput.firstCheck || DEFAULT_FIRST_CHECK),
   })
+
+  const accessProbes = Array.isArray(userInput.accessProbes) ? userInput.accessProbes : []
+  const accessResults = []
+  for (const probe of accessProbes.map((item) => normalizeAccessProbe(item))) {
+    accessResults.push(await runProbe({ host, jar, probe }))
+  }
 
   const denialProbes = (userInput.denialProbes || []).map((probe) => validateDenialProbe(probe, {
     allowMutating: allowMutatingDenialProbes,
@@ -246,7 +336,7 @@ async function proveUser({ host, userInput, allowMutatingDenialProbes }) {
   expectStatus(afterLogout, [401], `post-logout /api/auth/me for ${maskLoginIdentifier(identity)}`)
 
   return {
-    expectedRole: nullableString(userInput.role) ? String(userInput.role).toUpperCase() : null,
+    expectedRole,
     approvedBy: nullableString(userInput.approvedBy) || null,
     approvedAt: nullableString(userInput.approvedAt) || null,
     user: summarizePublicUserForProof(me.payload?.user || login.payload?.user || {}),
@@ -255,6 +345,7 @@ async function proveUser({ host, userInput, allowMutatingDenialProbes }) {
       cookieStoredInMemoryOnly: true,
     },
     firstAuthenticatedCheck: firstCheck,
+    authenticatedAccessChecks: accessResults,
     denialChecks: denialResults,
     logout: {
       status: logout.status,
@@ -268,6 +359,8 @@ async function main(args = process.argv.slice(2), env = process.env) {
   const input = await loadProofInput(args)
   const users = Array.isArray(input.users) ? input.users : []
   if (users.length === 0) fail('At least one proof user is required.')
+  for (const user of users) normalizeExpectedRole(user?.role)
+  if (hasFlag(args, '--require-finish-matrix')) validateFinishRoleMatrix(users)
 
   const output = {
     generatedAt: new Date().toISOString(),
@@ -280,7 +373,7 @@ async function main(args = process.argv.slice(2), env = process.env) {
       tokens: 'omitted',
       loginIdentifiers: 'masked',
       displayNames: 'initials only',
-      responseBodies: 'omitted except bounded user role/status and probe statuses',
+      responseBodies: 'first/access/denial probe bodies omitted; only bounded /api/auth/me user summary and statuses retained',
     },
     safety: {
       productionMutation: hasFlag(args, '--allow-mutating-denial-probes')

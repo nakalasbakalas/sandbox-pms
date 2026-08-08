@@ -254,9 +254,29 @@ Credentialed auth/RBAC/logout proof:
       "role": "MANAGER",
       "approvedBy": "Owner initials",
       "approvedAt": "2026-07-04",
-      "firstCheck": { "method": "GET", "path": "/api/auth/me", "expectStatus": 200 },
+      "firstCheck": {
+        "method": "GET",
+        "path": "/api/auth/me",
+        "expectStatus": 200,
+        "forbiddenResponseFields": ["password", "passwordHash", "sessionToken"]
+      },
+      "accessProbes": [
+        {
+          "label": "rooms read access",
+          "method": "GET",
+          "path": "/api/rooms",
+          "expectStatus": 200,
+          "forbiddenResponseFields": ["password", "passwordHash", "sessionToken"]
+        }
+      ],
       "denialProbes": [
-        { "label": "underprivileged user-management denial", "method": "GET", "path": "/api/users", "expectStatus": 403 }
+        {
+          "label": "underprivileged user-management denial",
+          "method": "GET",
+          "path": "/api/users",
+          "expectStatus": 403,
+          "forbiddenResponseFields": ["password", "passwordHash", "sessionToken"]
+        }
       ]
     }
   ]
@@ -269,22 +289,29 @@ Credentialed auth/RBAC/logout proof:
 npm.cmd run auth-rbac:proof -- --users-file .\.codex\auth-proof-users.local.json
 ```
 
+For the finish-packet role matrix, prepare exactly one approved account for each of `ADMIN`, `MANAGER`, `FRONT_DESK`, `HOUSEKEEPING`, and `CASHIER`, then require the complete matrix before any login request is sent:
+
+```powershell
+npm.cmd run auth-rbac:proof -- --users-file .\.codex\auth-proof-users.local.json --require-finish-matrix
+```
+
 For stdin-only handling:
 
 ```powershell
 Get-Content .\.codex\auth-proof-users.local.json -Raw | npm.cmd run auth-rbac:proof -- --users-stdin
 ```
 
-The helper logs in, verifies `/api/auth/me`, runs the first authenticated check and any owner-approved denial probes, logs out, then confirms `/api/auth/me` returns unauthenticated. Output masks login identifiers, keeps cookies in memory only, omits response bodies except bounded role/status fields, and rejects mutating denial probes unless `--allow-mutating-denial-probes` is explicitly set for an owner-approved no-op/invalid payload.
+Every proof user must declare the expected role. The helper verifies that role against `/api/auth/me`, runs the first authenticated check, any number of safe authenticated `accessProbes`, and owner-approved denial probes, logs out, then confirms `/api/auth/me` returns unauthenticated. First/access probes allow only `GET` or `HEAD`. Output masks login identifiers, keeps cookies in memory only, and never outputs first/access/denial response bodies. Optional `forbiddenResponseFields` assertions recursively inspect response keys and report only matching field names. Mutating denial probes remain blocked unless `--allow-mutating-denial-probes` is explicitly set for an owner-approved no-op/invalid payload.
 
 Staff account lockout:
 
-1. Staff accounts lock after three failed login attempts.
+1. Local business tests already prove that staff accounts lock after three failed login attempts and require an admin reset. Do not reproduce those failures against normal live staff accounts.
 2. A locked user cannot authenticate until an admin resets that user's password from user management.
 3. Password reset clears `failedLoginAttempts` and `lockedAt`. Do not unlock by editing production database rows directly unless emergency recovery is explicitly approved and recorded.
-4. If a server-mode login appears to revert to the sign-in screen, capture redacted request status and correlation ids for `/api/auth/login` and `/api/auth/me`. Do not restore access by writing `auth:current-user` or a token into browser storage.
-5. Run `npm.cmd run test:server-auth-authority` and the guarded `npm.cmd run test:e2e:server` before accepting an auth-bootstrap correction. The browser test deliberately delivers a stale failed `/api/auth/me` after a successful interactive login.
-4. Do not paste passwords, hashes, cookies, or session tokens into issue comments, screenshots, docs, or chat.
+4. Any live lockout or throttle proof is a separate owner-approved operation. Use a dedicated non-operational test account, confirm an authorized admin can access user management, record the reset steps and responsible owner before testing, and reset/verify the account immediately afterward. The auth/RBAC proof helper does not automate live lockout attempts.
+5. If a server-mode login appears to revert to the sign-in screen, capture redacted request status and correlation ids for `/api/auth/login` and `/api/auth/me`. Do not restore access by writing `auth:current-user` or a token into browser storage.
+6. Run `npm.cmd run test:server-auth-authority` and the guarded `npm.cmd run test:e2e:server` before accepting an auth-bootstrap correction. The browser test deliberately delivers a stale failed `/api/auth/me` after a successful interactive login.
+7. Do not paste passwords, hashes, cookies, or session tokens into issue comments, screenshots, docs, or chat.
 
 Hotel Ops notification center:
 
