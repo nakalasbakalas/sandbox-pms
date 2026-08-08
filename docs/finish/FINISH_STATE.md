@@ -3,16 +3,16 @@
 **Status:** IN_PROGRESS
 **Baseline SHA:** `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`
 **Current branch:** `codex/final-core-closure`
-**Current HEAD:** `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`
+**Current HEAD:** `1cfc6f8abc7716efeba5be78c0ede8ce13a2b4dc`
 **Last updated:** 2026-08-08 (Asia/Bangkok)
 
 ## Gates
 
 | ID | Gate | Status | Commit/PR | Validation | Blocker or owner action |
 |---|---|---|---|---|---|
-| F00 | Freeze and ledger | COMPLETE | this ledger commit | `git fetch origin --prune`; exact baseline confirmed | Setup kit remains untracked by design during ledger-only commit |
-| F01 | Privacy response reconnaissance | IN_PROGRESS |  | read-only scout pending |  |
-| F02 | Role-specific response projections | NOT_STARTED |  |  |  |
+| F00 | Freeze and ledger | COMPLETE | `1cfc6f8` | `git fetch origin --prune`; exact baseline confirmed | Setup kit remains untracked by design during ledger-only commit |
+| F01 | Privacy response reconnaissance | COMPLETE | read-only | packet-bounded `rg` scout; exposure paths mapped | Booking-email sync response permission path needs confirmation during F02 |
+| F02 | Role-specific response projections | IN_PROGRESS |  |  |  |
 | F03 | Audited sensitive-access endpoints | NOT_STARTED |  |  |  |
 | F04 | Independent privacy review | NOT_STARTED |  |  |  |
 | F05 | Float-authoritative money map | NOT_STARTED |  |  |  |
@@ -34,11 +34,11 @@
 
 ## Active task
 
-**Task:** F01
-**Owner/agent:** Read-only privacy scout
-**Allowed files:** none; inspect targeted symbols under `server`, `src`, and `scripts`
-**Focused validation:** two packet-specified `rg` searches
-**Next exact action:** Run the bounded F01 privacy scout and return exposure paths, a minimal patch plan, tests, and unknowns.
+**Task:** F02
+**Owner/agent:** Privacy implementation writer
+**Allowed files:** `server/pms-response-projections.mjs`, `server/pms-service.mjs`, `server/index.mjs`, `server/rbac.mjs`, focused privacy tests, and required package script wiring
+**Focused validation:** focused projection tests, `npm.cmd run typecheck`, `npm.cmd run lint`, `git diff --check`
+**Next exact action:** Replace broad reservation/guest/sync response graphs with explicit role-aware allowlisted DTOs and regression coverage.
 
 ## Decisions
 
