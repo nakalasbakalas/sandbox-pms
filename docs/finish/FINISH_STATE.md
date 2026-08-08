@@ -1,9 +1,9 @@
 # Sandbox PMS Finish State
 
-**Status:** IN_PROGRESS
+**Status:** PAUSED_OWNER_ACTION
 **Baseline SHA:** `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`
 **Current branch:** `codex/final-core-closure`
-**Current HEAD:** `b209321`
+**Current HEAD:** `195bc97`
 **Last updated:** 2026-08-08 (Asia/Bangkok)
 
 ## Gates
@@ -20,9 +20,9 @@
 | F07 | Exact-satang core financial reads | COMPLETE | `bdf4f2f` | exact-money core, Cashier accounting, privacy, lifecycle, report equality, typecheck, lint, diff check PASS | Production authority/env switch remains owner-gated |
 | F08 | Independent finance review | COMPLETE | `b2ab74d`, `468aae8` | independent reviewer PASS; full typecheck/lint/test/non-DB-e2e/build/diff gate PASS | Guarded PostgreSQL proof not run: no disposable/staging DB config; production authority remains unchanged |
 | F09 | Deep-health proof | COMPLETE | `b209321` | controlled generic-failure test plus `live:check` and `public-edge:proof` PASS | Public host does not expose exact deployed SHA/deploy ID; issue `#165` closure remains release-owner gated |
-| F10 | Credentialed auth/RBAC proof | IN_PROGRESS |  | assess and run existing `auth-rbac:proof` harness if approved inputs exist | Owner-approved test accounts and target required |
-| F11 | Staff workflow acceptance | NOT_STARTED |  |  | Staging or controlled-live approval required |
-| F12 | Disposable recovery restore | NOT_STARTED |  |  | Owner approval and named recovery owners required |
+| F10 | Credentialed auth/RBAC proof | OWNER_ACTION_REQUIRED | `792deff`, `12d9572` | hardened helper/business tests/typecheck/lint PASS; incomplete matrix guard stopped before login as designed | Supply approved five-role credentials, target, probes, and dedicated lockout/reset approval |
+| F11 | Staff workflow acceptance | OWNER_ACTION_REQUIRED | `195bc97` | coherent 16-step evidence checklist ready; no workflow mutation attempted | Supply isolated staging property or approved dataset, deployed candidate, five roles, testers, and cleanup owner |
+| F12 | Disposable recovery restore | OWNER_ACTION_REQUIRED | `195bc97` | restore drill not started; no provider/database mutation attempted | Supply provider approval, recovery point/retention, owner/deputy, last-good deploy, disposable target, and deletion owner; packet stop rule applies |
 | F13 | Current WAF proof | NOT_STARTED |  |  | Provider credentials may be required |
 | F14 | Visibility and licence decision | NOT_STARTED |  |  | Owner decision required |
 | F15 | Connectivity backlog and drift closure | NOT_STARTED |  |  |  |
@@ -34,11 +34,11 @@
 
 ## Active task
 
-**Task:** F10
+**Task:** F12 STOP RULE
 **Owner/agent:** Coordinator
-**Allowed files:** existing auth/RBAC proof harness, redacted proof artifacts, and required canonical documentation only
-**Focused validation:** ADMIN/MANAGER/FRONT_DESK/HOUSEKEEPING/CASHIER login, logout, intended route/API allow/deny, sensitive-field absence, and safe lockout/throttle
-**Next exact action:** Inspect and reuse `npm.cmd run auth-rbac:proof`; run only if approved target and role credentials are already supplied through ignored environment or secret storage, otherwise record one exact owner action block.
+**Allowed files:** ledger and the already-recorded redacted owner-action evidence only until approval arrives
+**Focused validation:** none while paused; do not create production bookings, lock staff accounts, restore databases, or run provider actions
+**Next exact action:** Owner supplies the F10-F12 inputs recorded in `AUTH_RBAC_PROOF_V2.md`, `STAFF_WORKFLOW_ACCEPTANCE_V2.md`, and `DATABASE_RECOVERY_PROOF_V2.md`; then resume from this ledger at F10 credentialed execution and proceed sequentially.
 
 ## Decisions
 
