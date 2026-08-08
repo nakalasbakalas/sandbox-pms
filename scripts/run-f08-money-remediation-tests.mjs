@@ -1,8 +1,9 @@
 /* global console */
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import process from 'node:process'
 import { URL } from 'node:url'
-import { createPayment, createReservation, getTodayData } from '../server/pms-service.mjs'
+import { createPayment, createReservation, getTodayData, updateReservation } from '../server/pms-service.mjs'
 
 function oddBookingFixture() {
   const property = {
@@ -58,6 +59,11 @@ function oddBookingFixture() {
         }
         return composedReservation()
       },
+      update: async ({ where, data }) => {
+        assert.equal(where.id, reservation.id)
+        Object.assign(reservation, data, { updatedAt: new Date() })
+        return composedReservation()
+      },
       findUnique: async ({ where }) => where.id === reservation?.id ? composedReservation() : null,
       findFirst: async ({ where }) => where.id === reservation?.id && where.propertyId === property.id ? composedReservation() : null,
     },
@@ -80,7 +86,13 @@ function oddBookingFixture() {
         charges.push(charge)
         return charge
       },
+      findFirst: async ({ where }) => charges.find((charge) => charge.folioId === where.folioId && charge.category === where.category && !charge.void) || null,
       findMany: async ({ where }) => charges.filter((charge) => charge.folioId === where.folioId && !charge.void),
+      update: async ({ where, data }) => {
+        const charge = charges.find((candidate) => candidate.id === where.id)
+        Object.assign(charge, data, { updatedAt: new Date() })
+        return charge
+      },
     },
     payment: {
       findUnique: async ({ where }) => {
@@ -101,6 +113,7 @@ function oddBookingFixture() {
     reservationLog: { create: async ({ data }) => data },
     auditLog: { create: async ({ data }) => data },
     domainEvent: { create: async ({ data }) => ({ id: 1n, createdAt: new Date(), ...data }) },
+    roomDateInventory: { deleteMany: async () => ({ count: 0 }) },
   }
   return {
     actor: { id: 'manager-f08', propertyId: property.id, role: 'MANAGER', name: 'Manager' },
@@ -133,6 +146,14 @@ assert.equal(fixture.getFolio().balanceSatang, 10_001n)
 assert.equal(fixture.charges[0].amountSatang, 5_001n, 'nightly display rate remains deterministic')
 assert.equal(fixture.charges[0].totalSatang, 10_001n, 'charge total is explicit rather than nightly rate multiplied back to 10002')
 
+const notesUpdated = await updateReservation(fixture.prisma, created.id, {
+  notes: 'Notes-only edits preserve exact pricing',
+}, fixture.actor)
+assert.equal(notesUpdated.ratePerNightSatang, 5_001n, 'non-rate edits preserve the current exact nightly rate')
+assert.equal(notesUpdated.totalAmountSatang, 10_001n, 'notes-only updates preserve the odd reservation total')
+assert.equal(fixture.getFolio().totalSatang, 10_001n, 'notes-only updates do not rebuild the folio total')
+assert.equal(fixture.charges[0].totalSatang, 10_001n, 'notes-only updates do not rebuild the charge total')
+
 const paid = await createPayment(fixture.prisma, {
   folioId: fixture.getFolio().id,
   amountSatang: '10001',
@@ -141,6 +162,64 @@ const paid = await createPayment(fixture.prisma, {
 }, fixture.actor)
 assert.equal(paid.folio.balanceSatang, 0n, 'payment of the exact odd total leaves zero due')
 assert.equal(paid.folio.status, 'CLOSED')
+
+const originalAuthority = process.env.MONEY_READ_AUTHORITY
+try {
+  process.env.MONEY_READ_AUTHORITY = 'legacy_float'
+  const legacyFixture = oddBookingFixture()
+  const legacyCreated = await createReservation(legacyFixture.prisma, {
+    guest: { firstName: 'Legacy', lastName: 'Rate' },
+    checkIn: '2026-08-10',
+    checkOut: '2026-08-12',
+    roomTypeCode: 'TWIN',
+    adults: 2,
+    childAges: [],
+    ratePerNight: 50.01,
+    ratePerNightSatang: '5001',
+    totalAmountSatang: '10001',
+  }, legacyFixture.actor)
+  const legacyRateUpdated = await updateReservation(legacyFixture.prisma, legacyCreated.id, {
+    ratePerNight: 60.01,
+  }, legacyFixture.actor)
+  assert.equal(legacyRateUpdated.ratePerNightSatang, 6_001n, 'legacy-only rate patches are honored and dual-written in legacy mode')
+  assert.equal(legacyRateUpdated.totalAmountSatang, 12_002n, 'legacy-only rate patches recompute the total')
+
+  process.env.MONEY_READ_AUTHORITY = 'satang'
+  const satangFixture = oddBookingFixture()
+  const satangCreated = await createReservation(satangFixture.prisma, {
+    guest: { firstName: 'Exact', lastName: 'Rate' },
+    checkIn: '2026-08-10',
+    checkOut: '2026-08-12',
+    roomTypeCode: 'TWIN',
+    adults: 2,
+    childAges: [],
+    ratePerNight: 50.01,
+    ratePerNightSatang: '5001',
+    totalAmountSatang: '10001',
+  }, satangFixture.actor)
+  await assert.rejects(
+    updateReservation(satangFixture.prisma, satangCreated.id, { ratePerNight: 60.01 }, satangFixture.actor),
+    /ratePerNightSatang exact money shadow is required/i,
+    'satang authority rejects a legacy-only rate patch',
+  )
+  await assert.rejects(
+    updateReservation(satangFixture.prisma, satangCreated.id, {
+      ratePerNight: 60.01,
+      ratePerNightSatang: '6002',
+    }, satangFixture.actor),
+    /must represent the same value/i,
+    'dual rate inputs must agree exactly',
+  )
+  const exactRateUpdated = await updateReservation(satangFixture.prisma, satangCreated.id, {
+    ratePerNightSatang: '6001',
+  }, satangFixture.actor)
+  assert.equal(exactRateUpdated.ratePerNight, 60.01)
+  assert.equal(exactRateUpdated.ratePerNightSatang, 6_001n)
+  assert.equal(exactRateUpdated.totalAmountSatang, 12_002n)
+} finally {
+  if (originalAuthority === undefined) delete process.env.MONEY_READ_AUTHORITY
+  else process.env.MONEY_READ_AUTHORITY = originalAuthority
+}
 
 function todayPrisma(missingExact) {
   const property = { id: 'property-today', code: 'SANDBOX' }

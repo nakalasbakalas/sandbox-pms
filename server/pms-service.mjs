@@ -324,6 +324,14 @@ function hasMoneyInput(input, legacyField = 'amount', satangField = `${legacyFie
   )
 }
 
+function hasProvidedField(input, field) {
+  return Boolean(input)
+    && Object.prototype.hasOwnProperty.call(input, field)
+    && input[field] !== undefined
+    && input[field] !== null
+    && input[field] !== ''
+}
+
 function pricingRulesFor(property, roomType) {
   return {
     standardOccupancy: roomType?.standardOcc ?? SANDBOX_RULES.standardOccupancy,
@@ -354,7 +362,11 @@ function calculateAuthoritativeStayPricing(input, property, roomType, env = proc
   }
   const rules = pricingRulesFor(property, roomType)
   const explicitTotal = input.totalAmountSatang !== null && input.totalAmountSatang !== undefined && input.totalAmountSatang !== ''
+  const explicitLegacyRate = input.ratePerNight !== null && input.ratePerNight !== undefined && input.ratePerNight !== ''
   const explicitRate = input.ratePerNightSatang !== null && input.ratePerNightSatang !== undefined && input.ratePerNightSatang !== ''
+  if (explicitLegacyRate && explicitRate) {
+    requiredMoneyInput(input, 'ratePerNight', 'ratePerNightSatang')
+  }
   const ratePerNight = input.ratePerNight ?? roomType?.baseRate
   const ratePerNightSatang = input.ratePerNightSatang
     ?? (input.ratePerNight === null || input.ratePerNight === undefined ? roomType?.baseRateSatang : undefined)
@@ -3323,21 +3335,39 @@ export async function updateReservation(prisma, reservationId, input, actor, opt
 
     const checkIn = update.checkIn ?? current.checkIn
     const checkOut = update.checkOut ?? current.checkOut
-    const ratePerNight = update.ratePerNight ?? current.ratePerNight
-    const ratePerNightSatang = update.ratePerNightSatang ?? current.ratePerNightSatang
     const adults = update.adults ?? current.adults
     const children = update.children ?? current.children
     const childAges = update.childAges ?? current.childAges
     const { checkInKey, checkOutKey } = proposedStay
-    const pricing = calculateAuthoritativeStayPricing({
-      checkIn,
-      checkOut,
-      ratePerNight,
-      ratePerNightSatang,
-      totalAmountSatang: update.totalAmountSatang,
-      adults,
-      childAges,
-    }, property, pricingRoomType)
+    const pricingChanged = [
+      'roomTypeCode',
+      'roomType',
+      'checkIn',
+      'checkOut',
+      'ratePerNight',
+      'ratePerNightSatang',
+      'totalAmountSatang',
+      'adults',
+      'children',
+      'childAges',
+    ].some((field) => hasProvidedField(update, field))
+    const hasLegacyRatePatch = hasProvidedField(update, 'ratePerNight')
+    const hasExactRatePatch = hasProvidedField(update, 'ratePerNightSatang')
+    const pricing = pricingChanged
+      ? calculateAuthoritativeStayPricing({
+          checkIn,
+          checkOut,
+          ratePerNight: hasLegacyRatePatch || hasExactRatePatch
+            ? update.ratePerNight
+            : current.ratePerNight,
+          ratePerNightSatang: hasLegacyRatePatch || hasExactRatePatch
+            ? update.ratePerNightSatang
+            : current.ratePerNightSatang,
+          totalAmountSatang: update.totalAmountSatang,
+          adults,
+          childAges,
+        }, property, pricingRoomType)
+      : null
 
     await ensureRoomTypeCapacity(tx, property.id, roomTypeId, checkInKey, checkOutKey, current.id)
 
@@ -3365,9 +3395,9 @@ export async function updateReservation(prisma, reservationId, input, actor, opt
         adults: Number(adults),
         children: Number(children || 0),
         childAges: Array.isArray(childAges) ? childAges.map(Number) : [],
-        ...dualWriteMoney('ratePerNight', 'ratePerNightSatang', pricing.ratePerNightSatang),
-        ...dualWriteMoney('totalAmount', 'totalAmountSatang', pricing.totalSatang),
-        ...dualWriteMoney('depositAmount', 'depositAmountSatang', pricing.depositAmountSatang),
+        ...(pricing ? dualWriteMoney('ratePerNight', 'ratePerNightSatang', pricing.ratePerNightSatang) : {}),
+        ...(pricing ? dualWriteMoney('totalAmount', 'totalAmountSatang', pricing.totalSatang) : {}),
+        ...(pricing ? dualWriteMoney('depositAmount', 'depositAmountSatang', pricing.depositAmountSatang) : {}),
         source: update.source || current.source,
         channelRef: update.channelRef ?? current.channelRef,
         sourceEmailEventId,
@@ -3383,7 +3413,7 @@ export async function updateReservation(prisma, reservationId, input, actor, opt
       await tx.roomDateInventory.deleteMany({ where: { reservationId: current.id } })
     }
 
-    if (current.folio) {
+    if (current.folio && pricing) {
       const roomCharge = await tx.charge.findFirst({
         where: { folioId: current.folio.id, category: 'ROOM', void: false },
         orderBy: { createdAt: 'asc' },

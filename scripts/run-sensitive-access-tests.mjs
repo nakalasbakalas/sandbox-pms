@@ -264,6 +264,7 @@ const cashierBookingEmail = projectBookingEmailEventResponse({
   channelRef: 'PROVIDER-BOOKING-123',
   guestName: 'Synthetic Guest',
   amount: 1000,
+  amountSatang: '100000',
   currency: 'THB',
   paymentStatus: 'PAID',
   reservationId: 'reservation-a',
@@ -286,6 +287,7 @@ for (const forbidden of ['guestEmail', 'guestPhone', 'notes', 'specialRequests',
   assert.equal(forbidden in cashierBookingEmail.parsedDetails, false, `cashier parsed details exclude ${forbidden}`)
 }
 assert.equal(cashierBookingEmail.amount, 1000, 'cashier keeps operational payment amount')
+assert.equal(cashierBookingEmail.amountSatang, '100000', 'cashier payment amount is derived from exact satang')
 assert.match(cashierBookingEmail.parsedDetails.paymentReference, /•+0001$/, 'cashier sees only a masked payment-reference suffix')
 assert.equal(JSON.stringify(cashierBookingEmail).includes('guest@example.test'), false)
 assert.equal(JSON.stringify(cashierBookingEmail).includes('PROVIDER-BOOKING-123'), false)

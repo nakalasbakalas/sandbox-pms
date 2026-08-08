@@ -89,6 +89,12 @@ const reservations = [
     assignedRoomId: 'room-101',
     checkIn: new Date('2026-07-20T00:00:00.000Z'),
     checkOut: new Date('2026-07-23T00:00:00.000Z'),
+    ratePerNight: 1500,
+    ratePerNightSatang: 150000n,
+    totalAmount: 4500,
+    totalAmountSatang: 450000n,
+    depositAmount: 1350,
+    depositAmountSatang: 135000n,
   },
 ]
 const fixture = {
