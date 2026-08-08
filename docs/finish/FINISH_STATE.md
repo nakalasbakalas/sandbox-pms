@@ -3,7 +3,7 @@
 **Status:** IN_PROGRESS
 **Baseline SHA:** `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`
 **Current branch:** `codex/final-core-closure`
-**Current HEAD:** `02d7419d8623c56542320cd452e00bb50274856b`
+**Current HEAD:** `3a8e216d29ff3ae10865bb1249a1006930c9cfa2`
 **Last updated:** 2026-08-08 (Asia/Bangkok)
 
 ## Gates
@@ -15,8 +15,8 @@
 | F02 | Role-specific response projections | COMPLETE | `c8c2b05` | `test:privacy-projections`; Cashier/Board projection tests; typecheck; lint; diff check | Live/provider proof not attempted |
 | F03 | Audited sensitive-access endpoints | COMPLETE | `f9154c5` | sensitive-access/privacy/Cashier/property tests; typecheck; lint; diff check | Credentialed deployed-role and production audit proof remain open for F10-F11 |
 | F04 | Independent privacy review | COMPLETE | `02d7419` | reviewer PASS; full Wave 1 typecheck/lint/test/e2e/build/diff gate PASS | Credentialed/live proof remains F10-F11 |
-| F05 | Float-authoritative money map | IN_PROGRESS |  | read-only scout pending |  |
-| F06 | Read-only money reconciliation | NOT_STARTED |  |  |  |
+| F05 | Float-authoritative money map | COMPLETE | read-only | packet-bounded scout mapped exact paths, Float reads, reports/exports, and nullable shadows | Deployed authority and live mismatch counts remain owner/runtime proof |
+| F06 | Read-only money reconciliation | IN_PROGRESS |  |  |  |
 | F07 | Exact-satang core financial reads | NOT_STARTED |  |  |  |
 | F08 | Independent finance review | NOT_STARTED |  |  |  |
 | F09 | Deep-health proof | NOT_STARTED |  |  |  |
@@ -34,11 +34,11 @@
 
 ## Active task
 
-**Task:** F05
-**Owner/agent:** Read-only money scout
-**Allowed files:** targeted exact-money symbols under `server`, `src`, `scripts`, and `prisma`
-**Focused validation:** packet-specified exact-money and legacy Float searches
-**Next exact action:** Map correct satang-authoritative paths, remaining Float reads, report/export arithmetic, nullable shadows, migration sequence, and focused tests.
+**Task:** F06
+**Owner/agent:** Exact-money reconciliation writer
+**Allowed files:** one read-only reconciliation script, deterministic fixture tests, and coordinator-owned package script wiring
+**Focused validation:** reconciliation fixtures, production-target refusal, typecheck, lint, diff check
+**Next exact action:** Add `npm.cmd run money:reconcile` as a read-only aggregate null/mismatch audit with BigInt-safe comparisons and no sensitive row output.
 
 ## Decisions
 
