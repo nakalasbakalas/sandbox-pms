@@ -3,7 +3,7 @@
 **Status:** IN_PROGRESS
 **Baseline SHA:** `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`
 **Current branch:** `codex/final-core-closure`
-**Current HEAD:** `5d9a72f5939397dd0dae000a4afa151a7a0d9afd`
+**Current HEAD:** `bdf4f2f`
 **Last updated:** 2026-08-08 (Asia/Bangkok)
 
 ## Gates
@@ -17,8 +17,8 @@
 | F04 | Independent privacy review | COMPLETE | `02d7419` | reviewer PASS; full Wave 1 typecheck/lint/test/e2e/build/diff gate PASS | Credentialed/live proof remains F10-F11 |
 | F05 | Float-authoritative money map | COMPLETE | read-only | packet-bounded scout mapped exact paths, Float reads, reports/exports, and nullable shadows | Deployed authority and live mismatch counts remain owner/runtime proof |
 | F06 | Read-only money reconciliation | COMPLETE | `5d9a72f` | `test:money-reconcile`; typecheck; lint; diff check | Real database reconciliation not run; owner/runtime proof remains open |
-| F07 | Exact-satang core financial reads | IN_PROGRESS |  |  | Production authority/env switch remains owner-gated |
-| F08 | Independent finance review | NOT_STARTED |  |  |  |
+| F07 | Exact-satang core financial reads | COMPLETE | `bdf4f2f` | exact-money core, Cashier accounting, privacy, lifecycle, report equality, typecheck, lint, diff check PASS | Production authority/env switch remains owner-gated |
+| F08 | Independent finance review | IN_PROGRESS | read-only | exact diff `d5fa956..bdf4f2f` under review | Fix only confirmed P0/P1 findings; production switch remains prohibited |
 | F09 | Deep-health proof | NOT_STARTED |  |  |  |
 | F10 | Credentialed auth/RBAC proof | NOT_STARTED |  |  | Owner-approved test accounts and target required |
 | F11 | Staff workflow acceptance | NOT_STARTED |  |  | Staging or controlled-live approval required |
@@ -34,11 +34,11 @@
 
 ## Active task
 
-**Task:** F07
-**Owner/agent:** Exact-money implementation writer
-**Allowed files:** mapped core lifecycle/booking-email/financial DTO/report/export/Board/assistant money consumers and focused exact-money tests
-**Focused validation:** Cashier accounting, lifecycle, report/export equality, idempotency, typecheck, lint, diff check
-**Next exact action:** Make core reads and outputs satang-authoritative with base-10 API strings, preserving compatibility only at formatting boundaries; do not switch production env.
+**Task:** F08
+**Owner/agent:** Independent finance reviewer
+**Allowed files:** read-only review of exact diff `d5fa956..bdf4f2f`; remediation only for confirmed P0/P1 findings
+**Focused validation:** dual-write consistency, null-shadow fail-closed behavior, overpayment, idempotency, report/export equality, Float fallbacks, and unsafe conversions
+**Next exact action:** Review the frozen F07 commit, fix only P0/P1 findings, re-review, then run the full Wave 2 gate without switching production authority.
 
 ## Decisions
 
