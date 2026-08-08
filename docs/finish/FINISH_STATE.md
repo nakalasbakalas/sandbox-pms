@@ -3,7 +3,7 @@
 **Status:** IN_PROGRESS
 **Baseline SHA:** `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`
 **Current branch:** `codex/final-core-closure`
-**Current HEAD:** `f9154c5965d106f21e10ae2cc553cd578b242d45`
+**Current HEAD:** `02d7419d8623c56542320cd452e00bb50274856b`
 **Last updated:** 2026-08-08 (Asia/Bangkok)
 
 ## Gates
@@ -14,8 +14,8 @@
 | F01 | Privacy response reconnaissance | COMPLETE | read-only | packet-bounded `rg` scout; exposure paths mapped | Booking-email sync response permission path needs confirmation during F02 |
 | F02 | Role-specific response projections | COMPLETE | `c8c2b05` | `test:privacy-projections`; Cashier/Board projection tests; typecheck; lint; diff check | Live/provider proof not attempted |
 | F03 | Audited sensitive-access endpoints | COMPLETE | `f9154c5` | sensitive-access/privacy/Cashier/property tests; typecheck; lint; diff check | Credentialed deployed-role and production audit proof remain open for F10-F11 |
-| F04 | Independent privacy review | IN_PROGRESS |  | read-only reviewer active |  |
-| F05 | Float-authoritative money map | NOT_STARTED |  |  |  |
+| F04 | Independent privacy review | COMPLETE | `02d7419` | reviewer PASS; full Wave 1 typecheck/lint/test/e2e/build/diff gate PASS | Credentialed/live proof remains F10-F11 |
+| F05 | Float-authoritative money map | IN_PROGRESS |  | read-only scout pending |  |
 | F06 | Read-only money reconciliation | NOT_STARTED |  |  |  |
 | F07 | Exact-satang core financial reads | NOT_STARTED |  |  |  |
 | F08 | Independent finance review | NOT_STARTED |  |  |  |
@@ -34,11 +34,11 @@
 
 ## Active task
 
-**Task:** F04
-**Owner/agent:** Independent read-only privacy reviewer
-**Allowed files:** Wave 1 diff and direct privacy call paths only
-**Focused validation:** severity-ranked review for leaks, bypasses, property scope, audit safety, test/evidence hygiene, and core API/UI regression
-**Next exact action:** Fix only P0/P1 review findings, then run the Wave 1 full gate.
+**Task:** F05
+**Owner/agent:** Read-only money scout
+**Allowed files:** targeted exact-money symbols under `server`, `src`, `scripts`, and `prisma`
+**Focused validation:** packet-specified exact-money and legacy Float searches
+**Next exact action:** Map correct satang-authoritative paths, remaining Float reads, report/export arithmetic, nullable shadows, migration sequence, and focused tests.
 
 ## Decisions
 
