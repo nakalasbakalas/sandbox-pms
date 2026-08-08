@@ -3,7 +3,7 @@
 **Status:** IN_PROGRESS
 **Baseline SHA:** `6fea1ab8c00d2ca49d6a5ad44f2f559f31ea942a`
 **Current branch:** `codex/final-core-closure`
-**Current HEAD:** `bdf4f2f`
+**Current HEAD:** `468aae8`
 **Last updated:** 2026-08-08 (Asia/Bangkok)
 
 ## Gates
@@ -18,8 +18,8 @@
 | F05 | Float-authoritative money map | COMPLETE | read-only | packet-bounded scout mapped exact paths, Float reads, reports/exports, and nullable shadows | Deployed authority and live mismatch counts remain owner/runtime proof |
 | F06 | Read-only money reconciliation | COMPLETE | `5d9a72f` | `test:money-reconcile`; typecheck; lint; diff check | Real database reconciliation not run; owner/runtime proof remains open |
 | F07 | Exact-satang core financial reads | COMPLETE | `bdf4f2f` | exact-money core, Cashier accounting, privacy, lifecycle, report equality, typecheck, lint, diff check PASS | Production authority/env switch remains owner-gated |
-| F08 | Independent finance review | IN_PROGRESS | read-only | exact diff `d5fa956..bdf4f2f` under review | Fix only confirmed P0/P1 findings; production switch remains prohibited |
-| F09 | Deep-health proof | NOT_STARTED |  |  |  |
+| F08 | Independent finance review | COMPLETE | `b2ab74d`, `468aae8` | independent reviewer PASS; full typecheck/lint/test/non-DB-e2e/build/diff gate PASS | Guarded PostgreSQL proof not run: no disposable/staging DB config; production authority remains unchanged |
+| F09 | Deep-health proof | IN_PROGRESS |  | inspect and prove generic failure payload plus deep dependency checks | Live/deployed proof remains separate from local engineering proof |
 | F10 | Credentialed auth/RBAC proof | NOT_STARTED |  |  | Owner-approved test accounts and target required |
 | F11 | Staff workflow acceptance | NOT_STARTED |  |  | Staging or controlled-live approval required |
 | F12 | Disposable recovery restore | NOT_STARTED |  |  | Owner approval and named recovery owners required |
@@ -34,11 +34,11 @@
 
 ## Active task
 
-**Task:** F08
-**Owner/agent:** Independent finance reviewer
-**Allowed files:** read-only review of exact diff `d5fa956..bdf4f2f`; remediation only for confirmed P0/P1 findings
-**Focused validation:** dual-write consistency, null-shadow fail-closed behavior, overpayment, idempotency, report/export equality, Float fallbacks, and unsafe conversions
-**Next exact action:** Review the frozen F07 commit, fix only P0/P1 findings, re-review, then run the full Wave 2 gate without switching production authority.
+**Task:** F09
+**Owner/agent:** Coordinator
+**Allowed files:** deep-health route/service, focused health tests, and required canonical documentation only
+**Focused validation:** generic public failure payload; database/schema/required-seed/storage/provider dependency checks without credential disclosure
+**Next exact action:** Inspect the current deep-health implementation and packet acceptance criteria, add only missing proof/guards, then validate locally without claiming deployed health.
 
 ## Decisions
 
