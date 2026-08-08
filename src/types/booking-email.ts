@@ -20,6 +20,7 @@ export interface BookingEmailParsedDetails {
   children?: number
   childAges?: number[]
   amount?: number
+  amountSatang?: string
   currency?: string
   paymentStatus?: string
   paymentMethod?: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'ONLINE' | 'OTHER'
@@ -46,6 +47,7 @@ export interface BookingEmailEvent {
   checkOut?: string
   roomType?: string
   amount?: number
+  amountSatang?: string | null
   currency?: string
   paymentStatus?: string
   confidence?: number

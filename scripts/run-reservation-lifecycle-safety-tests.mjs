@@ -192,6 +192,30 @@ await assert.rejects(
 assert.equal(staleCheckIn.reservation.status, 'CONFIRMED')
 assert.equal(staleCheckIn.evidence.audits.length, 0)
 
+const oneSatangDue = lifecycleFixture('CONFIRMED')
+oneSatangDue.reservation.folio.balance = 0
+oneSatangDue.reservation.folio.balanceSatang = 1n
+await assert.rejects(
+  checkInReservation(oneSatangDue.prisma, oneSatangDue.reservation.id, oneSatangDue.actor, {
+    idempotencyKey: 'check-in-one-satang-due',
+    expectedUpdatedAt: oneSatangDue.reservation.updatedAt.toISOString(),
+  }),
+  /collect or override the amount due/i,
+  'one satang due blocks check-in even when the legacy Float says zero',
+)
+assert.equal(oneSatangDue.reservation.status, 'CONFIRMED')
+
+const missingExactBalance = lifecycleFixture('CONFIRMED')
+missingExactBalance.reservation.folio.balanceSatang = null
+await assert.rejects(
+  checkInReservation(missingExactBalance.prisma, missingExactBalance.reservation.id, missingExactBalance.actor, {
+    idempotencyKey: 'check-in-missing-exact-balance',
+    expectedUpdatedAt: missingExactBalance.reservation.updatedAt.toISOString(),
+  }),
+  (error) => error?.statusCode === 503 && /balanceSatang exact money shadow is required/i.test(error.message),
+  'check-in fails closed when the exact balance shadow is missing',
+)
+
 const checkIn = lifecycleFixture('CONFIRMED')
 const checkInOptions = {
   idempotencyKey: 'check-in-retry-a',
@@ -236,6 +260,7 @@ assert.equal(checkOut.evidence.events.length, 1)
 
 const replayedCheckOut = await checkOutReservation(checkOut.prisma, checkOut.reservation.id, checkOut.actor, checkOutOptions)
 assert.equal(replayedCheckOut.status, 'CHECKED_OUT')
+assert.equal(replayedCheckOut.folio.balanceSatang, checkedOut.folio.balanceSatang, 'checkout replay preserves the exact balance total')
 assert.equal(checkOut.evidence.audits.length, 1, 'lost-response retry does not duplicate check-out audit evidence')
 assert.equal(checkOut.evidence.events.length, 1, 'lost-response retry does not duplicate check-out events')
 assert.equal(checkOut.evidence.reservationLogs.length, 1, 'lost-response retry does not duplicate check-out logs')

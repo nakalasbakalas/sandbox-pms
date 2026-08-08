@@ -26,12 +26,15 @@ import {
 } from './create-mutation-idempotency.mjs'
 import {
   bahtToSatang,
+  divideSatang,
   dualWriteMoney,
   parseSatang,
   readMoneySatang,
+  requireMoneySatang,
   resolveMoneyInput,
+  satangToBahtNumber,
   satangToApiString,
-  sumMoneySatang,
+  sumExactMoneySatang,
 } from './money.mjs'
 import { approvedBookingEmailProviderQuery } from '../scripts/booking-email-query.mjs'
 import {
@@ -300,6 +303,21 @@ function requiredMoneyInput(input, legacyField = 'amount', satangField = `${lega
 
 function moneyDataFromBaht(legacyField, satangField, value) {
   return dualWriteMoney(legacyField, satangField, bahtToSatang(value, legacyField))
+}
+
+function exactMoneyDecision(record, legacyField, satangField = `${legacyField}Satang`) {
+  try {
+    return requireMoneySatang(record, legacyField, satangField)
+  } catch (error) {
+    throw new PmsValidationError(error instanceof Error ? error.message : `Exact ${satangField} is unavailable.`, 503)
+  }
+}
+
+function hasMoneyInput(input, legacyField = 'amount', satangField = `${legacyField}Satang`) {
+  return Boolean(input) && (
+    input[satangField] !== undefined && input[satangField] !== null && input[satangField] !== ''
+    || input[legacyField] !== undefined && input[legacyField] !== null && input[legacyField] !== ''
+  )
 }
 
 function pricingRulesFor(property, roomType) {
@@ -1613,6 +1631,9 @@ function bookingEmailEventResponse(event, actor) {
     checkOut: dateKeyOrUndefined(event.checkOut || parsedDetails.checkOut),
     roomType: event.roomType || parsedDetails.roomType || undefined,
     amount: event.amount ?? parsedDetails.amount,
+    amountSatang: event.amountSatang === null || event.amountSatang === undefined
+      ? null
+      : satangToApiString(event.amountSatang),
     currency: event.currency || parsedDetails.currency || undefined,
     paymentStatus: event.paymentStatus || parsedDetails.paymentStatus || undefined,
     confidence: event.confidence,
@@ -2086,9 +2107,23 @@ async function upsertBookingEmailEvent(tx, source, input) {
 }
 
 function detailsForApproval(event, editedDetails) {
-  return {
+  const edited = safeJsonObject(editedDetails)
+  const details = {
     ...safeJsonObject(event.parsedDetails),
-    ...safeJsonObject(editedDetails),
+    ...edited,
+  }
+  const editedAmount = Object.prototype.hasOwnProperty.call(edited, 'amount')
+  const amountSatang = editedAmount
+    ? bahtToSatang(edited.amount, 'edited booking email amount')
+    : event.amountSatang !== null && event.amountSatang !== undefined
+      ? exactMoneyDecision(event, 'amount')
+      : details.amount !== null && details.amount !== undefined && details.amount !== ''
+        ? exactMoneyDecision(event, 'amount')
+        : null
+  return amountSatang === null ? details : {
+    ...details,
+    amount: satangToBahtNumber(amountSatang, 'booking email amount'),
+    amountSatang: satangToApiString(amountSatang),
   }
 }
 
@@ -2152,8 +2187,15 @@ async function reservationInputFromBookingEmailEvent(tx, event, details) {
   })
   if (!roomType) throw new PmsValidationError('Parsed room type does not match a configured PMS room type.')
   const { nights } = validateStayInput({ checkIn: details.checkIn, checkOut: details.checkOut })
-  const amount = Number(details.amount || event.amount)
-  const ratePerNight = Number.isFinite(amount) && amount > 0 ? roundMoney(amount / nights) : roomType.baseRate
+  const amountSatang = details.amountSatang !== undefined && details.amountSatang !== null
+    ? parseSatang(details.amountSatang, 'booking email amountSatang')
+    : event.amountSatang !== null && event.amountSatang !== undefined
+      ? exactMoneyDecision(event, 'amount')
+      : null
+  const ratePerNightSatang = amountSatang !== null && amountSatang > 0n
+    ? divideSatang(amountSatang, nights, 'booking email amount')
+    : exactMoneyDecision(roomType, 'baseRate')
+  const ratePerNight = satangToBahtNumber(ratePerNightSatang, 'booking email nightly rate')
 
   return {
     guest: {
@@ -2233,11 +2275,13 @@ async function approvePaymentEmailEvent(tx, event, details, actor, reservationId
   if (!reservation) throw new PmsValidationError('Link this payment notice to a reservation before applying it.')
   if (!reservation.folio?.id) throw new PmsValidationError('Matched reservation does not have a folio.')
 
-  const amount = Number(details.amount || event.amount)
-  if (!Number.isFinite(amount) || amount <= 0) throw new PmsValidationError('Payment amount is required before applying this email.')
+  const amountSatang = details.amountSatang !== undefined && details.amountSatang !== null
+    ? parseSatang(details.amountSatang, 'booking email amountSatang')
+    : exactMoneyDecision(event, 'amount')
+  if (amountSatang <= 0n) throw new PmsValidationError('Payment amount is required before applying this email.')
   const reference = normalizeNullableString(details.paymentReference || event.channelRef || event.sourceMessageId)
   const result = await recordPaymentInTransaction(tx, reservation.folio.id, {
-    amount,
+    amountSatang: satangToApiString(amountSatang),
     method: details.paymentMethod || 'ONLINE',
     reference,
     idempotencyKey: `booking-email-payment:${event.propertyId}:${event.id}`,
@@ -2378,16 +2422,21 @@ function boardReservationDto(reservation, actor) {
       notes: reservation.guest.notes,
     } : {}),
   } : null
-  const folio = reservation.folio && canViewFinance ? {
-    id: reservation.folio.id,
-    status: reservation.folio.status,
-    total: reservation.folio.total,
-    paid: reservation.folio.paid,
-    balance: reservation.folio.balance,
-    totalSatang: satangToApiString(readMoneySatang(reservation.folio, 'total')),
-    paidSatang: satangToApiString(readMoneySatang(reservation.folio, 'paid')),
-    balanceSatang: satangToApiString(readMoneySatang(reservation.folio, 'balance')),
-  } : null
+  const folio = reservation.folio && canViewFinance ? (() => {
+    const totalSatang = exactMoneyDecision(reservation.folio, 'total')
+    const paidSatang = exactMoneyDecision(reservation.folio, 'paid')
+    const balanceSatang = exactMoneyDecision(reservation.folio, 'balance')
+    return {
+      id: reservation.folio.id,
+      status: reservation.folio.status,
+      total: satangToBahtNumber(totalSatang, 'folio total'),
+      paid: satangToBahtNumber(paidSatang, 'folio paid'),
+      balance: satangToBahtNumber(balanceSatang, 'folio balance'),
+      totalSatang: satangToApiString(totalSatang),
+      paidSatang: satangToApiString(paidSatang),
+      balanceSatang: satangToApiString(balanceSatang),
+    }
+  })() : null
   return {
     id: reservation.id,
     confirmationCode: reservation.confirmationCode,
@@ -2425,16 +2474,21 @@ function boardReservationDto(reservation, actor) {
       currentStatus: reservation.assignedRoom.currentStatus,
       operationalStatus: reservation.assignedRoom.operationalStatus,
     } : null,
-    ...(canViewFinance ? {
-      ratePerNight: reservation.ratePerNight,
-      ratePerNightSatang: satangToApiString(readMoneySatang(reservation, 'ratePerNight')),
-      totalAmount: reservation.totalAmount,
-      totalAmountSatang: satangToApiString(readMoneySatang(reservation, 'totalAmount')),
-      depositAmount: reservation.depositAmount,
-      depositAmountSatang: satangToApiString(readMoneySatang(reservation, 'depositAmount')),
-      depositPaid: reservation.depositPaid,
-      folio,
-    } : {}),
+    ...(canViewFinance ? (() => {
+      const ratePerNightSatang = exactMoneyDecision(reservation, 'ratePerNight')
+      const totalAmountSatang = exactMoneyDecision(reservation, 'totalAmount')
+      const depositAmountSatang = exactMoneyDecision(reservation, 'depositAmount')
+      return {
+        ratePerNight: satangToBahtNumber(ratePerNightSatang, 'reservation nightly rate'),
+        ratePerNightSatang: satangToApiString(ratePerNightSatang),
+        totalAmount: satangToBahtNumber(totalAmountSatang, 'reservation total'),
+        totalAmountSatang: satangToApiString(totalAmountSatang),
+        depositAmount: satangToBahtNumber(depositAmountSatang, 'reservation deposit'),
+        depositAmountSatang: satangToApiString(depositAmountSatang),
+        depositPaid: reservation.depositPaid,
+        folio,
+      }
+    })() : {}),
   }
 }
 
@@ -2551,8 +2605,14 @@ async function recomputeFolio(tx, folioId) {
     tx.charge.findMany({ where: { folioId, void: false } }),
     tx.payment.findMany({ where: { folioId } }),
   ])
-  const subtotalSatang = sumMoneySatang(charges, 'total')
-  const paidSatang = sumMoneySatang(payments, 'amount')
+  let subtotalSatang
+  let paidSatang
+  try {
+    subtotalSatang = sumExactMoneySatang(charges, 'total')
+    paidSatang = sumExactMoneySatang(payments, 'amount')
+  } catch (error) {
+    throw new PmsValidationError(error instanceof Error ? error.message : 'Exact folio transaction money is unavailable.', 503)
+  }
   const balanceSatang = subtotalSatang - paidSatang
 
   return tx.folio.update({
@@ -2599,7 +2659,7 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
     })
     if (existingPayment) {
       const sameIntent = existingPayment.folioId === folioId
-        && readMoneySatang(existingPayment, 'amount') === amountSatang
+        && exactMoneyDecision(existingPayment, 'amount') === amountSatang
         && existingPayment.method === method
         && existingPayment.referenceFingerprint === referenceFingerprint
       if (!sameIntent) {
@@ -2621,7 +2681,7 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
   if (folio.status !== 'OPEN') {
     throw new PmsValidationError('Payments can only be recorded on an open folio.', 409)
   }
-  const balanceSatang = readMoneySatang(folio, 'balance')
+  const balanceSatang = exactMoneyDecision(folio, 'balance')
   if (amountSatang > balanceSatang) {
     throw new PmsValidationError('Payment cannot exceed the remaining balance.')
   }
@@ -4305,14 +4365,16 @@ function modificationUpdateFromBookingEmail(event, details, reservation, reason)
   if (details.channelRef) update.channelRef = details.channelRef
   if (details.specialRequests !== undefined) update.specialRequests = normalizeNullableString(details.specialRequests)
 
-  if (details.amount !== undefined && details.amount !== null && details.amount !== '') {
-    const amount = Number(details.amount)
-    if (!Number.isFinite(amount) || amount <= 0) throw new PmsValidationError('Modified reservation amount must be greater than zero.')
+  if (details.amountSatang !== undefined || (details.amount !== undefined && details.amount !== null && details.amount !== '')) {
+    const amountSatang = details.amountSatang !== undefined
+      ? parseSatang(details.amountSatang, 'modified reservation amountSatang')
+      : bahtToSatang(details.amount, 'modified reservation amount')
+    if (amountSatang <= 0n) throw new PmsValidationError('Modified reservation amount must be greater than zero.')
     const { nights } = validateStayInput({
       checkIn: update.checkIn || reservation.checkIn,
       checkOut: update.checkOut || reservation.checkOut,
     })
-    update.ratePerNight = roundMoney(amount / nights)
+    update.ratePerNight = satangToBahtNumber(divideSatang(amountSatang, nights, 'modified reservation amount'), 'modified reservation nightly rate')
   }
   return update
 }
@@ -4604,12 +4666,12 @@ export async function createWalkInCheckIn(prisma, input, actor) {
     })
     await recomputeFolio(tx, folio.id)
 
-    if (input.payment?.amount) {
+    if (hasMoneyInput(input.payment)) {
       await recordPaymentInTransaction(tx, folio.id, input.payment, actor)
     }
     const settledFolio = await tx.folio.findUnique({ where: { id: folio.id } })
-    const remainingBalance = roundMoney(settledFolio?.balance || 0)
-    if (remainingBalance > 0) {
+    const remainingBalanceSatang = exactMoneyDecision(settledFolio, 'balance')
+    if (remainingBalanceSatang > 0n) {
       if (input.allowPayLater) {
         requireOverride(actor, 'override:check-in', input.payLaterReason || input.overrideReason, 'Pay-later walk-in check-in')
       } else {
@@ -4802,14 +4864,14 @@ export async function checkInReservation(prisma, reservationId, actor, options =
       }
     }
 
-    if (options.payment?.amount) {
+    if (hasMoneyInput(options.payment)) {
       if (!reservation.folio?.id) throw new PmsValidationError('Reservation folio was not found.')
       await recordPaymentInTransaction(tx, reservation.folio.id, options.payment, actor)
       reservation = await tx.reservation.findFirst({ where: { id: reservationId, propertyId: property.id }, include: reservationInclude })
     }
 
-    const remainingBalance = roundMoney(reservation.folio?.balance || 0)
-    if (remainingBalance > 0) {
+    const remainingBalanceSatang = exactMoneyDecision(reservation.folio, 'balance')
+    if (remainingBalanceSatang > 0n) {
       if (options.allowPayLater) {
         requireOverride(actor, 'override:check-in', options.payLaterReason || options.overrideReason, 'Pay-later check-in')
       } else {
@@ -4941,14 +5003,14 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
       throw new PmsValidationError('Checked-in reservation is missing its assigned room.')
     }
 
-    if (options.payment?.amount) {
+    if (hasMoneyInput(options.payment)) {
       if (!reservation.folio?.id) throw new PmsValidationError('Reservation folio was not found.')
       await recordPaymentInTransaction(tx, reservation.folio.id, options.payment, actor)
       reservation = await tx.reservation.findFirst({ where: { id: reservationId, propertyId: property.id }, include: reservationInclude })
     }
 
-    const remainingBalance = roundMoney(reservation.folio?.balance || 0)
-    if (remainingBalance > 0) {
+    const remainingBalanceSatang = exactMoneyDecision(reservation.folio, 'balance')
+    if (remainingBalanceSatang > 0n) {
       if (options.allowUnpaidOverride) {
         requireOverride(actor, 'override:check-out', options.overrideReason, 'Unpaid checkout override')
       } else {
@@ -5011,7 +5073,11 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
     await createAudit(tx, actor, 'CHECKED_OUT', 'reservation', reservation.id, {
       roomId: room.id,
       roomNumber: room.number,
-      previousState: { reservationStatus: reservation.status, roomStatus: room.currentStatus, balance: remainingBalance },
+      previousState: {
+        reservationStatus: reservation.status,
+        roomStatus: room.currentStatus,
+        balanceSatang: satangToApiString(remainingBalanceSatang),
+      },
       newState: { reservationStatus: 'CHECKED_OUT', roomStatus: 'VACANT_DIRTY' },
       overrideReason: options.overrideReason || null,
       overrides: {
@@ -5408,7 +5474,7 @@ export async function getTodayData(prisma, actor) {
     prisma.reservation.count({ where: { propertyId: property.id, status: { in: ['PENDING', 'CONFIRMED'] }, checkIn: { gte: today, lt: tomorrow } } }),
     prisma.reservation.count({ where: { propertyId: property.id, status: 'CHECKED_IN', checkOut: { gte: today, lt: tomorrow } } }),
     prisma.reservation.count({ where: { propertyId: property.id, status: 'CHECKED_IN' } }),
-    prisma.folio.count({ where: { reservation: { propertyId: property.id }, balance: { gt: 0 } } }),
+    prisma.folio.count({ where: { reservation: { propertyId: property.id }, balanceSatang: { gt: 0n } } }),
     prisma.reservation.count({ where: { propertyId: property.id, status: { in: ['PENDING', 'CONFIRMED'] }, assignedRoomId: null, checkIn: { gte: today, lt: tomorrow } } }),
     prisma.reservation.count({ where: { propertyId: property.id, status: 'NO_SHOW', checkIn: { gte: today, lt: tomorrow } } }),
     prisma.bookingEmailEvent.count({ where: { propertyId: property.id, status: { in: ['NEEDS_REVIEW', 'ERROR'] } } }),

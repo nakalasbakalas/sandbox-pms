@@ -10,7 +10,10 @@ export interface BoardReservationSummary {
   status?: ReservationStatus
   isVIP?: boolean
   totalAmount?: number
+  totalAmountSatang?: string
   balanceDue?: number
+  balanceDueSatang?: string
+  paidAmountSatang?: string
   depositStatus?: 'PAID' | 'PENDING' | 'PARTIAL' | 'NONE'
 }
 
@@ -65,6 +68,7 @@ export interface BoardRoomCard {
   
   depositStatus: 'PAID' | 'PENDING' | 'PARTIAL' | 'NONE'
   balanceDue?: number
+  balanceDueSatang?: string
 }
 
 export interface BoardFiltersState {

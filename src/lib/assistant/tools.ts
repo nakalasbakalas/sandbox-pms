@@ -35,6 +35,12 @@ function money(amount: number) {
   return `THB ${Math.max(0, amount).toLocaleString('en-US')}`
 }
 
+function serverMoney(value: unknown, label: string): { satang: string; amount: number } {
+  const text = String(value ?? '')
+  if (!/^-?\d+$/.test(text)) throw new TypeError(`${label} exact satang is required.`)
+  return { satang: text, amount: Number(BigInt(text)) / 100 }
+}
+
 function roomLabel(room: Pick<BoardRoomCard, 'number' | 'type' | 'cleanStatus' | 'operationalStatus'>) {
   return `Room ${room.number} (${room.type}, ${room.cleanStatus.toLowerCase()}, ${room.operationalStatus.toLowerCase().replaceAll('_', ' ')})`
 }
@@ -85,6 +91,9 @@ function makeAnswer(
 
 export function normalizeServerReservation(reservation: any): AssistantReservation {
   const guestName = `${reservation?.guest?.firstName || ''} ${reservation?.guest?.lastName || ''}`.trim() || 'Guest name required'
+  const balance = serverMoney(reservation.folio?.balanceSatang, `reservation ${reservation?.id} balance`)
+  const paid = serverMoney(reservation.folio?.paidSatang, `reservation ${reservation?.id} paid`)
+  const total = serverMoney(reservation.totalAmountSatang ?? reservation.folio?.totalSatang, `reservation ${reservation?.id} total`)
   return {
     id: reservation.id,
     confirmationCode: reservation.confirmationCode,
@@ -97,9 +106,12 @@ export function normalizeServerReservation(reservation: any): AssistantReservati
     children: reservation.children || 0,
     assignedRoomId: reservation.assignedRoomId || undefined,
     roomNumber: reservation.assignedRoom?.number || undefined,
-    balanceDue: Math.max(0, reservation.folio?.balance || 0),
-    paidAmount: reservation.folio?.paid || 0,
-    totalAmount: reservation.totalAmount || reservation.folio?.total || 0,
+    balanceDue: Math.max(0, balance.amount),
+    balanceDueSatang: balance.satang,
+    paidAmount: paid.amount,
+    paidAmountSatang: paid.satang,
+    totalAmount: total.amount,
+    totalAmountSatang: total.satang,
     folioId: reservation.folio?.id,
     folioStatus: reservation.folio?.status,
     depositPaid: Boolean(reservation.depositPaid),

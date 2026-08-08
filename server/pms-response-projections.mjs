@@ -1,4 +1,5 @@
 import { canPerformAction, normalizeRole } from './rbac.mjs'
+import { satangToApiString, satangToBahtNumber } from './money.mjs'
 
 const GUEST_CONTACT_ROLES = new Set(['ADMIN', 'MANAGER', 'FRONT_DESK'])
 const RESERVATION_DETAIL_ROLES = new Set(['ADMIN', 'MANAGER', 'FRONT_DESK'])
@@ -26,6 +27,15 @@ function canViewFinance(actor) {
   return canPerformAction(actor, 'view:cashier')
     || canPerformAction(actor, 'post:charges')
     || canPerformAction(actor, 'process:payment')
+}
+
+function exactMoneyString(value) {
+  return value === null || value === undefined || value === '' ? null : satangToApiString(value)
+}
+
+function exactMoneyNumber(value) {
+  const exact = exactMoneyString(value)
+  return exact === null ? null : satangToBahtNumber(exact)
 }
 
 function projectRoomType(roomType) {
@@ -57,11 +67,11 @@ function projectCharge(charge) {
     date: charge.date,
     category: charge.category,
     description: charge.description,
-    amount: charge.amount,
-    amountSatang: charge.amountSatang,
+    amount: exactMoneyNumber(charge.amountSatang),
+    amountSatang: exactMoneyString(charge.amountSatang),
     quantity: charge.quantity,
-    total: charge.total,
-    totalSatang: charge.totalSatang,
+    total: exactMoneyNumber(charge.totalSatang),
+    totalSatang: exactMoneyString(charge.totalSatang),
     void: charge.void,
     createdBy: charge.createdBy,
     createdAt: charge.createdAt,
@@ -73,8 +83,8 @@ function projectPayment(payment) {
   return {
     id: payment.id,
     folioId: payment.folioId,
-    amount: payment.amount,
-    amountSatang: payment.amountSatang,
+    amount: exactMoneyNumber(payment.amountSatang),
+    amountSatang: exactMoneyString(payment.amountSatang),
     method: payment.method,
     receivedAt: payment.receivedAt,
     processedBy: payment.processedBy,
@@ -88,16 +98,16 @@ function projectFolio(folio, actor, { includeTransactions = true } = {}) {
   return {
     id: folio.id,
     reservationId: folio.reservationId,
-    subtotal: folio.subtotal,
-    subtotalSatang: folio.subtotalSatang,
-    tax: folio.tax,
-    taxSatang: folio.taxSatang,
-    total: folio.total,
-    totalSatang: folio.totalSatang,
-    paid: folio.paid,
-    paidSatang: folio.paidSatang,
-    balance: folio.balance,
-    balanceSatang: folio.balanceSatang,
+    subtotal: exactMoneyNumber(folio.subtotalSatang),
+    subtotalSatang: exactMoneyString(folio.subtotalSatang),
+    tax: exactMoneyNumber(folio.taxSatang),
+    taxSatang: exactMoneyString(folio.taxSatang),
+    total: exactMoneyNumber(folio.totalSatang),
+    totalSatang: exactMoneyString(folio.totalSatang),
+    paid: exactMoneyNumber(folio.paidSatang),
+    paidSatang: exactMoneyString(folio.paidSatang),
+    balance: exactMoneyNumber(folio.balanceSatang),
+    balanceSatang: exactMoneyString(folio.balanceSatang),
     status: folio.status,
     ...(includeTransactions ? {
       charges: Array.isArray(folio.charges) ? folio.charges.map(projectCharge) : [],
@@ -115,8 +125,8 @@ export function projectPaymentMutationResponse(result) {
     payment: {
       id: payment.id ?? null,
       folioId: payment.folioId ?? null,
-      amount: payment.amount ?? null,
-      amountSatang: payment.amountSatang ?? null,
+      amount: exactMoneyNumber(payment.amountSatang),
+      amountSatang: exactMoneyString(payment.amountSatang),
       method: payment.method ?? null,
       reference: maskSensitiveValue(payment.reference),
       processedBy: payment.processedBy ?? null,
@@ -125,16 +135,16 @@ export function projectPaymentMutationResponse(result) {
     folio: {
       id: folio.id ?? null,
       reservationId: folio.reservationId ?? null,
-      subtotal: folio.subtotal ?? 0,
-      subtotalSatang: folio.subtotalSatang ?? 0,
-      tax: folio.tax ?? 0,
-      taxSatang: folio.taxSatang ?? 0,
-      total: folio.total ?? 0,
-      totalSatang: folio.totalSatang ?? 0,
-      paid: folio.paid ?? 0,
-      paidSatang: folio.paidSatang ?? 0,
-      balance: folio.balance ?? 0,
-      balanceSatang: folio.balanceSatang ?? 0,
+      subtotal: exactMoneyNumber(folio.subtotalSatang),
+      subtotalSatang: exactMoneyString(folio.subtotalSatang),
+      tax: exactMoneyNumber(folio.taxSatang),
+      taxSatang: exactMoneyString(folio.taxSatang),
+      total: exactMoneyNumber(folio.totalSatang),
+      totalSatang: exactMoneyString(folio.totalSatang),
+      paid: exactMoneyNumber(folio.paidSatang),
+      paidSatang: exactMoneyString(folio.paidSatang),
+      balance: exactMoneyNumber(folio.balanceSatang),
+      balanceSatang: exactMoneyString(folio.balanceSatang),
       status: folio.status ?? null,
       createdAt: folio.createdAt ?? null,
       updatedAt: folio.updatedAt ?? null,
@@ -198,12 +208,12 @@ export function projectReservationResponse(reservation, actor, options = {}) {
       specialRequests: reservation.specialRequests,
     } : {}),
     ...(finance ? {
-      ratePerNight: reservation.ratePerNight,
-      ratePerNightSatang: reservation.ratePerNightSatang,
-      totalAmount: reservation.totalAmount,
-      totalAmountSatang: reservation.totalAmountSatang,
-      depositAmount: reservation.depositAmount,
-      depositAmountSatang: reservation.depositAmountSatang,
+      ratePerNight: exactMoneyNumber(reservation.ratePerNightSatang),
+      ratePerNightSatang: exactMoneyString(reservation.ratePerNightSatang),
+      totalAmount: exactMoneyNumber(reservation.totalAmountSatang),
+      totalAmountSatang: exactMoneyString(reservation.totalAmountSatang),
+      depositAmount: exactMoneyNumber(reservation.depositAmountSatang),
+      depositAmountSatang: exactMoneyString(reservation.depositAmountSatang),
       depositPaid: Boolean(reservation.depositPaid),
       folio: projectFolio(reservation.folio, actor),
     } : {}),
@@ -234,13 +244,15 @@ export function projectBookingEmailEventResponse(event, actor) {
       receivedAt: event?.receivedAt,
       eventType: event?.eventType,
       status: event?.status,
-      amount: event?.amount,
+      amount: exactMoneyNumber(event?.amountSatang),
+      amountSatang: exactMoneyString(event?.amountSatang),
       currency: event?.currency,
       paymentStatus: event?.paymentStatus,
       reservationId: event?.reservationId,
       reservationConfirmation: event?.reservationConfirmation,
       parsedDetails: {
-        amount: details.amount,
+        amount: exactMoneyNumber(event?.amountSatang ?? details.amountSatang),
+        amountSatang: exactMoneyString(event?.amountSatang ?? details.amountSatang),
         currency: details.currency,
         paymentStatus: details.paymentStatus,
         paymentMethod: details.paymentMethod,
@@ -263,7 +275,8 @@ export function projectBookingEmailEventResponse(event, actor) {
     checkIn: event?.checkIn,
     checkOut: event?.checkOut,
     roomType: event?.roomType,
-    amount: event?.amount,
+    amount: exactMoneyNumber(event?.amountSatang),
+    amountSatang: exactMoneyString(event?.amountSatang),
     currency: event?.currency,
     paymentStatus: event?.paymentStatus,
     confidence: event?.confidence,
@@ -303,7 +316,8 @@ export function projectBookingEmailEventResponse(event, actor) {
       adults: details.adults,
       children: details.children,
       childAges: Array.isArray(details.childAges) ? details.childAges.filter(Number.isInteger) : undefined,
-      amount: details.amount,
+      amount: exactMoneyNumber(event?.amountSatang ?? details.amountSatang),
+      amountSatang: exactMoneyString(event?.amountSatang ?? details.amountSatang),
       currency: details.currency,
       paymentStatus: details.paymentStatus,
       paymentMethod: details.paymentMethod,

@@ -130,12 +130,12 @@ const adminReservation = projectReservationResponse(reservationFixture(), actors
 assert.equal(adminReservation.guest.email, 'ada@example.test', 'administrators retain guest contact needed for front-office work')
 assert.equal(adminReservation.guest.identityRecorded, true, 'generic DTO reports identity presence without returning the identity value')
 assert.equal(adminReservation.notes, 'Reservation note', 'administrators retain operational reservation notes')
-assert.equal(adminReservation.folio.payments[0].amountSatang, 90_000n, 'generic finance-capable DTO retains payment amount')
+assert.equal(adminReservation.folio.payments[0].amountSatang, '90000', 'generic finance-capable DTO returns payment money as base-10 satang')
 assert.equal('reference' in adminReservation.folio.payments[0], false, 'generic reservation DTO never returns a full payment reference')
 assertForbiddenValuesAbsent(adminReservation, 'admin reservation')
 
 const cashierReservation = projectReservationResponse(reservationFixture(), actors.cashier)
-assert.equal(cashierReservation.folio.balanceSatang, 210_000n, 'cashiers retain financial balance data')
+assert.equal(cashierReservation.folio.balanceSatang, '210000', 'cashiers retain financial balance data as base-10 satang')
 assert.equal(cashierReservation.guest.firstName, 'Ada', 'cashiers retain guest name for folio matching')
 for (const field of ['email', 'phone', 'nationality', 'idType', 'identityRecorded', 'blacklisted', 'notes']) {
   assert.equal(field in cashierReservation.guest, false, `cashier guest DTO excludes ${field}`)
