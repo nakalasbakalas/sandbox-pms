@@ -180,6 +180,11 @@ import {
   updateSetupRoom,
   updateUser,
 } from './pms-service.mjs'
+import {
+  projectBookingEmailSyncHttpResponse,
+  projectGuestResponse,
+  projectReservationResponse,
+} from './pms-response-projections.mjs'
 
 loadEnvDefaults()
 
@@ -1684,7 +1689,7 @@ async function handleApi(request, response, url) {
         idempotencyKey: body.payment.idempotencyKey || context.idempotencyKey,
       },
     } : body, user)
-    sendJson(response, 201, { ok: true, data: reservation, message: `Walk-in checked in to Room ${reservation.assignedRoom?.number}.` })
+    sendJson(response, 201, { ok: true, data: projectReservationResponse(reservation, user), message: `Walk-in checked in to Room ${reservation.assignedRoom?.number}.` })
     return true
   }
 
@@ -1701,17 +1706,18 @@ async function handleApi(request, response, url) {
       env: process.env,
       submitCommand: submitOpsCommand,
     })
+    const httpResult = projectBookingEmailSyncHttpResponse(result)
     sendJson(response, 200, {
       ok: true,
-      data: result.status,
-      events: result.events,
+      data: httpResult.status,
+      events: httpResult.events,
       hotelOpsCommands: {
         enabled: emailOpsCommandIntakeStatus(process.env).enabled,
         accepted: opsCommandResults.filter((item) => item.status === 'accepted').length,
         skipped: opsCommandResults.filter((item) => item.status === 'skipped').length,
         errors: opsCommandResults.filter((item) => item.status === 'error').length,
       },
-      message: `Booking email sync processed ${result.events.length} event${result.events.length === 1 ? '' : 's'}.`,
+      message: `Booking email sync processed ${httpResult.events.length} event${httpResult.events.length === 1 ? '' : 's'}.`,
     })
     return true
   }
@@ -1889,7 +1895,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       requireIdempotency: true,
     })
-    sendJson(response, reservation.idempotentReplay ? 200 : 201, { ok: true, data: reservation, message: reservation.idempotentReplay ? `Existing reservation ${reservation.confirmationCode} returned.` : `Reservation ${reservation.confirmationCode} created.` })
+    sendJson(response, reservation.idempotentReplay ? 200 : 201, { ok: true, data: projectReservationResponse(reservation, user), message: reservation.idempotentReplay ? `Existing reservation ${reservation.confirmationCode} returned.` : `Reservation ${reservation.confirmationCode} created.` })
     return true
   }
 
@@ -1911,7 +1917,7 @@ async function handleApi(request, response, url) {
     }, user, {
       idempotencyKey: context.idempotencyKey,
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: `Reservation ${reservation.confirmationCode} updated.` })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: `Reservation ${reservation.confirmationCode} updated.` })
     return true
   }
 
@@ -1932,7 +1938,7 @@ async function handleApi(request, response, url) {
       ...body,
       ...(expectedTokens.length ? { expectedGuestUpdatedAt: String(expectedTokens[0]) } : {}),
     }, user, { idempotencyKey: context.idempotencyKey })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Guest profile updated.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Guest profile updated.' })
     return true
   }
 
@@ -1952,7 +1958,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Room assigned successfully.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Room assigned successfully.' })
     return true
   }
 
@@ -1981,7 +1987,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Check-in complete. Room is now occupied.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Check-in complete. Room is now occupied.' })
     return true
   }
 
@@ -2010,7 +2016,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Check-out complete. Room has been sent to housekeeping.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Check-out complete. Room has been sent to housekeeping.' })
     return true
   }
 
@@ -2030,7 +2036,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Reservation cancelled.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Reservation cancelled.' })
     return true
   }
 
@@ -2050,7 +2056,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
     })
-    sendJson(response, 200, { ok: true, data: reservation, message: 'Reservation marked as no-show.' })
+    sendJson(response, 200, { ok: true, data: projectReservationResponse(reservation, user), message: 'Reservation marked as no-show.' })
     return true
   }
 
@@ -2124,7 +2130,7 @@ async function handleApi(request, response, url) {
       idempotencyKey: context.idempotencyKey,
       requireIdempotency: true,
     })
-    sendJson(response, guest.idempotentReplay ? 200 : 201, { ok: true, data: guest, message: guest.idempotentReplay ? 'Existing guest profile returned.' : 'Guest profile created.' })
+    sendJson(response, guest.idempotentReplay ? 200 : 201, { ok: true, data: projectGuestResponse(guest, user), message: guest.idempotentReplay ? 'Existing guest profile returned.' : 'Guest profile created.' })
     return true
   }
 
@@ -2132,7 +2138,7 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'PATCH') {
     requirePermission(user, 'edit:reservation')
     const guest = await updateGuest(db, params.id, await readJson(request), user)
-    sendJson(response, 200, { ok: true, data: guest, message: 'Guest profile updated.' })
+    sendJson(response, 200, { ok: true, data: projectGuestResponse(guest, user), message: 'Guest profile updated.' })
     return true
   }
 

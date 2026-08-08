@@ -39,6 +39,7 @@ import {
   bookingEmailWorkspaceJsonStatus,
   fetchBookingEmailWorkspaceAnalyses,
 } from './booking-email-workspace-json.mjs'
+import { projectGuestResponse, projectReservationResponse } from './pms-response-projections.mjs'
 
 const reservationInclude = {
   guest: true,
@@ -2213,7 +2214,8 @@ function guestUpdateData(current, update) {
 }
 
 function boardReservationDto(reservation, actor) {
-  const canViewGuest = canPerformAction(actor, 'view:guests')
+  const canViewGuestProfile = ['ADMIN', 'MANAGER', 'FRONT_DESK'].includes(String(actor?.role || '').toUpperCase())
+    && canPerformAction(actor, 'view:guests')
   const canViewReservation = canPerformAction(actor, 'view:reservations')
   const canViewFinance = canPerformAction(actor, 'view:cashier')
     || canPerformAction(actor, 'post:charges')
@@ -2224,12 +2226,12 @@ function boardReservationDto(reservation, actor) {
     lastName: reservation.guest.lastName,
     vipStatus: Boolean(reservation.guest.vipStatus),
     updatedAt: reservation.guest.updatedAt,
-    ...(canViewGuest ? {
+    ...(canViewGuestProfile ? {
       email: reservation.guest.email,
       phone: reservation.guest.phone,
       nationality: reservation.guest.nationality,
       idType: reservation.guest.idType,
-      idNumber: reservation.guest.idNumber,
+      identityRecorded: Boolean(reservation.guest.idNumber),
       notes: reservation.guest.notes,
     } : {}),
   } : null
@@ -2868,11 +2870,12 @@ export async function getAuthenticatedUser(prisma, session) {
 
 export async function listReservations(prisma, actor) {
   const property = await getProperty(prisma, actor)
-  return prisma.reservation.findMany({
+  const reservations = await prisma.reservation.findMany({
     where: { propertyId: property.id },
     include: reservationInclude,
     orderBy: [{ checkIn: 'asc' }, { createdAt: 'desc' }],
   })
+  return reservations.map((reservation) => projectReservationResponse(reservation, actor))
 }
 
 function cashierSatangString(value, label) {
@@ -3395,7 +3398,7 @@ export async function deleteSetupRoom(prisma, roomId, actor) {
 
 export async function listGuests(prisma, actor) {
   const property = await getProperty(prisma, actor)
-  return prisma.guest.findMany({
+  const guests = await prisma.guest.findMany({
     where: { propertyId: property.id },
     include: {
       reservations: {
@@ -3409,6 +3412,7 @@ export async function listGuests(prisma, actor) {
     },
     orderBy: [{ updatedAt: 'desc' }, { lastName: 'asc' }, { firstName: 'asc' }],
   })
+  return guests.map((guest) => projectGuestResponse(guest, actor, { includeReservations: true }))
 }
 
 async function createReservationInTransaction(tx, input, actor, options = {}) {

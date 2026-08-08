@@ -251,6 +251,8 @@ assert.equal('channelRef' in housekeepingBoard.reservations[0], false, 'housekee
 
 const frontDeskBoard = await getFrontDeskBoard(fixture, { id: 'front-desk-1', role: 'FRONT_DESK', propertyId: property.id }, { from: '2026-07-18', to: '2026-08-01' })
 assert.equal(frontDeskBoard.reservations[0].guest.email, 'ada@example.test', 'front desk can receive guest contact details')
+assert.equal(frontDeskBoard.reservations[0].guest.identityRecorded, true, 'front desk receives identity-presence status without the full identity number')
+assert.equal('idNumber' in frontDeskBoard.reservations[0].guest, false, 'front desk board does not expose the full guest identity number')
 assert.equal(frontDeskBoard.reservations[0].folio.id, 'folio-1', 'cashier-capable front desk receives the minimal folio balance DTO')
 assert.equal(frontDeskBoard.reservations[0].folio.balanceSatang, '480000', 'folio exact money is serialized as base-10 satang')
 
